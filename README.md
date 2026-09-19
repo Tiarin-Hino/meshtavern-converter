@@ -22,4 +22,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.m
 
 ## Licence
 
-Not decided yet. Until a LICENSE file is added, all rights are reserved: you may read the code, but no licence to use or redistribute it is granted.
+[MIT](LICENSE).

@@ -29,7 +29,7 @@ Out of scope: support removal, painting UI, accounts, anything server-side.
 
 | #   | Criterion                                                                      | Measure                                                                      |
 | --- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| 1   | A 100 MB binary STL converts in the browser on the reference laptop            | Time and peak memory recorded; no tab crash                                  |
+| 1   | A 100 MB binary STL converts in the browser on the reference hardware          | Time and peak memory recorded; no tab crash                                  |
 | 2   | Variant A and Variant B screenshots for every mini in the corpus (20–30 files) | Side-by-side contact sheet in `docs/design/` (renders only, no source files) |
 | 3   | 100 unique converted minis on screen                                           | ≥30 fps on an integrated GPU; frame time recorded                            |
 | 4   | Output size                                                                    | Typical GLB ≤1 MB (A) / ≤4 MB with textures (B)                              |
@@ -49,4 +49,12 @@ Out of scope: support removal, painting UI, accounts, anything server-side.
 
 ## Reference hardware
 
-To be filled in by the PM: laptop model, CPU, iGPU, RAM, browser version.
+**Primary (PM's desktop, read from the machine on 2026-09-19):**
+
+- Gigabyte B560M DS3H V3, Intel Core i7-11700F (8 cores / 16 threads), 64 GB RAM
+- NVIDIA GeForce RTX 3060 (driver 32.0.16.1074), 1920×1080 at 144 Hz
+- Windows 11 Home 10.0.26200, Chrome 153, Edge 153
+
+This machine has a discrete GPU and no integrated one (the 11700F has none), and far more RAM than a typical user. Numbers measured here are an upper bound: they can prove something is too slow, but not that it is fast enough.
+
+**Secondary (needed for exit criteria 1 and 3): to be named.** A laptop with an integrated GPU and 8–16 GB RAM, for example a team member's. Criteria 1 and 3 are only met when measured on this device.
