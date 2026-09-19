@@ -10,6 +10,8 @@
       <h1>MeshTavern Converter</h1>
       <label>Open an STL <input id="file" type="file" accept=".stl" /></label>
       <p id="status">Drop an STL anywhere on the page. The file stays on your computer.</p>
+      <progress id="progress" max="100" value="0" hidden></progress>
+      <dl id="stats" hidden></dl>
     </header>
     <canvas id="viewport"></canvas>
     <script type="module" src="/src/main.ts"></script>
