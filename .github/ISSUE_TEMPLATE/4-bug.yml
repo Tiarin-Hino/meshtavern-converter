@@ -1,0 +1,28 @@
+name: Bug
+description: Something does not work as specified
+title: '[Bug] '
+labels: ['type:bug']
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Do not attach licensed STL files. Give file name, size and triangle count instead.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual (screenshot welcome)
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Browser, OS, GPU

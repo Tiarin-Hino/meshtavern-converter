@@ -1,0 +1,14 @@
+node_modules
+dist
+playwright-report
+test-results
+.env*
+.claude/settings.local.json
+.claude/worktrees/
+*.log
+.DS_Store
+
+# Test minis are licensed files: never commit them. Keep the corpus outside the repo (see CONTRIBUTING.md).
+corpus/
+*.stl
+!src/**/fixtures/*.stl

@@ -1,0 +1,33 @@
+name: User story
+description: Something a user can do when this is finished
+title: '[Story] '
+labels: ['type:story']
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: Story
+      value: |
+        As a …
+        I want …
+        so that …
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable statements. Prefer numbers and visible behaviour; say which need a human to judge (visuals).
+      value: |
+        - [ ] Given … when … then …
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: out
+    attributes:
+      label: Out of scope
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes, wireframes, links

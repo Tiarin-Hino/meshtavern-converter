@@ -1,0 +1,30 @@
+name: Epic
+description: A larger outcome that groups user stories and tasks
+title: '[Epic] '
+labels: ['type:epic']
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome do we want, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope / out of scope
+    validations:
+      required: true
+  - type: textarea
+    id: exit
+    attributes:
+      label: Exit criteria
+      description: How do we know the epic is finished? Use measurable statements.
+    validations:
+      required: true
+  - type: textarea
+    id: links
+    attributes:
+      label: Specs and links
+      description: Link the spec in docs/specs and add child issues as sub-issues.

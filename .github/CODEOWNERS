@@ -1,0 +1,6 @@
+# The PM owns requirements and everything that steers the agent or CI.
+/docs/            @Tiarin-Hino
+/CLAUDE.md        @Tiarin-Hino
+/.claude/         @Tiarin-Hino
+/.mcp.json        @Tiarin-Hino
+/.github/         @Tiarin-Hino
