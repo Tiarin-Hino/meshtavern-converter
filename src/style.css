@@ -42,3 +42,34 @@ h1 {
   height: 100%;
   min-height: 0;
 }
+
+#progress {
+  width: 160px;
+}
+
+#stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#stats div {
+  display: flex;
+  gap: 6px;
+}
+
+#stats dt {
+  color: #a9afb8;
+}
+
+#stats dd {
+  margin: 0;
+}
+
+[hidden] {
+  display: none !important;
+}

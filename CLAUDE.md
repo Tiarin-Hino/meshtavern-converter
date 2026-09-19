@@ -11,12 +11,15 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `npm run dev` — dev server
 - `npm run check` — format check, lint, typecheck, unit tests, build (run before every commit)
 - `npm run e2e` — Playwright smoke tests (builds first)
+- `npm run bench` — pipeline benchmark on a generated 2M-triangle mesh
 - `npm run format` — Prettier
 
 ## Layout
 
 - `src/pipeline/` — mesh processing. Pure functions on ArrayBuffers/typed arrays: no DOM, no three.js scene objects, must run in a Web Worker and in Node. Every function gets unit tests.
-- `src/viewer.ts` — three.js scene. `src/main.ts` — UI wiring and the `window.__mt` test hook.
+- `src/pipeline/run.ts` — runs the steps in order with timings and memory figures. New steps are added there.
+- `src/worker/` — Web Worker around the pipeline: `protocol.ts` (messages), `handle.ts` (testable logic), `convert.worker.ts` (glue), `client.ts` (page side). The page never runs pipeline steps itself.
+- `src/viewer.ts` — three.js scene. `src/main.ts` — UI wiring and the `window.__mt` test hook (`state`, `loadDemo()`, `loadGenerated(n)`).
 - `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (Excalidraw JSON + PNG export).
 
 ## Conventions

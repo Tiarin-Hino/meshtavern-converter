@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import type { IndexedMesh } from './pipeline/mesh';
 
 /**
  * Coordinate conventions (keep in sync with CLAUDE.md):
- * the scene is Y-up and 1 unit = 1 mm. Print STLs are Z-up millimetres,
- * so loaded meshes are rotated -90° around X and keep their scale.
+ * the scene is Y-up and 1 unit = 1 mm. The pipeline delivers meshes already converted
+ * to that convention, standing on y = 0 and centred on the origin.
  */
 export class Viewer {
   private readonly renderer: THREE.WebGLRenderer;
@@ -37,20 +37,15 @@ export class Viewer {
     });
   }
 
-  showStl(buffer: ArrayBuffer): void {
+  showMesh(mesh: IndexedMesh, sizeMm: [number, number, number]): void {
     if (this.mesh) {
       this.scene.remove(this.mesh);
       this.mesh.geometry.dispose();
     }
-    const geometry = new STLLoader().parse(buffer);
-    // Normals stored in STL files are often zero or wrong; derive them from the triangles.
-    geometry.deleteAttribute('normal');
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     geometry.computeVertexNormals();
-    geometry.rotateX(-Math.PI / 2);
-    geometry.computeBoundingBox();
-    const box = geometry.boundingBox!;
-    const centre = box.getCenter(new THREE.Vector3());
-    geometry.translate(-centre.x, -box.min.y, -centre.z);
 
     const material = new THREE.MeshStandardMaterial({
       color: 0x9aa0a8,
@@ -59,7 +54,7 @@ export class Viewer {
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.scene.add(this.mesh);
-    this.frame(box.getSize(new THREE.Vector3()));
+    this.frame(new THREE.Vector3(...sizeMm));
   }
 
   private frame(size: THREE.Vector3): void {
