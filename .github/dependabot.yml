@@ -8,6 +8,15 @@ updates:
       dev-dependencies:
         dependency-type: development
     open-pull-requests-limit: 5
+    ignore:
+      # typescript-eslint does not support TypeScript 7 yet.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # Vitest 5 needs Node 22.12+; local development is still on Node 20. Remove after the Node upgrade.
+      - dependency-name: vitest
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
