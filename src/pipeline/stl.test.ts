@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectStlFormat, encodeBinaryStl, inspectStl } from './stl';
+import { detectStlFormat, encodeBinaryStl, inspectStl, readStlTriangles } from './stl';
 
 const TWO_TRIANGLES = [0, 0, 0, 10, 0, 0, 0, 5, 0, 0, 0, 0, 0, 5, 0, -2, 0, 32];
 
@@ -48,5 +48,18 @@ describe('inspectStl', () => {
 describe('encodeBinaryStl', () => {
   it('rejects incomplete triangles', () => {
     expect(() => encodeBinaryStl([0, 0, 0])).toThrow();
+  });
+});
+
+describe('readStlTriangles', () => {
+  it('round-trips a binary STL', () => {
+    expect(Array.from(readStlTriangles(encodeBinaryStl(TWO_TRIANGLES)))).toEqual(TWO_TRIANGLES);
+  });
+
+  it('reads vertices from an ASCII STL, including exponents', () => {
+    const ascii =
+      'solid a\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1.5e1 0 0\nvertex 0 -2 0\nendloop\nendfacet\nendsolid a';
+    const soup = readStlTriangles(new TextEncoder().encode(ascii).buffer as ArrayBuffer);
+    expect(Array.from(soup)).toEqual([0, 0, 0, 15, 0, 0, 0, -2, 0]);
   });
 });

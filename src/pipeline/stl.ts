@@ -59,6 +59,28 @@ export function inspectStl(buffer: ArrayBuffer): StlInfo {
   return { format: 'binary', triangleCount, bounds: { min, max } };
 }
 
+/** Reads an STL into a triangle soup: 9 numbers per triangle, in the file's own axes and units. */
+export function readStlTriangles(buffer: ArrayBuffer): Float32Array {
+  if (detectStlFormat(buffer) === 'ascii') {
+    const text = new TextDecoder().decode(buffer);
+    const values: number[] = [];
+    for (const match of text.matchAll(/vertex\s+(\S+)\s+(\S+)\s+(\S+)/g)) {
+      values.push(Number(match[1]), Number(match[2]), Number(match[3]));
+    }
+    // Drop a trailing incomplete triangle from a truncated file.
+    return new Float32Array(values.slice(0, values.length - (values.length % 9)));
+  }
+
+  const view = new DataView(buffer);
+  const triangleCount = view.getUint32(HEADER_BYTES, true);
+  const soup = new Float32Array(triangleCount * 9);
+  for (let t = 0; t < triangleCount; t++) {
+    const vertices = HEADER_BYTES + COUNT_BYTES + t * TRIANGLE_BYTES + 12;
+    for (let i = 0; i < 9; i++) soup[t * 9 + i] = view.getFloat32(vertices + i * 4, true);
+  }
+  return soup;
+}
+
 /** Builds a binary STL from flat triangle vertex data (9 numbers per triangle). Used by tests and the demo mesh. */
 export function encodeBinaryStl(vertices: ArrayLike<number>): ArrayBuffer {
   if (vertices.length % 9 !== 0) throw new Error('Expected 9 numbers per triangle');
