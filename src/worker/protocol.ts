@@ -7,6 +7,8 @@ export type WorkerRequest = {
   id: number;
   stl: ArrayBuffer;
   up?: UpAxis;
+  /** Texture size for baked detail maps; 0 or absent means none. */
+  bakeResolution?: number;
 };
 
 export type WorkerResponse =

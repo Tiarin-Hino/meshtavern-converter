@@ -9,10 +9,21 @@ export async function handleRequest(request: WorkerRequest, post: Post): Promise
       request.stl,
       (progress) => post({ type: 'progress', id: request.id, progress }),
       request.up ?? null,
+      request.bakeResolution ?? 0,
     );
     // Transfer instead of copy: mesh buffers can be hundreds of megabytes.
     const meshes = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
-    post({ type: 'done', id: request.id, result }, meshes.flatMap(meshBuffers));
+    const transfer = meshes.flatMap(meshBuffers);
+    if (result.baked) {
+      const { mesh, maps } = result.baked;
+      transfer.push(
+        ...meshBuffers(mesh),
+        maps.normal.buffer,
+        maps.cavity.buffer,
+        maps.occlusion.buffer,
+      );
+    }
+    post({ type: 'done', id: request.id, result }, transfer);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     post({ type: 'error', id: request.id, message });

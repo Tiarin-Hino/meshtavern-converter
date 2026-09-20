@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
+import type { BakedMaps } from './pipeline/bake';
+import { DEFAULT_LOOK, textureColours, vertexColours, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 
 /** One inch: the usual tabletop grid square. */
@@ -45,6 +46,8 @@ export class Viewer {
   private mesh: THREE.Mesh | null = null;
   private stress: THREE.LOD[] = [];
   private imported: THREE.Group | null = null;
+  private bakedMaps: BakedMaps | null = null;
+  private bakedMaterial: THREE.MeshStandardMaterial | null = null;
   private readonly size = new THREE.Vector3(1, 1, 1);
   private look: Look = { ...DEFAULT_LOOK };
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
@@ -190,9 +193,65 @@ export class Viewer {
     };
   }
 
+  /**
+   * Shows an unwrapped mesh with its baked maps: the sculpt's normals from a texture and
+   * the look as a colour texture, instead of per-vertex data.
+   */
+  showBaked(
+    mesh: IndexedMesh,
+    maps: BakedMaps,
+    sizeMm: [number, number, number],
+    reframe = false,
+  ): void {
+    this.clear();
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals!, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs!, 2));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+
+    const normalMap = new THREE.DataTexture(maps.normal, maps.resolution, maps.resolution);
+    normalMap.minFilter = THREE.LinearMipmapLinearFilter;
+    normalMap.magFilter = THREE.LinearFilter;
+    normalMap.generateMipmaps = true;
+    normalMap.needsUpdate = true;
+    this.bakedMaps = maps;
+    this.bakedMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.75,
+      metalness: 0,
+      normalMap,
+      normalMapType: THREE.ObjectSpaceNormalMap,
+      map: this.colourTexture(maps),
+      wireframe: this.material.wireframe,
+    });
+    this.mesh = new THREE.Mesh(geometry, this.bakedMaterial);
+    this.scene.add(this.mesh);
+    this.size.set(...sizeMm);
+    if (reframe) this.setCamera(34, 22, 1);
+  }
+
+  private colourTexture(maps: BakedMaps): THREE.DataTexture {
+    const texture = new THREE.DataTexture(
+      textureColours(maps.occlusion, maps.cavity, this.look),
+      maps.resolution,
+      maps.resolution,
+    );
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
   /** Re-colours everything on screen. Cheap: no conversion, just new vertex colours. */
   setLook(look: Look): void {
     this.look = { ...look };
+    if (this.bakedMaterial && this.bakedMaps) {
+      this.bakedMaterial.map?.dispose();
+      this.bakedMaterial.map = this.colourTexture(this.bakedMaps);
+    }
     const recolour = (object: THREE.Object3D): void => {
       const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
       const source = geometry?.userData.source as IndexedMesh | undefined;
@@ -218,6 +277,7 @@ export class Viewer {
 
   setWireframe(wireframe: boolean): void {
     this.material.wireframe = wireframe;
+    if (this.bakedMaterial) this.bakedMaterial.wireframe = wireframe;
   }
 
   /**
@@ -258,6 +318,13 @@ export class Viewer {
       this.scene.remove(this.mesh);
       this.mesh.geometry.dispose();
       this.mesh = null;
+    }
+    if (this.bakedMaterial) {
+      this.bakedMaterial.map?.dispose();
+      this.bakedMaterial.normalMap?.dispose();
+      this.bakedMaterial.dispose();
+      this.bakedMaterial = null;
+      this.bakedMaps = null;
     }
     for (const mini of this.stress) {
       this.scene.remove(mini);

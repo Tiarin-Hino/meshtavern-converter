@@ -43,6 +43,23 @@ export function parseHexColour(hex: string): [number, number, number] {
   ) as [number, number, number];
 }
 
+/** One surface point: linear RGB for the given occlusion (0..1) and raw cavity (about -0.25..0.25). */
+function pointColour(
+  base: readonly number[],
+  look: Look,
+  occlusion: number,
+  rawCavity: number,
+): [number, number, number] {
+  const cavity = Math.max(-1, Math.min(1, rawCavity * CAVITY_GAIN));
+  let shadow = (1 - look.occlusion * (1 - occlusion)) * (1 - look.wash * Math.max(0, -cavity));
+  shadow = DARKEST + (1 - DARKEST) * shadow;
+  const highlight = look.edges * Math.max(0, cavity) * HIGHLIGHT;
+  return [0, 1, 2].map((channel) => {
+    const coat = base[channel]! * shadow;
+    return coat + (1 - coat) * highlight;
+  }) as [number, number, number];
+}
+
 /**
  * Linear RGB per vertex, 0–1, three numbers each. Meshes without shading data, and a
  * disabled look, get the flat base coat.
@@ -52,21 +69,49 @@ export function vertexColours(mesh: IndexedMesh, look: Look): Float32Array {
   const colours = new Float32Array(vertexCount * 3);
   const base = parseHexColour(look.base);
   const shaded = look.enabled && mesh.occlusion && mesh.cavity;
-
   for (let v = 0; v < vertexCount; v++) {
-    let shadow = 1;
-    let highlight = 0;
-    if (shaded) {
-      const cavity = Math.max(-1, Math.min(1, mesh.cavity![v]! * CAVITY_GAIN));
-      shadow =
-        (1 - look.occlusion * (1 - mesh.occlusion![v]!)) * (1 - look.wash * Math.max(0, -cavity));
-      shadow = DARKEST + (1 - DARKEST) * shadow;
-      highlight = look.edges * Math.max(0, cavity) * HIGHLIGHT;
-    }
-    for (let channel = 0; channel < 3; channel++) {
-      const coat = base[channel]! * shadow;
-      colours[v * 3 + channel] = coat + (1 - coat) * highlight;
-    }
+    colours.set(
+      shaded ? pointColour(base, look, mesh.occlusion![v]!, mesh.cavity![v]!) : base,
+      v * 3,
+    );
   }
   return colours;
+}
+
+/** Raw cavity values are stored in a byte as (cavity + 0.5) * 255, keeping precision where the values are. */
+export const cavityToByte = (cavity: number): number =>
+  Math.round((Math.max(-0.5, Math.min(0.5, cavity)) + 0.5) * 255);
+const byteToCavity = (byte: number): number => byte / 255 - 0.5;
+
+const linearToSrgbByte = (value: number): number => {
+  const clamped = Math.max(0, Math.min(1, value));
+  const srgb = clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055;
+  return Math.round(srgb * 255);
+};
+
+/**
+ * The look as an sRGB colour texture (RGBA bytes), from baked per-texel maps: `occlusion`
+ * one byte per texel (0..255), `cavity` one byte per texel (see `cavityToByte`). Uses a
+ * 256 × 256 lookup table, so re-colouring a 2K texture takes a few milliseconds.
+ */
+export function textureColours(occlusion: Uint8Array, cavity: Uint8Array, look: Look): Uint8Array {
+  const base = parseHexColour(look.base);
+  const table = new Uint8Array(256 * 256 * 3);
+  for (let o = 0; o < 256; o++) {
+    for (let c = 0; c < 256; c++) {
+      const colour = look.enabled ? pointColour(base, look, o / 255, byteToCavity(c)) : base;
+      for (let channel = 0; channel < 3; channel++) {
+        table[(o * 256 + c) * 3 + channel] = linearToSrgbByte(colour[channel]!);
+      }
+    }
+  }
+  const out = new Uint8Array(occlusion.length * 4);
+  for (let texel = 0; texel < occlusion.length; texel++) {
+    const entry = (occlusion[texel]! * 256 + cavity[texel]!) * 3;
+    out[texel * 4] = table[entry]!;
+    out[texel * 4 + 1] = table[entry + 1]!;
+    out[texel * 4 + 2] = table[entry + 2]!;
+    out[texel * 4 + 3] = 255;
+  }
+  return out;
 }

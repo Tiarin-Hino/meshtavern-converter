@@ -146,3 +146,28 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
   await page.getByRole('button', { name: 'Download GLB' }).click();
   expect((await download).suggestedFilename()).toBe('generated-50-close.glb');
 });
+
+test('spike: unwraps the table level and shows it with baked maps when asked to', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/?bake=256');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await page.evaluate(() => window.__mt.loadGenerated(100));
+  const state = await page.evaluate(() => window.__mt.state);
+
+  expect(state.error).toBeNull();
+  expect(state.stats?.timings.map((t) => t.step)).toEqual(
+    expect.arrayContaining(['unwrap', 'bake']),
+  );
+  expect(state.baked?.resolution).toBe(256);
+  expect(state.baked?.charts).toBeGreaterThan(0);
+  expect(state.baked?.coverage).toBeGreaterThan(0.2);
+
+  await page.evaluate(() => window.__mt.showBaked(true));
+  expect(await page.evaluate(() => window.__mt.state.showingBaked)).toBe(true);
+  await page.waitForTimeout(300);
+  await testInfo.attach('sheet-baked', {
+    body: await page.locator('#viewport').screenshot(),
+    contentType: 'image/png',
+  });
+});

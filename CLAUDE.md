@@ -19,12 +19,14 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `src/pipeline/` — mesh processing. Pure functions on ArrayBuffers/typed arrays: no DOM, no three.js scene objects, must run in a Web Worker and in Node. Every function gets unit tests.
 - `src/pipeline/shade.ts` measures per vertex how buried (occlusion) and how creased or edgy (cavity) the surface is; `src/pipeline/look.ts` turns those numbers into colours. Both are used by the viewer and by exports, so they must stay free of three.js.
 - `src/pipeline/glb.ts` writes a level as a GLB file, plain or compressed (quantised + meshopt). Vertex data stays in mm; the node scale converts to glTF metres. Tests run the Khronos validator on both variants.
+- `src/pipeline/unwrap.ts` and `bake.ts` — spike (issue #10), off unless the address has `?bake=<size>`: xatlas texture coordinates for the table level and detail maps baked from the sculpt. The PM decided baked maps ship at release; issues #29–#31 are the blockers.
 - `src/pipeline/run.ts` — runs the steps in order with timings and memory figures. New steps are added there.
 - `src/worker/` — Web Worker around the pipeline: `protocol.ts` (messages), `handle.ts` (testable logic), `convert.worker.ts` (glue), `client.ts` (page side). The page never runs pipeline steps itself.
 - `src/viewer.ts` — three.js scene. `src/main.ts` — UI wiring and the `window.__mt` test hook (`state`, `loadDemo()`, `loadGenerated(n)`, `showLevel(i)`, `setCamera(azimuth, elevation, zoom)`, `setWireframe(on)`, `setLook(changes)`, `exportGlb(level, compact)`, `loadGlb(buffer)`, `startStress(count, forcedLod?)`, `stopStress()`, `setUp(axis)`, `poolForStress(share)`, `clearStressPool()`; live figures on `state.perf`).
 - `scripts/compare-lods.mjs` — converts every STL in the local `corpus/` in real Chrome and writes comparison images and a results table to the git-ignored `out/lods/`.
 - `scripts/compare-look.mjs` — before/after images of the look for every corpus mini, into `out/look/`.
 - `scripts/export-sizes.mjs` — exports every level of every corpus mini, re-opens each compressed file and prints the size table.
+- `scripts/compare-bake.mjs` — spike: sculpt vs per-vertex look vs baked maps, into `out/bake/`.
 - `scripts/measure-stress.mjs` — measures the 100/400-mini stress scene in real Chrome, with and without the frame-rate cap.
 - `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (Excalidraw JSON + PNG export).
 

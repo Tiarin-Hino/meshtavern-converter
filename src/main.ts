@@ -4,7 +4,7 @@ import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
-import type { ConversionStats, Progress } from './pipeline/run';
+import type { Baked, ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
 import { Viewer, type Perf } from './viewer';
 import { Converter } from './worker/client';
@@ -32,6 +32,16 @@ interface AppState {
   look: Look;
   /** Set after a GLB was opened: what the file contained. */
   imported: { triangles: number; sizeMm: [number, number, number] } | null;
+  /** Spike, issue #10: figures of the baked table level, when `?bake=<size>` is in the address. */
+  baked: {
+    charts: number;
+    utilisation: number;
+    vertices: number;
+    coverage: number;
+    fallback: number;
+    resolution: number;
+  } | null;
+  showingBaked: boolean;
 }
 
 declare global {
@@ -47,6 +57,8 @@ declare global {
       setWireframe: (wireframe: boolean) => void;
       /** Changes some or all look settings and re-colours what is on screen. */
       setLook: (changes: Partial<Look>) => void;
+      /** Shows the table level with baked maps (true) or with per-vertex data (false). */
+      showBaked: (on: boolean) => void;
       /** Encodes a level (1 = close, 2 = table, 3 = far) with the current look. */
       exportGlb: (level: number, compact: boolean) => Promise<ArrayBuffer>;
       /** Opens a GLB in the viewer, as dropping the file would. */
@@ -95,7 +107,12 @@ const state: AppState = {
   stressCount: 0,
   look: { ...DEFAULT_LOOK },
   imported: null,
+  baked: null,
+  showingBaked: false,
 };
+let baked: Baked | null = null;
+/** Spike switch: `?bake=2048` unwraps the table level and bakes detail maps of that size. */
+const bakeResolution = Number(new URLSearchParams(location.search).get('bake') ?? 0);
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
@@ -135,9 +152,19 @@ function showStats(stats: ConversionStats): void {
   statsList.hidden = false;
 }
 
+function showBaked(on: boolean): void {
+  if (!baked || !state.stats) return;
+  if (!on) return showLevel(2);
+  viewer.showBaked(baked.mesh, baked.maps, state.stats.sizeMm);
+  state.shownLevel = 2;
+  state.showingBaked = true;
+  state.stressCount = 0;
+}
+
 function showLevel(level: number, reframe = false): void {
   const mesh = levels[level];
   if (!mesh || !state.stats) return;
+  state.showingBaked = false;
   state.stressCount = 0;
   viewer.showMesh(mesh, state.stats.sizeMm, reframe);
   state.shownLevel = level;
@@ -277,8 +304,18 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
         status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%`;
       },
       up,
+      bakeResolution,
     );
     stopWatching();
+    baked = result.baked ?? null;
+    state.baked = baked && {
+      charts: baked.charts,
+      utilisation: baked.utilisation,
+      vertices: baked.mesh.positions.length / 3,
+      coverage: baked.maps.coverage,
+      fallback: baked.maps.fallback,
+      resolution: baked.maps.resolution,
+    };
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = result.stats;
     showLevelButtons(result.stats);
@@ -413,6 +450,7 @@ window.__mt = {
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
   setLook,
+  showBaked,
   exportGlb,
   loadGlb,
   startStress,
