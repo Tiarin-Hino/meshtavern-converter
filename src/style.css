@@ -47,6 +47,27 @@ h1 {
   width: 160px;
 }
 
+#levels {
+  display: flex;
+  gap: 4px;
+}
+
+#levels button {
+  padding: 3px 10px;
+  border: 1px solid #3a3f49;
+  border-radius: 4px;
+  background: #252830;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+#levels button[aria-pressed='true'] {
+  border-color: #7aa2f7;
+  background: #2f3b57;
+}
+
 #stats {
   display: flex;
   flex-wrap: wrap;

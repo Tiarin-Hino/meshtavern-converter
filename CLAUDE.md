@@ -19,7 +19,8 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `src/pipeline/` — mesh processing. Pure functions on ArrayBuffers/typed arrays: no DOM, no three.js scene objects, must run in a Web Worker and in Node. Every function gets unit tests.
 - `src/pipeline/run.ts` — runs the steps in order with timings and memory figures. New steps are added there.
 - `src/worker/` — Web Worker around the pipeline: `protocol.ts` (messages), `handle.ts` (testable logic), `convert.worker.ts` (glue), `client.ts` (page side). The page never runs pipeline steps itself.
-- `src/viewer.ts` — three.js scene. `src/main.ts` — UI wiring and the `window.__mt` test hook (`state`, `loadDemo()`, `loadGenerated(n)`).
+- `src/viewer.ts` — three.js scene. `src/main.ts` — UI wiring and the `window.__mt` test hook (`state`, `loadDemo()`, `loadGenerated(n)`, `showLevel(i)`, `setCamera(azimuth, elevation, zoom)`, `setWireframe(on)`).
+- `scripts/compare-lods.mjs` — converts every STL in the local `corpus/` in real Chrome and writes comparison images and a results table to the git-ignored `out/lods/`.
 - `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (Excalidraw JSON + PNG export).
 
 ## Conventions

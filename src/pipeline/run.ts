@@ -1,9 +1,10 @@
 import type { IndexedMesh } from './mesh';
 import { weldVertices } from './mesh';
 import { orientAndPlace } from './orient';
+import { buildLods, simplifierReady, type Lod } from './simplify';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
 
-export const STEPS = ['read', 'weld', 'orient'] as const;
+export const STEPS = ['read', 'weld', 'orient', 'simplify'] as const;
 export type StepName = (typeof STEPS)[number];
 
 export interface Progress {
@@ -18,6 +19,13 @@ export interface StepTiming {
   ms: number;
 }
 
+export interface LodStats {
+  targetTriangles: number;
+  triangles: number;
+  vertices: number;
+  errorMm: number;
+}
+
 export interface ConversionStats {
   format: StlFormat;
   sourceTriangles: number;
@@ -25,6 +33,7 @@ export interface ConversionStats {
   vertices: number;
   degenerateTriangles: number;
   sizeMm: [number, number, number];
+  lods: LodStats[];
   timings: StepTiming[];
   totalMs: number;
   /** Largest sum of pipeline buffers alive at once: a lower bound for the memory a conversion needs. */
@@ -34,7 +43,10 @@ export interface ConversionStats {
 }
 
 export interface ConversionResult {
+  /** The welded, oriented source mesh at full detail. */
   mesh: IndexedMesh;
+  /** Reduced versions, highest detail first. */
+  lods: Lod[];
   stats: ConversionStats;
 }
 
@@ -47,11 +59,14 @@ function heapBytes(): number | null {
 const meshBytes = (mesh: IndexedMesh): number =>
   mesh.positions.byteLength + mesh.indices.byteLength;
 
-/** Runs every pipeline step on one STL. Synchronous and DOM-free, so it works in a worker and in Node. */
-export function runPipeline(
+/** Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node. */
+export async function runPipeline(
   stl: ArrayBuffer,
   onProgress: (progress: Progress) => void = () => {},
-): ConversionResult {
+): Promise<ConversionResult> {
+  // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
+  await simplifierReady();
+
   const timings: StepTiming[] = [];
   let peakBufferBytes = 0;
   let peakHeapBytes = heapBytes();
@@ -85,9 +100,16 @@ export function runPipeline(
     () => orientAndPlace(welded.mesh),
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
   );
+  const lods = run(
+    'simplify',
+    () => buildLods(placed.mesh),
+    // The simplifier copies the mesh into WebAssembly memory while it works.
+    (l) => meshBytes(placed.mesh) * 2 + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
+  );
 
   return {
     mesh: placed.mesh,
+    lods,
     stats: {
       format,
       sourceTriangles: soup.length / 9,
@@ -95,6 +117,12 @@ export function runPipeline(
       vertices: placed.mesh.positions.length / 3,
       degenerateTriangles: welded.degenerateTriangles,
       sizeMm: placed.sizeMm,
+      lods: lods.map((lod) => ({
+        targetTriangles: lod.targetTriangles,
+        triangles: lod.triangles,
+        vertices: lod.mesh.positions.length / 3,
+        errorMm: lod.errorMm,
+      })),
       timings,
       totalMs: timings.reduce((sum, timing) => sum + timing.ms, 0),
       peakBufferBytes,

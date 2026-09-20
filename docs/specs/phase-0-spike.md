@@ -47,6 +47,26 @@ Out of scope: support removal, painting UI, accounts, anything server-side.
 8. Contact-sheet generator (Playwright) for the corpus.
 9. Write up results and decisions.
 
+## Results so far
+
+### Simplifier (issue #8, 2026-09-20)
+
+**Recommendation: meshoptimizer.** Decision on looks is the PM's.
+
+- Maintained, MIT, on npm, works directly on typed arrays inside the worker, and has an attribute-aware mode we will need once minis carry vertex colours or UVs.
+- Fast-Quadric-Mesh-Simplification was not integrated: it has no npm package, and the only WebAssembly builds are unmaintained (2022) and exchange data through temporary files, which costs extra 60–100 MB copies per mini. It stays the fallback if meshoptimizer's quality disappoints.
+- Settings: `Prune` flag (drops tiny floating components), no error ceiling (the triangle budget wins), each LOD simplified from the previous one. Simplifying every LOD from the source instead gives about 30 % lower error at 15k and 4k but takes 2–3 times as long.
+
+Measured in Chrome 153 on the primary reference machine, three of the PM's own minis:
+
+| Mini     | Source triangles | 50k LOD           | 15k LOD           | 4k LOD           | Simplify | Whole conversion |
+| -------- | ---------------- | ----------------- | ----------------- | ---------------- | -------- | ---------------- |
+| M-001a   | 1,253,380        | 50,000 (±0.02 mm) | 14,998 (±0.07 mm) | 3,990 (±0.22 mm) | 1288 ms  | 1698 ms          |
+| MINI-001 | 554,316          | 50,000 (±0.03 mm) | 15,000 (±0.09 mm) | 4,000 (±0.28 mm) | 377 ms   | 526 ms           |
+| MINI-014 | 546,406          | 50,000 (±0.01 mm) | 14,998 (±0.06 mm) | 3,990 (±0.25 mm) | 371 ms   | 533 ms           |
+
+The ± figure is the simplifier's own estimate of the largest deviation from the source surface. Comparison images: `npm run build && node scripts/compare-lods.mjs` writes them to the git-ignored `out/lods/`.
+
 ## Reference hardware
 
 **Primary (PM's desktop, read from the machine on 2026-09-19):**
