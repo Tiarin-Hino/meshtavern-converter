@@ -1,10 +1,11 @@
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, weldVertices } from './mesh';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
-import { buildLods, simplifierReady, type Lod } from './simplify';
+import { shade } from './shade';
+import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
 
-export const STEPS = ['read', 'weld', 'orient', 'simplify'] as const;
+export const STEPS = ['read', 'weld', 'orient', 'simplify', 'shade', 'levels'] as const;
 export type StepName = (typeof STEPS)[number];
 
 export interface Progress {
@@ -110,15 +111,27 @@ export async function runPipeline(
     },
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
   );
-  const lods = run(
+  const close = run(
     'simplify',
     () => {
       // Every LOD keeps the shading of the full sculpt at the vertices that survive.
       placed.mesh.normals = computeVertexNormals(placed.mesh);
-      return buildLods(placed.mesh);
+      return simplifyToSpec(placed.mesh, LOD_SPECS[0]!);
     },
     // The simplifier copies the mesh into WebAssembly memory while it works.
-    (l) => meshBytes(placed.mesh) * 2 + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
+    (lod) => meshBytes(placed.mesh) * 2 + meshBytes(lod.mesh),
+  );
+  // Shade the highest level only: the lower ones are made of its vertices and inherit the result.
+  run(
+    'shade',
+    () => shade(close.mesh),
+    // The occlusion grid is at most 160 voxels a side, one byte each.
+    () => meshBytes(placed.mesh) + meshBytes(close.mesh) + 160 ** 3,
+  );
+  const lods = run(
+    'levels',
+    () => [close, ...chainLods(close, LOD_SPECS.slice(1))],
+    (l) => meshBytes(placed.mesh) + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
   );
 
   return {

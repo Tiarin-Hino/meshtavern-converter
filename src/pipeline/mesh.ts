@@ -6,6 +6,17 @@ export interface IndexedMesh {
   indices: Uint32Array;
   /** Unit normal per vertex. Optional: consumers derive normals from the faces when absent. */
   normals?: Float32Array;
+  /** Signed curvature per vertex, -1 (crease) to 1 (edge). See shade.ts. */
+  cavity?: Float32Array;
+  /** Openness per vertex, 0 (buried) to 1 (open). See shade.ts. */
+  occlusion?: Float32Array;
+}
+
+/** Every buffer of a mesh, for handing it between threads without copying. */
+export function meshBuffers(mesh: IndexedMesh): ArrayBufferLike[] {
+  return [mesh.positions, mesh.indices, mesh.normals, mesh.cavity, mesh.occlusion].flatMap(
+    (array) => (array ? [array.buffer] : []),
+  );
 }
 
 /** Area-weighted vertex normals, the same rule three.js uses. */

@@ -96,6 +96,12 @@ Costs and open points:
 - Mixed stress scene, 80 % MINI-014 and 20 % giant: 100 minis with LOD by distance draw 1.9M triangles per frame; 400 minis 3.0M; both at the display cap, with 1279 and 352 fps when the cap is lifted. All 100 at the table level: 2.7M triangles, 711 fps uncapped. Primary reference machine only.
 - Who may receive the close-up level is a licensing question (a 200k-triangle mesh at 0.04 mm is close to print quality). Tracked in the private repo.
 
+### Primed-and-washed look (issue #9, 2026-09-20)
+
+Variant A from the pipeline list, done without textures. Two numbers are measured per vertex on the close level and inherited by the lower levels: **occlusion** (how buried a spot is; short rays marched through a 160-voxel grid, with the table counted as solid) and **cavity** (signed curvature: creases negative, edges positive). Colour = base coat, darkened by occlusion and creases, lightened on edges. Strengths and base coat are adjustable live, because only the colours are recomputed, not the conversion.
+
+The shade step costs 0.16–0.86 s on the corpus minis (25k–100k vertices) on the primary reference machine. Defaults: shadows 0.75, wash 0.6, edges 0.45, base coat #9aa0a8. Visual call: PM.
+
 ### Stress scene (issue #12, 2026-09-20)
 
 Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of mini M-001a, each with its own buffers and draw call. "Cap lifted" runs Chrome without the display frame-rate limit to show headroom.

@@ -51,7 +51,7 @@ export interface Lod {
 /** Resolves once the WebAssembly simplifier is compiled. Must be awaited before simplifying. */
 export const simplifierReady = (): Promise<void> => MeshoptSimplifier.ready;
 
-/** Drops vertices no triangle uses and renumbers the indices. Normals follow their vertices. */
+/** Drops vertices no triangle uses and renumbers the indices. Per-vertex data follows its vertex. */
 function compact(source: IndexedMesh, indices: Uint32Array): IndexedMesh {
   const { positions, normals } = source;
   const [remap, vertexCount] = MeshoptSimplifier.compactMesh(indices);
@@ -67,7 +67,21 @@ function compact(source: IndexedMesh, indices: Uint32Array): IndexedMesh {
       }
     }
   }
-  return { positions: compacted, indices, normals: compactedNormals };
+  const scalar = (values: Float32Array | undefined): Float32Array | undefined => {
+    if (!values) return undefined;
+    const kept = new Float32Array(vertexCount);
+    for (let old = 0; old < remap.length; old++) {
+      if (remap[old] !== 0xffffffff) kept[remap[old]!] = values[old]!;
+    }
+    return kept;
+  };
+  return {
+    positions: compacted,
+    indices,
+    normals: compactedNormals,
+    cavity: scalar(source.cavity),
+    occlusion: scalar(source.occlusion),
+  };
 }
 
 /** Geometry-only reduction; the returned error is a surface deviation in mm. */
@@ -150,9 +164,18 @@ export function simplifyToSpec(mesh: IndexedMesh, spec: LodSpec, errorSoFarMm = 
  * estimate against the original sculpt.
  */
 export function buildLods(mesh: IndexedMesh, specs: readonly LodSpec[] = LOD_SPECS): Lod[] {
+  return chainLods({ mesh, errorMm: 0 }, specs);
+}
+
+/**
+ * Builds the levels in `specs` starting from an existing mesh that already deviates
+ * `errorMm` from the sculpt. Lets a caller work on one level (shade it, for example) before
+ * the lower ones are derived from it and inherit that work.
+ */
+export function chainLods(from: Pick<Lod, 'mesh' | 'errorMm'>, specs: readonly LodSpec[]): Lod[] {
   const lods: Lod[] = [];
-  let source = mesh;
-  let errorSoFar = 0;
+  let source = from.mesh;
+  let errorSoFar = from.errorMm;
   for (const spec of specs) {
     const lod = simplifyToSpec(source, spec, errorSoFar);
     lods.push(lod);

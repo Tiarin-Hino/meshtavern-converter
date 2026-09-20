@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 
 /** One inch: the usual tabletop grid square. */
@@ -42,8 +43,11 @@ export class Viewer {
   private mesh: THREE.Mesh | null = null;
   private stress: THREE.LOD[] = [];
   private readonly size = new THREE.Vector3(1, 1, 1);
+  private look: Look = { ...DEFAULT_LOOK };
+  // The colour comes from the vertices (see look.ts), so the material itself stays white.
   private readonly material = new THREE.MeshStandardMaterial({
-    color: 0x9aa0a8,
+    color: 0xffffff,
+    vertexColors: true,
     roughness: 0.75,
     metalness: 0,
   });
@@ -156,6 +160,32 @@ export class Viewer {
     };
   }
 
+  /** Re-colours everything on screen. Cheap: no conversion, just new vertex colours. */
+  setLook(look: Look): void {
+    this.look = { ...look };
+    const recolour = (object: THREE.Object3D): void => {
+      const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+      const source = geometry?.userData.source as IndexedMesh | undefined;
+      if (!geometry || !source) return;
+      geometry.setAttribute(
+        'color',
+        new THREE.BufferAttribute(vertexColours(source, this.look), 3),
+      );
+    };
+    this.mesh?.traverse(recolour);
+    // Copies of one mini share their source mesh, so compute each colour set once.
+    const done = new Map<IndexedMesh, Float32Array>();
+    for (const mini of this.stress) {
+      mini.traverse((object) => {
+        const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+        const source = geometry?.userData.source as IndexedMesh | undefined;
+        if (!geometry || !source) return;
+        if (!done.has(source)) done.set(source, vertexColours(source, this.look));
+        geometry.setAttribute('color', new THREE.BufferAttribute(done.get(source)!.slice(), 3));
+      });
+    }
+  }
+
   setWireframe(wireframe: boolean): void {
     this.material.wireframe = wireframe;
   }
@@ -188,6 +218,8 @@ export class Viewer {
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     if (mesh.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
     else geometry.computeVertexNormals();
+    geometry.setAttribute('color', new THREE.BufferAttribute(vertexColours(mesh, this.look), 3));
+    geometry.userData.source = mesh;
     return geometry;
   }
 

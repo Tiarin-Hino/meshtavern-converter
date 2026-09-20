@@ -1,5 +1,6 @@
 import './style.css';
 import { generateBumpySheet } from './pipeline/generate';
+import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
 import type { ConversionStats, Progress } from './pipeline/run';
@@ -27,6 +28,7 @@ interface AppState {
   perf: Perf | null;
   /** Number of minis in the stress scene; 0 when a single mini is shown. */
   stressCount: number;
+  look: Look;
 }
 
 declare global {
@@ -40,6 +42,8 @@ declare global {
       showLevel: (level: number) => void;
       setCamera: (azimuthDeg: number, elevationDeg: number, zoom: number) => void;
       setWireframe: (wireframe: boolean) => void;
+      /** Changes some or all look settings and re-colours what is on screen. */
+      setLook: (changes: Partial<Look>) => void;
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
@@ -82,6 +86,7 @@ const state: AppState = {
   shownLevel: 0,
   perf: null,
   stressCount: 0,
+  look: { ...DEFAULT_LOOK },
 };
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
@@ -149,6 +154,38 @@ function showLevelButtons(stats: ConversionStats): void {
   );
   levelButtons.hidden = false;
 }
+
+const lookPanel = document.querySelector<HTMLElement>('#look')!;
+const lookInputs = {
+  enabled: document.querySelector<HTMLInputElement>('#look-enabled')!,
+  base: document.querySelector<HTMLInputElement>('#look-base')!,
+  occlusion: document.querySelector<HTMLInputElement>('#look-occlusion')!,
+  wash: document.querySelector<HTMLInputElement>('#look-wash')!,
+  edges: document.querySelector<HTMLInputElement>('#look-edges')!,
+};
+
+function setLook(changes: Partial<Look>): void {
+  Object.assign(state.look, changes);
+  lookInputs.enabled.checked = state.look.enabled;
+  lookInputs.base.value = state.look.base;
+  lookInputs.occlusion.value = String(state.look.occlusion);
+  lookInputs.wash.value = String(state.look.wash);
+  lookInputs.edges.value = String(state.look.edges);
+  viewer.setLook(state.look);
+}
+
+for (const input of Object.values(lookInputs)) {
+  input.addEventListener('input', () =>
+    setLook({
+      enabled: lookInputs.enabled.checked,
+      base: lookInputs.base.value,
+      occlusion: Number(lookInputs.occlusion.value),
+      wash: Number(lookInputs.wash.value),
+      edges: Number(lookInputs.edges.value),
+    }),
+  );
+}
+setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
   if (!lastSource) return;
@@ -218,6 +255,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
   statsList.hidden = true;
   levelButtons.hidden = true;
   stressButtons.hidden = true;
+  lookPanel.hidden = true;
   progressBar.hidden = false;
   const stopWatching = watchFrames();
   try {
@@ -236,6 +274,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
     state.stats = result.stats;
     showLevelButtons(result.stats);
     stressButtons.hidden = false;
+    lookPanel.hidden = false;
     upSelect.value = result.stats.up;
     upLabel.hidden = false;
     const start = performance.now();
@@ -324,6 +363,7 @@ window.__mt = {
   showLevel: (level) => showLevel(level),
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
+  setLook,
   startStress,
   poolForStress: (share) => {
     if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share });

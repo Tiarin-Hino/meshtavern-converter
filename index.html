@@ -22,6 +22,16 @@
         <button type="button" data-count="100" data-lod="0">100 minis, all 50k</button>
         <button type="button" data-count="0">Single mini</button>
       </div>
+      <fieldset id="look" hidden>
+        <legend>Look</legend>
+        <label><input id="look-enabled" type="checkbox" checked /> Primed and washed</label>
+        <label>Base coat <input id="look-base" type="color" value="#9aa0a8" /></label>
+        <label
+          >Shadows <input id="look-occlusion" type="range" min="0" max="1" step="0.05"
+        /></label>
+        <label>Wash <input id="look-wash" type="range" min="0" max="1" step="0.05" /></label>
+        <label>Edges <input id="look-edges" type="range" min="0" max="1" step="0.05" /></label>
+      </fieldset>
       <dl id="stats" hidden></dl>
       <p id="perf"></p>
     </header>
