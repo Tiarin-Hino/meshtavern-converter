@@ -112,3 +112,37 @@ test('applies the primed-and-washed look and lets the user adjust it', async ({
   await page.getByLabel('Primed and washed').uncheck();
   expect(await page.evaluate(() => window.__mt.state.look.enabled)).toBe(false);
 });
+
+test('exports a level as GLB and opens the file again', async ({ page }, testInfo) => {
+  await page.evaluate(() => window.__mt.loadGenerated(200));
+  const result = await page.evaluate(async () => {
+    const plain = await window.__mt.exportGlb(2, false);
+    const compact = await window.__mt.exportGlb(2, true);
+    await window.__mt.loadGlb(compact, 'round-trip.glb');
+    return {
+      plainBytes: plain.byteLength,
+      compactBytes: compact.byteLength,
+      imported: window.__mt.state.imported,
+      table: window.__mt.state.stats!.lods[1]!,
+      error: window.__mt.state.error,
+    };
+  });
+
+  expect(result.error).toBeNull();
+  expect(result.compactBytes).toBeLessThan(result.plainBytes / 2);
+  expect(result.imported?.triangles).toBe(result.table.triangles);
+  // glTF is in metres; after the round trip the sheet must be 50 mm wide again.
+  expect(result.imported?.sizeMm[0]).toBeCloseTo(50, 1);
+  await expect(page.locator('#status')).toContainText('round-trip.glb');
+  await page.waitForTimeout(300);
+  await testInfo.attach('reopened-glb', {
+    body: await page.locator('#viewport').screenshot(),
+    contentType: 'image/png',
+  });
+
+  // The download button offers a file named after the mini and the level.
+  await page.evaluate(() => window.__mt.loadGenerated(50));
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download GLB' }).click();
+  expect((await download).suggestedFilename()).toBe('generated-50-close.glb');
+});

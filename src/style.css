@@ -48,13 +48,15 @@ h1 {
 }
 
 #levels,
-#stress {
+#stress,
+#export {
   display: flex;
   gap: 4px;
 }
 
 #levels button,
-#stress button {
+#stress button,
+#export button {
   padding: 3px 10px;
   border: 1px solid #3a3f49;
   border-radius: 4px;
@@ -68,6 +70,12 @@ h1 {
 #levels button[aria-pressed='true'] {
   border-color: #7aa2f7;
   background: #2f3b57;
+}
+
+#export {
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
 }
 
 #look {

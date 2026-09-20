@@ -8,7 +8,7 @@
   <body>
     <header>
       <h1>MeshTavern Converter</h1>
-      <label>Open an STL <input id="file" type="file" accept=".stl" /></label>
+      <label>Open an STL (or a GLB) <input id="file" type="file" accept=".stl,.glb" /></label>
       <p id="status">Drop an STL anywhere on the page. The file stays on your computer.</p>
       <progress id="progress" max="100" value="0" hidden></progress>
       <label id="up-label" hidden
@@ -21,6 +21,10 @@
         <button type="button" data-count="400">400 minis</button>
         <button type="button" data-count="100" data-lod="0">100 minis, all 50k</button>
         <button type="button" data-count="0">Single mini</button>
+      </div>
+      <div id="export" hidden>
+        <button id="download" type="button">Download GLB</button>
+        <label><input id="compact" type="checkbox" /> Compressed (smaller; not for Blender)</label>
       </div>
       <fieldset id="look" hidden>
         <legend>Look</legend>
