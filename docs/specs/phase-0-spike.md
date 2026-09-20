@@ -27,13 +27,13 @@ Out of scope: support removal, painting UI, accounts, anything server-side.
 
 ## Exit criteria
 
-| #   | Criterion                                                                      | Measure                                                                      |
-| --- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| 1   | A 100 MB binary STL converts in the browser on the reference hardware          | Time and peak memory recorded; no tab crash                                  |
-| 2   | Variant A and Variant B screenshots for every mini in the corpus (20–30 files) | Side-by-side contact sheet in `docs/design/` (renders only, no source files) |
-| 3   | 100 unique converted minis on screen                                           | ≥30 fps on an integrated GPU; frame time recorded                            |
-| 4   | Output size                                                                    | Typical GLB ≤1 MB (A) / ≤4 MB with textures (B)                              |
-| 5   | Decision                                                                       | Go/no-go on Variant B; chosen simplifier; triangle budgets                   |
+| #   | Criterion                                                                      | Measure                                                                                                     |
+| --- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| 1   | A 100 MB binary STL converts in the browser on the reference hardware          | **Met:** 3.4 s on the reference laptop, 5.5 s on a phone, no crash. Peak memory is calculated, not measured |
+| 2   | Variant A and Variant B screenshots for every mini in the corpus (20–30 files) | Side-by-side contact sheet in `docs/design/` (renders only, no source files)                                |
+| 3   | 100 unique converted minis on screen                                           | **Met:** 60 fps on Intel Iris Xe; holds 60 fps up to 400 minis at table level                               |
+| 4   | Output size                                                                    | Typical GLB ≤1 MB (A) / ≤4 MB with textures (B)                                                             |
+| 5   | Decision                                                                       | Go/no-go on Variant B; chosen simplifier; triangle budgets                                                  |
 
 ## Work items
 
@@ -232,6 +232,37 @@ Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of m
 
 Exit criterion 3 is **not met yet**: it needs the same measurement on an integrated GPU. Reproduce with `npm run build && node scripts/measure-stress.mjs`, or by hand with the "100 minis" button.
 
+### Measurements on other devices (issue #35, 2026-09-20)
+
+Taken by the PM with the "Benchmark this device" panel, served over the local network. No baking in these runs. Frame rates are capped by each display; the ramp (all minis at the table level, about 22k triangles each) shows where the cap stops holding.
+
+|                                    | Ubuntu laptop, Intel Iris Xe (Alder Lake), Chrome 149 | Pixel 9, Mali-G715, Chrome 153 | Development PC, RTX 3060                   |
+| ---------------------------------- | ----------------------------------------------------- | ------------------------------ | ------------------------------------------ |
+| 100 MB STL, 2 M triangles          | 3.4 s, no crash                                       | 5.5 s, no crash                | 5.6 s                                      |
+| Longest stall of the page          | 83 ms                                                 | 150 ms                         | 212 ms                                     |
+| Real 60 MB mini, 1.25 M triangles  | not run                                               | 2.5 s                          | 2.7 s                                      |
+| 100 minis, detail by distance      | 60 fps (cap), 2.2 ms CPU                              | 60 fps (cap), 3.0 ms CPU       | 165 fps (cap), 1.1 ms CPU                  |
+| 400 minis, detail by distance      | 60 fps (cap), 3.8 ms CPU                              | 60 fps (cap), 5.3 ms CPU       | 165 fps (cap), 2.7 ms CPU                  |
+| Ramp: holds its display rate up to | 400 minis, 8.8 M triangles; 28 fps at 800             | not run yet                    | 400 minis, 9.0 M triangles; 105 fps at 800 |
+
+**Exit criterion 1 is met** (a 100 MB binary STL converts in the browser on the reference laptop: 3.4 s, no crash) and **exit criterion 3 is met** (100 minis at 30 fps or more on an integrated GPU: 60 fps, with four times that scene in hand). A flagship phone converts as fast as the desktop, because the conversion is single-threaded.
+
+**Baked minis on the same devices** (`?bake=auto&ktx=0`, the PM's mini M-001a with 1.25 M triangles, 1K detail texture, KTX2-compressed, every mini owning its texture):
+
+|                                     | Ubuntu laptop, Iris Xe                | Pixel 9, Mali-G715                                                    |
+| ----------------------------------- | ------------------------------------- | --------------------------------------------------------------------- |
+| Conversion without baking           | 2.0 s                                 | 3.0 s                                                                 |
+| Unwrap / bake / KTX2 encode         | 2.4 / 3.6 / 1.3 s                     | 3.0 / 3.3 / 1.6 s                                                     |
+| Whole conversion including textures | 9.3 s                                 | 10.9 s                                                                |
+| 100 baked minis, detail by distance | 60 fps (cap), 133 MB of textures      | 60 fps (cap), 133 MB                                                  |
+| 400 baked minis, detail by distance | 60 fps (cap), 533 MB                  | 60 fps (cap), 533 MB                                                  |
+| Ramp, all baked at table level      | 60 fps to 200 minis; 44 fps at 400    | 60 fps to 400 minis; 22 fps at 800 with 1,067 MB of textures          |
+| Ramp without baking, for comparison | 60 fps to 400 minis; 28–50 fps at 800 | 60 fps to 400 minis; 32–39 fps at 800, CPU-bound (17–22 ms per frame) |
+
+What this settles: **baked minis at release are viable** on an integrated GPU and on a flagship phone. The target scene of 100 minis runs at the display rate with room to spare, compressed textures work on a mobile GPU (three.js transcodes the same file to a format the Mali supports), and a ten-second conversion including textures is acceptable for a one-off. Baking halves the laptop's headroom (200 instead of 400 table-level minis at 60 fps), and a phone collapses once textures pass about 1 GB, which is what the texture budget with its per-vertex fallback is for.
+
+Still owed: the Steam Deck; a large detailed mini with a 2K texture on the weak devices (unwrap time above all); a mid-range phone; a session long enough to show thermal throttling.
+
 ## Reference hardware
 
 **Primary (PM's desktop, read from the machine on 2026-09-19):**
@@ -242,4 +273,10 @@ Exit criterion 3 is **not met yet**: it needs the same measurement on an integra
 
 This machine has a discrete GPU and no integrated one (the 11700F has none), and far more RAM than a typical user. Numbers measured here are an upper bound: they can prove something is too slow, but not that it is fast enough.
 
-**Secondary (needed for exit criteria 1 and 3): to be named.** A laptop with an integrated GPU and 8–16 GB RAM, for example a team member's. Criteria 1 and 3 are only met when measured on this device.
+**Secondary devices (named by the PM on 2026-09-20; exact models come from the benchmark output):**
+
+- an Ubuntu laptop with an integrated GPU: the reference for exit criteria 1 and 3
+- a Steam Deck (AMD APU, 16 GB shared memory, Linux): a handheld with a mid-range integrated GPU
+- a phone: expected to play, not to convert; the light benchmark shows how far it gets
+
+Criteria 1 and 3 are only met when measured on the laptop. How to measure: `npm run lan` on the development PC, open the address it prints on the device (same network), open "Benchmark this device", run it, and paste the result into issue #35. Add `?bake=auto&ktx=0` to the address for the baked variant.
