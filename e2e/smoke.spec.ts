@@ -185,6 +185,7 @@ test('runs the device benchmark and offers the result as text', async ({ page })
   expect(result).toContain('**GPU:**');
   expect(result).toContain('| Source triangles | 7,200 |');
   expect(result).toContain('| 400 minis, detail by distance |');
+  expect(result).toContain('**Headroom:**');
   await expect(page.locator('#bench-result')).toHaveValue(/100 minis, all at table level/);
   await expect(page.getByRole('button', { name: 'Copy result' })).toBeEnabled();
 });

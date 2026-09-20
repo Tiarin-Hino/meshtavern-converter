@@ -12,6 +12,14 @@ const SETTLE_SECONDS = Number(new URLSearchParams(location.search).get('settle')
 /** `tiny` is for automated tests only. */
 export type BenchmarkSize = 'tiny' | 'light' | 'full';
 
+/**
+ * Headroom ramp: displays cap the frame rate, so "60 fps" only says "at least 60". The ramp
+ * keeps doubling the number of minis, all at the table level (one level keeps memory low),
+ * until the frame rate falls below this share of the best rate seen, or the last step is done.
+ */
+const RAMP_COUNTS = [200, 400, 800, 1600];
+const RAMP_HOLD = 0.85;
+
 /** Quads per side of the generated sheet: 500 → 0.5M triangles (25 MB STL), 1000 → 2M (100 MB). */
 const SHEET_QUADS: Record<BenchmarkSize, number> = { tiny: 60, light: 500, full: 1000 };
 
@@ -85,6 +93,33 @@ export async function runBenchmark(
       `| ${label} | ${perf.fps.toFixed(0)} | ${perf.frameMs.toFixed(1)} ms | ${perf.worstFrameMs.toFixed(0)} ms | ${perf.renderCpuMs.toFixed(1)} ms | ${perf.triangles.toLocaleString()} | ${perf.bakedMinis}, ${Math.round(perf.textureBytes / 1048576)} MB |`,
     );
   }
+  // 3. Headroom.
+  let best = 0;
+  let held = { count: 0, triangles: 0 };
+  let dropped: string | null = null;
+  add('');
+  add('| Headroom ramp, all at table level | fps | Worst frame | CPU per frame | Triangles |');
+  add('| --- | --- | --- | --- | --- |');
+  for (const count of [100, ...RAMP_COUNTS]) {
+    mt.startStress(count, 1);
+    await wait(Math.min(SETTLE_SECONDS, 5));
+    const perf = mt.state.perf;
+    if (!perf) break;
+    add(
+      `| ${count} minis | ${perf.fps.toFixed(0)} | ${perf.worstFrameMs.toFixed(0)} ms | ${perf.renderCpuMs.toFixed(1)} ms | ${perf.triangles.toLocaleString()} |`,
+    );
+    best = Math.max(best, perf.fps);
+    if (perf.fps < best * RAMP_HOLD) {
+      dropped = `${count} minis (${perf.fps.toFixed(0)} fps)`;
+      break;
+    }
+    held = { count, triangles: perf.triangles };
+  }
+  add('');
+  add(
+    `**Headroom:** holds its display rate (${best.toFixed(0)} fps) up to ${held.count} minis at table level, ${(held.triangles / 1e6).toFixed(1)} M triangles per frame; ${dropped ? `drops at ${dropped}` : 'never dropped, the ramp ended first'}.`,
+  );
+
   mt.stopStress();
   return lines.join('\n');
 }
