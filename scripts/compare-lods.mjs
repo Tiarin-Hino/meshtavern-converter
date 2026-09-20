@@ -9,7 +9,7 @@ import { basename, join } from 'node:path';
 import { chromium } from '@playwright/test';
 
 const PORT = 4174;
-const OUT = join('out', 'lods');
+const OUT = join('out', process.argv[3] ?? 'lods');
 const VIEWS = [
   { name: 'whole', azimuth: 25, elevation: 12, zoom: 1 },
   { name: 'close-up', azimuth: 25, elevation: 8, zoom: 2.6 },
@@ -30,7 +30,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: false });
 const rows = [];
 try {
   const page = await browser.newPage({ viewport: { width: 760, height: 900 } });
-  await page.goto(`http://localhost:${PORT}/`);
+  await page.goto(`http://localhost:${PORT}/${process.argv[2] ?? ''}`);
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 
   for (const file of files) {
@@ -43,7 +43,9 @@ try {
     const stats = await page.evaluate(() => window.__mt.state.stats);
     const labels = [
       'Full',
-      ...stats.lods.map((lod) => `${Math.round(lod.targetTriangles / 1000)}k`),
+      ...stats.lods.map(
+        (lod) => `${lod.name} ${Math.round(lod.triangles / 1000)}k (${lod.decidedBy})`,
+      ),
     ];
 
     const shots = [];

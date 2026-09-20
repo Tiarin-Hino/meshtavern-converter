@@ -44,6 +44,12 @@ declare global {
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
       startStress: (count: number, forcedLod?: number | null) => void;
+      /**
+       * Remembers the converted mini for mixed stress scenes. With a pool, `startStress`
+       * fills the table from it: `share` is the fraction of positions this mini takes.
+       */
+      poolForStress: (share: number) => void;
+      clearStressPool: () => void;
       stopStress: () => void;
     };
   }
@@ -92,8 +98,8 @@ function showStats(stats: ConversionStats): void {
     ['Vertices', stats.vertices.toLocaleString()],
     ['Dropped', stats.degenerateTriangles.toLocaleString()],
     ...stats.lods.map((lod): [string, string] => [
-      `LOD ${Math.round(lod.targetTriangles / 1000)}k`,
-      `${lod.triangles.toLocaleString()} tris, ±${lod.errorMm.toFixed(2)} mm`,
+      lod.name,
+      `${lod.triangles.toLocaleString()} tris, ±${lod.errorMm.toFixed(3)} mm (${lod.decidedBy})`,
     ]),
     ...stats.timings.map((t): [string, string] => [t.step, `${t.ms.toFixed(0)} ms`]),
     ['Total', `${stats.totalMs.toFixed(0)} ms`],
@@ -128,7 +134,10 @@ function showLevel(level: number, reframe = false): void {
 }
 
 function showLevelButtons(stats: ConversionStats): void {
-  const labels = ['Full', ...stats.lods.map((lod) => `${Math.round(lod.triangles / 1000)}k`)];
+  const labels = [
+    'Full',
+    ...stats.lods.map((lod) => `${lod.name} ${Math.round(lod.triangles / 1000)}k`),
+  ];
   levelButtons.replaceChildren(
     ...labels.map((label, level) => {
       const button = document.createElement('button');
@@ -146,9 +155,33 @@ async function setUp(up: UpAxis): Promise<void> {
   await convert(await lastSource.read(), lastSource.name, up);
 }
 
+const stressPool: { lods: IndexedMesh[]; share: number }[] = [];
+
 function startStress(count: number, forcedLod: number | null = null): void {
   if (levels.length < 2) return;
-  viewer.showStress(levels.slice(1), count, forcedLod);
+  if (stressPool.length === 0) {
+    viewer.showStress([levels.slice(1)], count, forcedLod);
+  } else {
+    // Spread each pooled mini evenly over the table according to its share.
+    const total = stressPool.reduce((sum, entry) => sum + entry.share, 0);
+    const filled = stressPool.map(() => 0);
+    const setFor = (index: number): number => {
+      let pick = 0;
+      let deficit = -Infinity;
+      stressPool.forEach((entry, set) => {
+        const owed = ((index + 1) * entry.share) / total - filled[set]!;
+        if (owed > deficit) [pick, deficit] = [set, owed];
+      });
+      filled[pick] = filled[pick]! + 1;
+      return pick;
+    };
+    viewer.showStress(
+      stressPool.map((entry) => entry.lods),
+      count,
+      forcedLod,
+      setFor,
+    );
+  }
   state.stressCount = count;
 }
 
@@ -292,6 +325,12 @@ window.__mt = {
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
   startStress,
+  poolForStress: (share) => {
+    if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share });
+  },
+  clearStressPool: () => {
+    stressPool.length = 0;
+  },
   stopStress: () => showLevel(0, true),
 };
 state.ready = true;

@@ -1,5 +1,5 @@
 import type { IndexedMesh } from './mesh';
-import { weldVertices } from './mesh';
+import { computeVertexNormals, weldVertices } from './mesh';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { buildLods, simplifierReady, type Lod } from './simplify';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
@@ -20,7 +20,8 @@ export interface StepTiming {
 }
 
 export interface LodStats {
-  targetTriangles: number;
+  name: Lod['name'];
+  decidedBy: Lod['decidedBy'];
   triangles: number;
   vertices: number;
   errorMm: number;
@@ -111,7 +112,11 @@ export async function runPipeline(
   );
   const lods = run(
     'simplify',
-    () => buildLods(placed.mesh),
+    () => {
+      // Every LOD keeps the shading of the full sculpt at the vertices that survive.
+      placed.mesh.normals = computeVertexNormals(placed.mesh);
+      return buildLods(placed.mesh);
+    },
     // The simplifier copies the mesh into WebAssembly memory while it works.
     (l) => meshBytes(placed.mesh) * 2 + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
   );
@@ -129,7 +134,8 @@ export async function runPipeline(
       up: placed.up,
       upMethod: forcedUp ? 'manual' : placed.detection.method,
       lods: lods.map((lod) => ({
-        targetTriangles: lod.targetTriangles,
+        name: lod.name,
+        decidedBy: lod.decidedBy,
         triangles: lod.triangles,
         vertices: lod.mesh.positions.length / 3,
         errorMm: lod.errorMm,

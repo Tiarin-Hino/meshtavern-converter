@@ -67,6 +67,35 @@ Measured in Chrome 153 on the primary reference machine, three of the PM's own m
 
 The ± figure is the simplifier's own estimate of the largest deviation from the source surface. Comparison images: `npm run build && node scripts/compare-lods.mjs` writes them to the git-ignored `out/lods/`.
 
+### Detail levels driven by error (issue #24, 2026-09-20)
+
+The PM's verdict on fixed budgets: fine for simple minis, awful for detailed commercial ones at 15k. Triangle count turned out to be a poor measure of detail: to stay within 0.05 mm, one 1.25M-triangle mini needs 14k triangles and a 0.5M-triangle hill giant needs 144k. Levels are therefore defined by allowed deviation, with a floor and a cap:
+
+| Level | Error limit | Floor | Cap  |
+| ----- | ----------- | ----- | ---- |
+| close | 0.02 mm     | 50k   | 200k |
+| table | 0.05 mm     | 15k   | 60k  |
+| far   | 0.2 mm      | 4k    | 20k  |
+
+Every level also carries the normals of the full-detail mesh, and the final reduction weighs those normals so creases and facial features survive.
+
+Result on the five local corpus minis (Chrome 153, primary reference machine):
+
+| Mini                        | Source | close                | table               | far                 | Simplify step |
+| --------------------------- | ------ | -------------------- | ------------------- | ------------------- | ------------- |
+| Large detailed giant, 77 mm | 500k   | 200k (cap, ±0.04 mm) | 60k (cap, ±0.14 mm) | 20k (cap, ±0.34 mm) | 3.6 s         |
+| Detailed 48 mm figure       | 1,172k | 94k (±0.02 mm)       | 50k (±0.05 mm)      | 8k (±0.20 mm)       | 6.7 s         |
+| M-001a                      | 1,253k | 50k (floor)          | 23k (±0.05 mm)      | 4k (floor)          | 2.3 s         |
+| MINI-001                    | 554k   | 66k (±0.02 mm)       | 32k (±0.05 mm)      | 5k (±0.20 mm)       | 1.0 s         |
+| MINI-014                    | 546k   | 50k (floor)          | 19k (±0.05 mm)      | 5k (±0.20 mm)       | 0.9 s         |
+
+Costs and open points:
+
+- The simplify step is 2–3 times slower than with fixed budgets, because each level needs up to three simplifier runs. Acceptable once per upload on the fast desktop; to be checked on the weak reference device.
+- Levels are chained, and the error a level inherits counts against its limit. That is conservative: the table level gets more triangles than a direct reduction from the source would need (50k instead of 32k for the 48 mm figure).
+- Mixed stress scene, 80 % MINI-014 and 20 % giant: 100 minis with LOD by distance draw 1.9M triangles per frame; 400 minis 3.0M; both at the display cap, with 1279 and 352 fps when the cap is lifted. All 100 at the table level: 2.7M triangles, 711 fps uncapped. Primary reference machine only.
+- Who may receive the close-up level is a licensing question (a 200k-triangle mesh at 0.04 mm is close to print quality). Tracked in the private repo.
+
 ### Stress scene (issue #12, 2026-09-20)
 
 Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of mini M-001a, each with its own buffers and draw call. "Cap lifted" runs Chrome without the display frame-rate limit to show headroom.
