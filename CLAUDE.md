@@ -2,7 +2,7 @@
 
 Browser tool that turns a 3D-print STL of a miniature into a reduced, game-ready mini (GLB). Everything runs client-side: the user's STL must never be uploaded anywhere. This repo is public; the MeshTavern VTT that consumes it is a separate private repo.
 
-Current phase: Phase 1, the public converter. Phase 0 (the spike) is done; its results and decisions are in `docs/specs/phase-0-spike.md`. Several parts are still spike-quality and sit behind address options (`?bake=`, `?ktx=`); the Phase 1 epic turns them into the product.
+Current phase: Phase 1, the converter at product quality: spec in `docs/specs/phase-1-converter.md`, epic #40. It is not published in this phase (PM decision, 2026-09-20). Phase 0, the spike, is done; its results and decisions are in `docs/specs/phase-0-spike.md`. Several parts are still spike-quality and sit behind address options (`?bake=`, `?ktx=`); Phase 1 turns them into the normal path.
 
 ## Stack and commands
 
