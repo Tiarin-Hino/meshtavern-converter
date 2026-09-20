@@ -131,48 +131,10 @@ At 1K the bake drops to 1.6–1.9 s; the unwrap time does not change. About half
 - Object-space normal maps are not part of glTF; exporting them needs a tangent-space conversion.
 - New dependency: `xatlas-wasm` 0.1.3, pinned. It is a young single-maintainer package. Its bundle makes no network calls, and it is loaded only when baking is requested. Building xatlas from source ourselves is the clean path if this goes to production.
 
-**Recommendation: no-go for baked normal maps at release; conditional go for unwrapping when painting is built.**
+**Decision (PM, 2026-09-20): go. Baked maps ship at release, on all minis.** The improvement on smooth sculpts is what the product should look like. The spike's recommendation had been no-go for release (no gain at table distance, memory, unwrap time); the PM weighed the close-up quality higher. What must be solved before release, each a `release-blocker` issue:
 
-- Ship variant A. The error-driven levels with carried normals already look right at the distances a table is played at, which is where baked maps add nothing.
-- Painting is the real reason to unwrap: per-vertex paint on a table-level mesh has a "brush" of about 0.5 mm, too coarse for eyes and trim, while a 1K colour texture gives 0.07 mm. That needs the unwrap and one colour texture (about 5 MB), but no normal map.
-- So unwrap **on demand, when a user first paints a mini**, not at upload; show progress; accept seconds to minutes once per painted mini. Before building that, test cheaper unwrap settings on large minis.
-- Revisit baked normal maps only together with a BVH-based bake and compressed textures.
+- **#29 Bake sampling.** Closest point on the sculpt's triangles through a BVH, instead of nearest vertices, so dense sculpts like the giant's beard stop looking blotchy.
+- **#30 Texture memory.** 11–43 MB per mini does not fit a full table on an integrated GPU. Needs a map-size policy per level, packed or compressed textures, and a fallback to the per-vertex look on weak devices. Better sampling does not change this.
+- **#31 Unwrap time.** Up to minutes on large detailed minis; needs cheaper chart settings or another strategy, honest progress, a measurement on the weak device, and a decision on the `xatlas-wasm` dependency.
 
-### GLB export (issue #11, 2026-09-20)
-
-One GLB per level, in two variants. **Plain**: float data, no extensions, opens everywhere including Blender. **Compressed**: 16-bit positions and 8-bit normals (KHR_mesh_quantization) packed with EXT_meshopt_compression; about a third of the plain size; needs a loader with meshopt support (three.js, Babylon.js, Godot 4; not Blender). Both pass the Khronos glTF validator with zero errors in the unit tests, carry the look as COLOR_0, and carry the raw shading data as `_SHADING` so an application can re-tint a mini later. Vertex data stays in mm; the node scale converts to glTF metres.
-
-| Mini                  | STL   | Level               | Triangles        | Plain                  | Compressed           |
-| --------------------- | ----- | ------------------- | ---------------- | ---------------------- | -------------------- |
-| Large detailed giant  | 24 MB | close / table / far | 200k / 60k / 20k | 5,463 / 1,284 / 425 KB | 1,398 / 439 / 150 KB |
-| Detailed 48 mm figure | 56 MB | close / table / far | 94k / 50k / 8k   | 2,018 / 1,067 / 175 KB | 659 / 359 / 63 KB    |
-| MINI-001              | 26 MB | close / table / far | 66k / 32k / 5k   | 1,417 / 689 / 107 KB   | 461 / 233 / 40 KB    |
-| M-001a                | 60 MB | close / table / far | 50k / 23k / 4k   | 1,074 / 486 / 86 KB    | 350 / 165 / 33 KB    |
-| MINI-014              | 26 MB | close / table / far | 50k / 19k / 5k   | 1,075 / 402 / 102 KB   | 350 / 137 / 38 KB    |
-
-All 15 compressed files were opened again in the viewer with matching triangle counts. Compressing takes 2–130 ms. What other players would download per mini (table + far, compressed) is 0.2–0.6 MB, against exit criterion 4's "typical GLB ≤1 MB".
-
-### Stress scene (issue #12, 2026-09-20)
-
-Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of mini M-001a, each with its own buffers and draw call. "Cap lifted" runs Chrome without the display frame-rate limit to show headroom.
-
-| Case                       | Triangles per frame | Normal                | Cap lifted | CPU per frame |
-| -------------------------- | ------------------- | --------------------- | ---------- | ------------- |
-| 100 minis, LOD by distance | 1.0 M               | 165 fps (display cap) | 672 fps    | 1.1 ms        |
-| 400 minis, LOD by distance | 1.6 M               | 165 fps (display cap) | 298 fps    | 3.0 ms        |
-| 100 minis, all 50k         | 5.0 M               | 165 fps (display cap) | 384 fps    | 2.4 ms        |
-| 400 minis, all 50k         | 19.4 M              | 113 fps               | 126 fps    | 7.6 ms        |
-
-Exit criterion 3 is **not met yet**: it needs the same measurement on an integrated GPU. Reproduce with `npm run build && node scripts/measure-stress.mjs`, or by hand with the "100 minis" button.
-
-## Reference hardware
-
-**Primary (PM's desktop, read from the machine on 2026-09-19):**
-
-- Gigabyte B560M DS3H V3, Intel Core i7-11700F (8 cores / 16 threads), 64 GB RAM
-- NVIDIA GeForce RTX 3060 (driver 32.0.16.1074), 1920×1080 at 144 Hz
-- Windows 11 Home 10.0.26200, Chrome 153, Edge 153
-
-This machine has a discrete GPU and no integrated one (the 11700F has none), and far more RAM than a typical user. Numbers measured here are an upper bound: they can prove something is too slow, but not that it is fast enough.
-
-**Secondary (needed for exit criteria 1 and 3): to be named.** A laptop with an integrated GPU and 8–16 GB RAM, for example a team member's. Criteria 1 and 3 are only met when measured on this device.
+Unchanged from the spike: painting needs these texture coordinates anyway, and object-space normal maps need a tangent-space conversion before they can go into a GLB export.
