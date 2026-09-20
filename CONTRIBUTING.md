@@ -29,5 +29,7 @@ This project is built by a small team together with the Claude Code agent. Human
 STLs are licensed files. Never commit them and never attach them to issues.
 
 - Keep your corpus in a folder outside the repo (or in `corpus/`, which is git-ignored).
+- Sort it into folders by kind: `humanoid`, `large-creature`, `quadruped`, `flying` (also minis on a stand), `mounted`, `swarm`, `terrain`. `npm run corpus` reports which kinds are still missing, how many files came Y-up and Z-up, and how many have a base.
+- After a pipeline change, run `npm run corpus` and read `out/corpus/results.md`: it lists every figure that moved since the last run. The sheets and results stay on your machine.
 - Record in the issue only the file name, triangle count and file size.
 - For shared test files the team uses the project Google Drive folder.

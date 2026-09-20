@@ -3,9 +3,10 @@
 // Usage: npm run build && node scripts/compare-look.mjs
 // Nothing from corpus/ or out/ is ever committed.
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4177;
 const OUT = join('out', 'look');
@@ -21,7 +22,7 @@ const LOOKS = [
   { label: 'bone base coat', look: { enabled: true, base: '#c9b994' } },
 ];
 
-const files = readdirSync('corpus').filter((file) => file.toLowerCase().endsWith('.stl'));
+const files = corpusFiles();
 if (files.length === 0) throw new Error('No STL files in corpus/');
 mkdirSync(OUT, { recursive: true });
 

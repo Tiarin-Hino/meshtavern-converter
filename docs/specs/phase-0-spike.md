@@ -95,7 +95,7 @@ Measured in Chrome 153 on the primary reference machine, three of the PM's own m
 | MINI-001 | 554,316          | 50,000 (±0.03 mm) | 15,000 (±0.09 mm) | 4,000 (±0.28 mm) | 377 ms   | 526 ms           |
 | MINI-014 | 546,406          | 50,000 (±0.01 mm) | 14,998 (±0.06 mm) | 3,990 (±0.25 mm) | 371 ms   | 533 ms           |
 
-The ± figure is the simplifier's own estimate of the largest deviation from the source surface. Comparison images: `npm run build && node scripts/compare-lods.mjs` writes them to the git-ignored `out/lods/`.
+The ± figure is the simplifier's own estimate of the largest deviation from the source surface. Comparison images: `npm run corpus` (in Phase 0: `scripts/compare-lods.mjs`) writes them to the git-ignored `out/corpus/`.
 
 ### Detail levels driven by error (issue #24, 2026-09-20)
 

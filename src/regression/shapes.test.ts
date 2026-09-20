@@ -53,7 +53,9 @@ describe('generated shapes', () => {
   });
 
   it('gives the same bits every time', () => {
-    expect(generateSwarm()).toEqual(generateSwarm());
+    // Compared as bytes: a deep comparison of 880,000 numbers takes seconds.
+    const bytes = (soup: Float32Array): Buffer => Buffer.from(soup.buffer);
+    expect(bytes(generateSwarm()).equals(bytes(generateSwarm()))).toBe(true);
   });
 
   it('has a base the pipeline finds, in both file conventions', () => {
