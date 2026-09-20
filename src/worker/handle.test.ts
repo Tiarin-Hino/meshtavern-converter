@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateBumpySheet } from '../pipeline/generate';
+import { meshBuffers } from '../pipeline/mesh';
 import { STEPS } from '../pipeline/run';
 import { encodeBinaryStl } from '../pipeline/stl';
 import { handleRequest } from './handle';
@@ -21,7 +22,7 @@ describe('handleRequest', () => {
       p.response.type === 'progress' ? [p.response.progress] : [],
     );
     expect(progress.map((p) => p.step)).toEqual([...STEPS]);
-    expect(progress.map((p) => p.percent)).toEqual([0, 25, 50, 75]);
+    expect(progress.map((p) => p.percent)).toEqual([0, 17, 33, 50, 67, 83]);
   });
 
   it('echoes the job id on every message', async () => {
@@ -41,13 +42,12 @@ describe('handleRequest', () => {
     expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
     expect(stats.peakBufferBytes).toBeGreaterThan(0);
     expect(stats.lods.map((lod) => lod.triangles)).toEqual(lods.map((lod) => lod.triangles));
-    expect(last.transfer).toEqual(
-      [mesh, ...lods.map((lod) => lod.mesh)].flatMap((m) => [
-        m.positions.buffer,
-        m.indices.buffer,
-        m.normals!.buffer,
-      ]),
-    );
+    expect(last.transfer).toEqual([mesh, ...lods.map((lod) => lod.mesh)].flatMap(meshBuffers));
+    // Shading is computed on the close level and inherited by the lower ones.
+    for (const lod of lods) {
+      expect(lod.mesh.occlusion?.length).toBe(lod.mesh.positions.length / 3);
+      expect(lod.mesh.cavity?.length).toBe(lod.mesh.positions.length / 3);
+    }
   });
 
   it('converts an empty STL without failing', async () => {

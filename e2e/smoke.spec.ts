@@ -14,7 +14,14 @@ test('converts the demo mini in the worker and renders it', async ({ page }, tes
   expect(state.stats?.vertices).toBe(5);
   // Y-up after conversion: 25 mm base, 32 mm tall.
   expect(state.stats?.sizeMm).toEqual([25, 32, 25]);
-  expect(state.progressLog.map((p) => p.step)).toEqual(['read', 'weld', 'orient', 'simplify']);
+  expect(state.progressLog.map((p) => p.step)).toEqual([
+    'read',
+    'weld',
+    'orient',
+    'simplify',
+    'shade',
+    'levels',
+  ]);
   await expect(page.locator('#stats')).toContainText('Triangles');
 
   // Attached to the CI run so a human can check what the agent cannot: does it look right?
@@ -79,4 +86,29 @@ test('fills the table with 100 minis and reports rendering figures', async ({ pa
 
   await page.getByRole('button', { name: 'Single mini' }).click();
   expect(await page.evaluate(() => window.__mt.state.stressCount)).toBe(0);
+});
+
+test('applies the primed-and-washed look and lets the user adjust it', async ({
+  page,
+}, testInfo) => {
+  await page.evaluate(() => window.__mt.loadGenerated(200));
+  expect(await page.evaluate(() => window.__mt.state.look.enabled)).toBe(true);
+  expect(await page.evaluate(() => window.__mt.state.stats?.timings.map((t) => t.step))).toContain(
+    'shade',
+  );
+
+  await page.getByLabel('Base coat').fill('#c9b994');
+  await page.getByLabel('Shadows').fill('1');
+  expect(await page.evaluate(() => window.__mt.state.look)).toMatchObject({
+    base: '#c9b994',
+    occlusion: 1,
+  });
+  await page.waitForTimeout(300);
+  await testInfo.attach('sheet-washed-bone', {
+    body: await page.locator('#viewport').screenshot(),
+    contentType: 'image/png',
+  });
+
+  await page.getByLabel('Primed and washed').uncheck();
+  expect(await page.evaluate(() => window.__mt.state.look.enabled)).toBe(false);
 });
