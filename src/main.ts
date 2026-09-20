@@ -1,5 +1,6 @@
 import './style.css';
 import { generateBumpySheet } from './pipeline/generate';
+import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
@@ -29,6 +30,8 @@ interface AppState {
   /** Number of minis in the stress scene; 0 when a single mini is shown. */
   stressCount: number;
   look: Look;
+  /** Set after a GLB was opened: what the file contained. */
+  imported: { triangles: number; sizeMm: [number, number, number] } | null;
 }
 
 declare global {
@@ -44,6 +47,10 @@ declare global {
       setWireframe: (wireframe: boolean) => void;
       /** Changes some or all look settings and re-colours what is on screen. */
       setLook: (changes: Partial<Look>) => void;
+      /** Encodes a level (1 = close, 2 = table, 3 = far) with the current look. */
+      exportGlb: (level: number, compact: boolean) => Promise<ArrayBuffer>;
+      /** Opens a GLB in the viewer, as dropping the file would. */
+      loadGlb: (glb: ArrayBuffer, name?: string) => Promise<void>;
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
@@ -87,6 +94,7 @@ const state: AppState = {
   perf: null,
   stressCount: 0,
   look: { ...DEFAULT_LOOK },
+  imported: null,
 };
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
@@ -256,6 +264,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
   levelButtons.hidden = true;
   stressButtons.hidden = true;
   lookPanel.hidden = true;
+  exportPanel.hidden = true;
   progressBar.hidden = false;
   const stopWatching = watchFrames();
   try {
@@ -275,6 +284,8 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
     showLevelButtons(result.stats);
     stressButtons.hidden = false;
     lookPanel.hidden = false;
+    exportPanel.hidden = false;
+    state.imported = null;
     upSelect.value = result.stats.up;
     upLabel.hidden = false;
     const start = performance.now();
@@ -308,10 +319,48 @@ function demoStl(): ArrayBuffer {
   ]);
 }
 
+const exportPanel = document.querySelector<HTMLElement>('#export')!;
+const compactBox = document.querySelector<HTMLInputElement>('#compact')!;
+
+async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> {
+  const mesh = levels[level];
+  if (!mesh || level === 0 || !state.fileName) throw new Error('No converted level to export');
+  if (compact) await glbEncoderReady();
+  return encodeGlb(mesh, { name: state.fileName.replace(/.stl$/i, ''), look: state.look, compact });
+}
+
+async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
+  for (const panel of [statsList, levelButtons, stressButtons, lookPanel, upLabel, exportPanel]) {
+    panel.hidden = true;
+  }
+  try {
+    state.imported = await viewer.showGlb(glb);
+    state.stressCount = 0;
+    const size = state.imported.sizeMm.map((mm) => mm.toFixed(1)).join(' × ');
+    status.textContent = `${name}: ${state.imported.triangles.toLocaleString()} triangles, ${size} mm, ${(glb.byteLength / 1024).toFixed(0)} KB`;
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : String(error);
+    status.textContent = `${name} could not be opened: ${state.error}`;
+  }
+}
+
+document.querySelector<HTMLButtonElement>('#download')!.addEventListener('click', () => {
+  // The full-detail level is never exported; fall back to the close level.
+  const level = Math.max(1, state.shownLevel);
+  void exportGlb(level, compactBox.checked).then((glb) => {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+    link.download = `${state.fileName!.replace(/.stl$/i, '')}-${state.stats!.lods[level - 1]!.name}.glb`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
+});
+
 async function loadFile(file: File | undefined): Promise<void> {
   if (!file) return;
+  if (file.name.toLowerCase().endsWith('.glb')) return loadGlb(await file.arrayBuffer(), file.name);
   if (!file.name.toLowerCase().endsWith('.stl')) {
-    status.textContent = `${file.name} is not an STL file.`;
+    status.textContent = `${file.name} is neither an STL nor a GLB file.`;
     return;
   }
   // The file is read locally and handed to a worker in this tab. It is never sent anywhere.
@@ -364,6 +413,8 @@ window.__mt = {
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
   setLook,
+  exportGlb,
+  loadGlb,
   startStress,
   poolForStress: (share) => {
     if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share });

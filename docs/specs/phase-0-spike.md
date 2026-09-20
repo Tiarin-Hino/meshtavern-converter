@@ -102,6 +102,20 @@ Variant A from the pipeline list, done without textures. Two numbers are measure
 
 The shade step costs 0.16–0.86 s on the corpus minis (25k–100k vertices) on the primary reference machine. Defaults: shadows 0.75, wash 0.6, edges 0.45, base coat #9aa0a8. Visual call: PM.
 
+### GLB export (issue #11, 2026-09-20)
+
+One GLB per level, in two variants. **Plain**: float data, no extensions, opens everywhere including Blender. **Compressed**: 16-bit positions and 8-bit normals (KHR_mesh_quantization) packed with EXT_meshopt_compression; about a third of the plain size; needs a loader with meshopt support (three.js, Babylon.js, Godot 4; not Blender). Both pass the Khronos glTF validator with zero errors in the unit tests, carry the look as COLOR_0, and carry the raw shading data as `_SHADING` so an application can re-tint a mini later. Vertex data stays in mm; the node scale converts to glTF metres.
+
+| Mini                  | STL   | Level               | Triangles        | Plain                  | Compressed           |
+| --------------------- | ----- | ------------------- | ---------------- | ---------------------- | -------------------- |
+| Large detailed giant  | 24 MB | close / table / far | 200k / 60k / 20k | 5,463 / 1,284 / 425 KB | 1,398 / 439 / 150 KB |
+| Detailed 48 mm figure | 56 MB | close / table / far | 94k / 50k / 8k   | 2,018 / 1,067 / 175 KB | 659 / 359 / 63 KB    |
+| MINI-001              | 26 MB | close / table / far | 66k / 32k / 5k   | 1,417 / 689 / 107 KB   | 461 / 233 / 40 KB    |
+| M-001a                | 60 MB | close / table / far | 50k / 23k / 4k   | 1,074 / 486 / 86 KB    | 350 / 165 / 33 KB    |
+| MINI-014              | 26 MB | close / table / far | 50k / 19k / 5k   | 1,075 / 402 / 102 KB   | 350 / 137 / 38 KB    |
+
+All 15 compressed files were opened again in the viewer with matching triangle counts. Compressing takes 2–130 ms. What other players would download per mini (table + far, compressed) is 0.2–0.6 MB, against exit criterion 4's "typical GLB ≤1 MB".
+
 ### Stress scene (issue #12, 2026-09-20)
 
 Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of mini M-001a, each with its own buffers and draw call. "Cap lifted" runs Chrome without the display frame-rate limit to show headroom.

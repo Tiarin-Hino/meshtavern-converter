@@ -2,7 +2,7 @@
 
 Turn a 3D-print STL of a miniature into a lightweight, game-ready 3D mini — entirely in your browser. Your STL file is never uploaded.
 
-**Status:** early spike. It currently opens an STL, shows it and reports its size and triangle count. Reduction, auto-scaling, the "primed" look and GLB export are in progress — see [the Phase 0 spec](docs/specs/phase-0-spike.md).
+**Status:** early, but usable end to end. Drop an STL and it is reduced to three detail levels, stood upright, given a primed-and-washed look, and can be downloaded as a GLB file. Everything runs in your browser. See [the Phase 0 spec](docs/specs/phase-0-spike.md) for measurements and what is still open.
 
 ## Run it
 

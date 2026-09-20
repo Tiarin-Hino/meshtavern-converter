@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { MeshoptDecoder } from 'meshoptimizer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 
@@ -42,6 +44,7 @@ export class Viewer {
   private readonly grid: THREE.GridHelper;
   private mesh: THREE.Mesh | null = null;
   private stress: THREE.LOD[] = [];
+  private imported: THREE.Group | null = null;
   private readonly size = new THREE.Vector3(1, 1, 1);
   private look: Look = { ...DEFAULT_LOOK };
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
@@ -142,6 +145,33 @@ export class Viewer {
     this.controls.autoRotateSpeed = 4;
   }
 
+  /**
+   * Shows a GLB file as it is, colours included: the check that an export opens again.
+   * glTF is in metres, the scene in millimetres.
+   */
+  async showGlb(
+    glb: ArrayBuffer,
+  ): Promise<{ triangles: number; sizeMm: [number, number, number] }> {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    const gltf = await loader.parseAsync(glb, '');
+    this.clear();
+    this.imported = new THREE.Group();
+    this.imported.add(gltf.scene);
+    this.imported.scale.setScalar(1000);
+    this.scene.add(this.imported);
+
+    let triangles = 0;
+    this.imported.traverse((object) => {
+      const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+      if (geometry) triangles += (geometry.index?.count ?? geometry.attributes.position!.count) / 3;
+    });
+    const size = new THREE.Box3().setFromObject(this.imported).getSize(new THREE.Vector3());
+    this.size.copy(size);
+    this.setCamera(34, 22, 1);
+    return { triangles, sizeMm: [size.x, size.y, size.z] };
+  }
+
   perf(): Perf {
     const mean = (values: Float32Array): number =>
       values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -234,6 +264,11 @@ export class Viewer {
       for (const level of mini.levels) (level.object as THREE.Mesh).geometry.dispose();
     }
     this.stress = [];
+    if (this.imported) {
+      this.scene.remove(this.imported);
+      this.imported.traverse((object) => (object as THREE.Mesh).geometry?.dispose());
+      this.imported = null;
+    }
     this.controls.autoRotate = false;
   }
 
