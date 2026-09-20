@@ -1,6 +1,6 @@
 import type { IndexedMesh } from './mesh';
 import { weldVertices } from './mesh';
-import { orientAndPlace } from './orient';
+import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { buildLods, simplifierReady, type Lod } from './simplify';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
 
@@ -33,6 +33,9 @@ export interface ConversionStats {
   vertices: number;
   degenerateTriangles: number;
   sizeMm: [number, number, number];
+  /** Which way was taken as up in the file, and how that was decided. */
+  up: UpAxis;
+  upMethod: UpDetection['method'] | 'manual';
   lods: LodStats[];
   timings: StepTiming[];
   totalMs: number;
@@ -63,6 +66,8 @@ const meshBytes = (mesh: IndexedMesh): number =>
 export async function runPipeline(
   stl: ArrayBuffer,
   onProgress: (progress: Progress) => void = () => {},
+  /** Overrides up-axis detection, for when the guess is wrong. */
+  forcedUp: UpAxis | null = null,
 ): Promise<ConversionResult> {
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
@@ -97,7 +102,11 @@ export async function runPipeline(
   );
   const placed = run(
     'orient',
-    () => orientAndPlace(welded.mesh),
+    () => {
+      const detection = detectUpAxis(welded.mesh);
+      const up = forcedUp ?? detection.up;
+      return { ...orientAndPlace(welded.mesh, up), up, detection };
+    },
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
   );
   const lods = run(
@@ -117,6 +126,8 @@ export async function runPipeline(
       vertices: placed.mesh.positions.length / 3,
       degenerateTriangles: welded.degenerateTriangles,
       sizeMm: placed.sizeMm,
+      up: placed.up,
+      upMethod: forcedUp ? 'manual' : placed.detection.method,
       lods: lods.map((lod) => ({
         targetTriangles: lod.targetTriangles,
         triangles: lod.triangles,
