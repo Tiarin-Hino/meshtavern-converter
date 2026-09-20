@@ -1,8 +1,8 @@
 # Phase 1: the converter, product quality
 
-Status: proposed, for PM review · Owner: PM · Epic: #40 · Written: 2026-09-20
+Status: accepted by the PM on 2026-09-20, including the order of the stories · Owner: PM · Epic: #40 · Written: 2026-09-20
 
-Everything marked _(proposal)_ is the agent's suggestion for product behaviour and is the PM's to change. Phase 0's results and decisions are in [phase-0-spike.md](phase-0-spike.md).
+Everything marked _(proposal)_ was the agent's suggestion for product behaviour; it stands unless the PM changes it. Phase 0's results and decisions are in [phase-0-spike.md](phase-0-spike.md).
 
 ## Goal
 
@@ -43,7 +43,7 @@ Order rationale _(proposal)_: first the net that catches regressions, then the s
 5. **A converter other code can call (#50).** `src/` splits into a library (pipeline, worker, a small typed API: convert a file with options, progress events, cancel, result with levels, texture and figures) and the page that uses it. The table application will import the library, not copy the page. No behaviour change.
 6. **The page (#41).** Empty, converting, done and error states, wireframes in `docs/design/` first; usable on a phone; the done state shows the mini, its size and the downloads (table and far); level switching available but secondary; the spike's tools (stress scene, benchmark, raw figures) behind `?dev`; an end-to-end test proves that no network request carries file data. Visual call: PM.
 7. **Look presets (#45).** Four to six starting points on top of the existing controls _(proposal: grey primer, bone, black with drybrush, steel, bronze)_; the choice is stored with the mini. Defaults: PM.
-8. **Carried-over blockers.** Own xatlas build (#33); measurements on the weak devices, including a large mini with a 2K texture, the Steam Deck and a mid-range phone (#35).
+8. **Carried-over blockers.** Own xatlas build (#33); measurements on the weak devices (#35). The Iris Xe laptop and the Pixel 9 cover the low end and the development PC the middle and the high end (PM decision, 2026-09-20: no Steam Deck, no further phone). Still owed on the laptop: a large mini with a 2K texture.
 
 ## Exit criteria
 

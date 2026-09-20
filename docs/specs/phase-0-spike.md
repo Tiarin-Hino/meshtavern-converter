@@ -33,12 +33,12 @@ All three questions are answered with yes, on real devices.
 | What leaves the uploader's device | Table and far level only; the close-up level stays local (ADR-0001, revision 2, private repo)                                                                                                                                                                | PM                              |
 | Dependencies                      | meshoptimizer stays. `xatlas-wasm` is replaced by our own build before release (#33). `ktx2-encoder` is reviewed with #38                                                                                                                                    | PM                              |
 
-**Next:** Phase 1, the public converter, is epic #40 with stories #41–#47; the release blockers #33, #35 and #38 belong to it.
+**Next:** Phase 1, the converter at product quality, is epic #40; its spec is [phase-1-converter.md](phase-1-converter.md). The release blockers #33, #35 and #38 belong to it. The converter is not published in Phase 1 (PM decision, 2026-09-20), so publishing (#47) waits outside the epic.
 
 **What Phase 0 did not answer**, carried into Phase 1 and the release blockers:
 
 - The corpus is five minis, all clean. Supported, non-manifold and multi-part files, files in inches or metres, and minis that need scaling to a base size are untested.
-- Unwrapping a large detailed mini on weak hardware; a mid-range phone; a session long enough to show thermal throttling (#35).
+- Unwrapping a large detailed mini on weak hardware; a session long enough to show thermal throttling (#35). A mid-range phone and the Steam Deck were dropped by the PM on 2026-09-20.
 - Download size of baked minis: texture files are still without Zstandard supercompression, and encoding runs on the page instead of in the worker (#38).
 - Large tables are bound by draw calls on a phone (one per mini). Merging or instancing belongs to the table application, not the converter.
 
@@ -260,7 +260,7 @@ Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of m
 | 100 minis, all 50k         | 5.0 M               | 165 fps (display cap) | 384 fps    | 2.4 ms        |
 | 400 minis, all 50k         | 19.4 M              | 113 fps               | 126 fps    | 7.6 ms        |
 
-Exit criterion 3 is **not met yet**: it needs the same measurement on an integrated GPU. Reproduce with `npm run build && node scripts/measure-stress.mjs`, or by hand with the "100 minis" button.
+Exit criterion 3 was **not met by this measurement**: it needed the same on an integrated GPU, which followed under "Measurements on other devices" below and met it. Reproduce with `npm run build && node scripts/measure-stress.mjs`, or by hand with the "100 minis" button.
 
 ### Measurements on other devices (issue #35, 2026-09-20)
 
@@ -291,7 +291,7 @@ Taken by the PM with the "Benchmark this device" panel, served over the local ne
 
 What this settles: **baked minis at release are viable** on an integrated GPU and on a flagship phone. The target scene of 100 minis runs at the display rate with room to spare, compressed textures work on a mobile GPU (three.js transcodes the same file to a format the Mali supports), and a ten-second conversion including textures is acceptable for a one-off. Baking halves the laptop's headroom (200 instead of 400 table-level minis at 60 fps), and a phone collapses once textures pass about 1 GB, which is what the texture budget with its per-vertex fallback is for.
 
-Still owed: the Steam Deck; a large detailed mini with a 2K texture on the weak devices (unwrap time above all); a mid-range phone; a session long enough to show thermal throttling.
+Still owed: a large detailed mini with a 2K texture on the laptop (unwrap time above all); a session long enough to show thermal throttling. Dropped by the PM on 2026-09-20: the Steam Deck and a mid-range phone. The laptop and the Pixel 9 cover the low end, the development PC the middle and the high end.
 
 ## Reference hardware
 
@@ -303,10 +303,11 @@ Still owed: the Steam Deck; a large detailed mini with a 2K texture on the weak 
 
 This machine has a discrete GPU and no integrated one (the 11700F has none), and far more RAM than a typical user. Numbers measured here are an upper bound: they can prove something is too slow, but not that it is fast enough.
 
-**Secondary devices (named by the PM on 2026-09-20; exact models come from the benchmark output):**
+**Secondary devices (named by the PM on 2026-09-20; models from the benchmark output). Together they are the low end; the primary machine stands for the middle and the high end:**
 
-- an Ubuntu laptop with an integrated GPU: the reference for exit criteria 1 and 3
-- a Steam Deck (AMD APU, 16 GB shared memory, Linux): a handheld with a mid-range integrated GPU
-- a phone: expected to play, not to convert; the light benchmark shows how far it gets
+- an Ubuntu laptop with an Intel Iris Xe integrated GPU (Alder Lake GT2, Mesa, 12 threads), Chrome 149: the reference for exit criteria 1 and 3
+- a Pixel 9 phone (Mali-G715), Chrome 153: expected to play, not to convert; it turned out to convert as fast as the desktop
+
+A Steam Deck was on this list and was dropped by the PM on 2026-09-20 without being measured.
 
 Criteria 1 and 3 are only met when measured on the laptop. How to measure: `npm run lan` on the development PC, open the address it prints on the device (same network), open "Benchmark this device", run it, and paste the result into issue #35. Add `?bake=auto&ktx=0` to the address for the baked variant.
