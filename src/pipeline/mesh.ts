@@ -4,6 +4,39 @@ export interface IndexedMesh {
   positions: Float32Array;
   /** Three vertex indices per triangle. */
   indices: Uint32Array;
+  /** Unit normal per vertex. Optional: consumers derive normals from the faces when absent. */
+  normals?: Float32Array;
+}
+
+/** Area-weighted vertex normals, the same rule three.js uses. */
+export function computeVertexNormals({ positions, indices }: IndexedMesh): Float32Array {
+  const normals = new Float32Array(positions.length);
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t]! * 3;
+    const b = indices[t + 1]! * 3;
+    const c = indices[t + 2]! * 3;
+    const ux = positions[b]! - positions[a]!;
+    const uy = positions[b + 1]! - positions[a + 1]!;
+    const uz = positions[b + 2]! - positions[a + 2]!;
+    const vx = positions[c]! - positions[a]!;
+    const vy = positions[c + 1]! - positions[a + 1]!;
+    const vz = positions[c + 2]! - positions[a + 2]!;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    for (const corner of [a, b, c]) {
+      normals[corner] = normals[corner]! + nx;
+      normals[corner + 1] = normals[corner + 1]! + ny;
+      normals[corner + 2] = normals[corner + 2]! + nz;
+    }
+  }
+  for (let i = 0; i < normals.length; i += 3) {
+    const length = Math.hypot(normals[i]!, normals[i + 1]!, normals[i + 2]!) || 1;
+    normals[i] = normals[i]! / length;
+    normals[i + 1] = normals[i + 1]! / length;
+    normals[i + 2] = normals[i + 2]! / length;
+  }
+  return normals;
 }
 
 export interface WeldResult {

@@ -180,7 +180,8 @@ export class Viewer {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    geometry.computeVertexNormals();
+    if (mesh.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
+    else geometry.computeVertexNormals();
     return geometry;
   }
 

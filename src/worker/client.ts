@@ -26,9 +26,10 @@ export class Converter {
     stl: ArrayBuffer,
     onProgress: (progress: Progress) => void,
     up?: UpAxis,
+    sourceNormals = true,
   ): Promise<ConversionResult> {
     const id = this.nextId++;
-    const request: WorkerRequest = { type: 'convert', id, stl, up };
+    const request: WorkerRequest = { type: 'convert', id, stl, up, sourceNormals };
     return new Promise((resolve, reject) => {
       this.jobs.set(id, { onProgress, resolve, reject });
       this.worker.postMessage(request, [stl]);

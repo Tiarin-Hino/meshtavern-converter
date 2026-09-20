@@ -21,6 +21,12 @@ const TARGET_ERROR = 1;
  */
 const FLAGS: SimplifierFlags[] = ['Prune'];
 
+/**
+ * How strongly the simplifier protects places where the surface direction changes
+ * (creases, folds, facial features) when the mesh carries normals.
+ */
+const NORMAL_WEIGHT = 0.5;
+
 export interface Lod {
   mesh: IndexedMesh;
   targetTriangles: number;
@@ -33,17 +39,24 @@ export interface Lod {
 export const simplifierReady = (): Promise<void> => MeshoptSimplifier.ready;
 
 /** Drops vertices no triangle uses and renumbers the indices. */
-function compact(positions: Float32Array, indices: Uint32Array): IndexedMesh {
+function compact(source: IndexedMesh, indices: Uint32Array): IndexedMesh {
+  const { positions, normals } = source;
   const [remap, vertexCount] = MeshoptSimplifier.compactMesh(indices);
   const compacted = new Float32Array(vertexCount * 3);
+  const compactedNormals = normals ? new Float32Array(vertexCount * 3) : undefined;
   for (let old = 0; old < remap.length; old++) {
     const target = remap[old]!;
     if (target === 0xffffffff) continue;
     compacted[target * 3] = positions[old * 3]!;
     compacted[target * 3 + 1] = positions[old * 3 + 1]!;
     compacted[target * 3 + 2] = positions[old * 3 + 2]!;
+    if (normals && compactedNormals) {
+      compactedNormals[target * 3] = normals[old * 3]!;
+      compactedNormals[target * 3 + 1] = normals[old * 3 + 1]!;
+      compactedNormals[target * 3 + 2] = normals[old * 3 + 2]!;
+    }
   }
-  return { positions: compacted, indices };
+  return { positions: compacted, indices, normals: compactedNormals };
 }
 
 /**
@@ -54,22 +67,35 @@ export function simplifyToBudget(mesh: IndexedMesh, targetTriangles: number): Lo
   const sourceTriangles = mesh.indices.length / 3;
   if (sourceTriangles <= targetTriangles) {
     return {
-      mesh: compact(mesh.positions, mesh.indices.slice()),
+      mesh: compact(mesh, mesh.indices.slice()),
       targetTriangles,
       triangles: sourceTriangles,
       errorMm: 0,
     };
   }
-  const [indices, relativeError] = MeshoptSimplifier.simplify(
-    mesh.indices,
-    mesh.positions,
-    3,
-    targetTriangles * 3,
-    TARGET_ERROR,
-    FLAGS,
-  );
+  const [indices, relativeError] = mesh.normals
+    ? MeshoptSimplifier.simplifyWithAttributes(
+        mesh.indices,
+        mesh.positions,
+        3,
+        mesh.normals,
+        3,
+        [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT],
+        null,
+        targetTriangles * 3,
+        TARGET_ERROR,
+        FLAGS,
+      )
+    : MeshoptSimplifier.simplify(
+        mesh.indices,
+        mesh.positions,
+        3,
+        targetTriangles * 3,
+        TARGET_ERROR,
+        FLAGS,
+      );
   return {
-    mesh: compact(mesh.positions, indices),
+    mesh: compact(mesh, indices),
     targetTriangles,
     triangles: indices.length / 3,
     errorMm: relativeError * MeshoptSimplifier.getScale(mesh.positions, 3),

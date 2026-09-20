@@ -197,6 +197,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
         status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%`;
       },
       up,
+      !new URLSearchParams(location.search).has('facenormals'),
     );
     stopWatching();
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];

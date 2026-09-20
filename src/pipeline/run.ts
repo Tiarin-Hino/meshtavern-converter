@@ -1,5 +1,5 @@
 import type { IndexedMesh } from './mesh';
-import { weldVertices } from './mesh';
+import { computeVertexNormals, weldVertices } from './mesh';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { buildLods, simplifierReady, type Lod } from './simplify';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
@@ -68,6 +68,8 @@ export async function runPipeline(
   onProgress: (progress: Progress) => void = () => {},
   /** Overrides up-axis detection, for when the guess is wrong. */
   forcedUp: UpAxis | null = null,
+  /** Experiment switch: carry the source normals through the LODs. */
+  sourceNormals = true,
 ): Promise<ConversionResult> {
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
@@ -111,7 +113,10 @@ export async function runPipeline(
   );
   const lods = run(
     'simplify',
-    () => buildLods(placed.mesh),
+    () => {
+      if (sourceNormals) placed.mesh.normals = computeVertexNormals(placed.mesh);
+      return buildLods(placed.mesh);
+    },
     // The simplifier copies the mesh into WebAssembly memory while it works.
     (l) => meshBytes(placed.mesh) * 2 + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
   );

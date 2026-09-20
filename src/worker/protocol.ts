@@ -2,7 +2,13 @@ import type { UpAxis } from '../pipeline/orient';
 import type { ConversionResult, Progress } from '../pipeline/run';
 
 /** Messages between the page and the conversion worker. Every job carries an id so replies can be matched. */
-export type WorkerRequest = { type: 'convert'; id: number; stl: ArrayBuffer; up?: UpAxis };
+export type WorkerRequest = {
+  type: 'convert';
+  id: number;
+  stl: ArrayBuffer;
+  up?: UpAxis;
+  sourceNormals?: boolean;
+};
 
 export type WorkerResponse =
   | { type: 'progress'; id: number; progress: Progress }
