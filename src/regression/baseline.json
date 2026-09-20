@@ -1,0 +1,238 @@
+{
+  "sheet": {
+    "sourceTriangles": 45000,
+    "triangles": 45000,
+    "vertices": 22801,
+    "degenerateTriangles": 0,
+    "sizeMm": [50, 50, 3.99939],
+    "up": "+y",
+    "upMethod": "tallest",
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "source",
+        "triangles": 45000,
+        "vertices": 22801,
+        "errorMm": 0,
+        "glbBytes": 1001048,
+        "compactGlbBytes": 273296
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 18317,
+        "vertices": 9320,
+        "errorMm": 0.0488843,
+        "glbBytes": 409552,
+        "compactGlbBytes": 135116
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 4209,
+        "vertices": 2174,
+        "errorMm": 0.199369,
+        "glbBytes": 96224,
+        "compactGlbBytes": 35916
+      }
+    ]
+  },
+  "figure": {
+    "sourceTriangles": 114480,
+    "triangles": 114480,
+    "vertices": 57250,
+    "degenerateTriangles": 0,
+    "sizeMm": [25, 32.2337, 25],
+    "up": "+z",
+    "upMethod": "base",
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54600,
+        "vertices": 27310,
+        "errorMm": 0.0199218,
+        "glbBytes": 1202972,
+        "compactGlbBytes": 393640
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 35012,
+        "vertices": 17516,
+        "errorMm": 0.0499884,
+        "glbBytes": 772032,
+        "compactGlbBytes": 259716
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5300,
+        "vertices": 2660,
+        "errorMm": 0.197598,
+        "glbBytes": 118368,
+        "compactGlbBytes": 43384
+      }
+    ],
+    "baked": {
+      "resolution": 512,
+      "vertices": 29557,
+      "charts": 1593,
+      "utilisation": 0.829618,
+      "coverage": 0.443756,
+      "fallback": 0
+    }
+  },
+  "figure-y-up": {
+    "sourceTriangles": 114480,
+    "triangles": 114480,
+    "vertices": 57250,
+    "degenerateTriangles": 0,
+    "sizeMm": [25, 32.2337, 25],
+    "up": "+y",
+    "upMethod": "base",
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54600,
+        "vertices": 27310,
+        "errorMm": 0.0199218,
+        "glbBytes": 1202980,
+        "compactGlbBytes": 393652
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 35012,
+        "vertices": 17516,
+        "errorMm": 0.0499884,
+        "glbBytes": 772040,
+        "compactGlbBytes": 259728
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5300,
+        "vertices": 2660,
+        "errorMm": 0.197598,
+        "glbBytes": 118380,
+        "compactGlbBytes": 43396
+      }
+    ]
+  },
+  "figure-no-base": {
+    "sourceTriangles": 99600,
+    "triangles": 99600,
+    "vertices": 49808,
+    "degenerateTriangles": 0,
+    "sizeMm": [16.2986, 30.63, 8.34041],
+    "up": "+z",
+    "upMethod": "tallest",
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54314,
+        "vertices": 27165,
+        "errorMm": 0.0198604,
+        "glbBytes": 1196652,
+        "compactGlbBytes": 394536
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 34918,
+        "vertices": 17467,
+        "errorMm": 0.0497701,
+        "glbBytes": 769936,
+        "compactGlbBytes": 259820
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5172,
+        "vertices": 2594,
+        "errorMm": 0.199326,
+        "glbBytes": 115532,
+        "compactGlbBytes": 42564
+      }
+    ]
+  },
+  "swarm": {
+    "sourceTriangles": 97824,
+    "triangles": 97824,
+    "vertices": 48938,
+    "degenerateTriangles": 0,
+    "sizeMm": [50, 14.437, 50],
+    "up": "+z",
+    "upMethod": "base",
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 81764,
+        "vertices": 40908,
+        "errorMm": 0.0199609,
+        "glbBytes": 1801084,
+        "compactGlbBytes": 584296
+      },
+      {
+        "name": "table",
+        "decidedBy": "cap",
+        "triangles": 60000,
+        "vertices": 30026,
+        "errorMm": 0.0821843,
+        "glbBytes": 1322292,
+        "compactGlbBytes": 442804
+      },
+      {
+        "name": "far",
+        "decidedBy": "cap",
+        "triangles": 20000,
+        "vertices": 10026,
+        "errorMm": 0.244077,
+        "glbBytes": 442304,
+        "compactGlbBytes": 152800
+      }
+    ]
+  },
+  "boulder": {
+    "sourceTriangles": 97200,
+    "triangles": 97200,
+    "vertices": 48602,
+    "degenerateTriangles": 0,
+    "sizeMm": [40, 28, 18],
+    "up": "+y",
+    "upMethod": "tallest",
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "floor",
+        "triangles": 50000,
+        "vertices": 25002,
+        "errorMm": 0.00299005,
+        "glbBytes": 1101452,
+        "compactGlbBytes": 233024
+      },
+      {
+        "name": "table",
+        "decidedBy": "floor",
+        "triangles": 15000,
+        "vertices": 7502,
+        "errorMm": 0.0117924,
+        "glbBytes": 331500,
+        "compactGlbBytes": 77360
+      },
+      {
+        "name": "far",
+        "decidedBy": "floor",
+        "triangles": 4000,
+        "vertices": 2002,
+        "errorMm": 0.0410684,
+        "glbBytes": 89544,
+        "compactGlbBytes": 25176
+      }
+    ]
+  }
+}
