@@ -75,7 +75,7 @@ try {
 
     const ms = (step) => Math.round(stats.timings.find((t) => t.step === step).ms);
     console.log(
-      `| ${name} | ${stats.lods[1].triangles.toLocaleString()} | ${baked.charts.toLocaleString()} | ${stats.lods[1].vertices.toLocaleString()} → ${baked.vertices.toLocaleString()} | ${(ms('unwrap') / 1000).toFixed(1)} s | ${(ms('bake') / 1000).toFixed(1)} s | ${(baked.coverage * 100).toFixed(0)} % | ${(baked.fallback * 100).toFixed(1)} % | ${(stats.totalMs / 1000).toFixed(1)} s | ${Math.round(stats.peakBufferBytes / 1048576)} MB |`,
+      `| ${name} | ${stats.lods[1].triangles.toLocaleString()} | ${baked.charts.toLocaleString()} | ${stats.lods[1].vertices.toLocaleString()} → ${baked.vertices.toLocaleString()} | ${(ms('unwrap') / 1000).toFixed(1)} s | ${(ms('bake') / 1000).toFixed(1)} s | ${(baked.coverage * 100).toFixed(0)} % | ${(baked.fallback * 100).toFixed(1)} % | BVH ${Math.round(baked.bvhBuildMs)} ms, ${Math.round(baked.bvhBytes / 1048576)} MB | ${(stats.totalMs / 1000).toFixed(1)} s | ${Math.round(stats.peakBufferBytes / 1048576)} MB |`,
     );
   }
 } finally {

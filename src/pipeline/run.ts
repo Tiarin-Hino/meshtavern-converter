@@ -20,6 +20,8 @@ export interface Progress {
   step: StepName;
   /** Share of steps already finished, 0–100. */
   percent: number;
+  /** For long steps that can tell: how far this step itself is, 0–100. */
+  stepPercent?: number;
 }
 
 export interface StepTiming {
@@ -159,7 +161,10 @@ export async function runPipeline(
     // xatlas is asynchronous to load, so this step is timed by hand.
     onProgress({ step: 'unwrap', percent: Math.round((timings.length / stepCount) * 100) });
     const start = performance.now();
-    const unwrapped = await unwrap(lods[BAKED_LEVEL]!.mesh, bakeResolution);
+    const overall = Math.round((timings.length / stepCount) * 100);
+    const unwrapped = await unwrap(lods[BAKED_LEVEL]!.mesh, bakeResolution, (stepPercent) =>
+      onProgress({ step: 'unwrap', percent: overall, stepPercent }),
+    );
     timings.push({ step: 'unwrap', ms: performance.now() - start });
     const maps = run(
       'bake',
