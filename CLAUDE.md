@@ -11,6 +11,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `npm run dev` — dev server
 - `npm run check` — format check, lint, typecheck, unit tests, build (run before every commit)
 - `npm run e2e` — Playwright smoke tests (builds first)
+- `npm run lan` — builds and serves on the local network, for the device benchmark (issue #35)
 - `npm run bench` — pipeline benchmark on a generated 2M-triangle mesh
 - `npm run format` — Prettier
 
@@ -21,6 +22,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `src/pipeline/glb.ts` writes a level as a GLB file, plain or compressed (quantised + meshopt). Vertex data stays in mm; the node scale converts to glTF metres. Tests run the Khronos validator on both variants.
 - `src/pipeline/unwrap.ts` and `bake.ts` — spike (issue #10), off unless the address has `?bake=<size>`: xatlas texture coordinates for the table level and detail maps baked from the sculpt. The PM decided baked maps ship at release; issues #29–#31 are the blockers.
 - `src/pipeline/bake-policy.ts` picks the detail texture size from the surface area. `src/baked-material.ts` draws a baked mini from one packed texture (normal + cavity) and computes the look in the shader; its GLSL must stay in step with `pointColour` in `look.ts`. `src/compressed-texture.ts` (spike, `?ktx=0..3`) encodes that texture to KTX2.
+- `src/benchmark.ts` — the "Benchmark this device" panel: converts a generated mesh, runs three table scenes, returns Markdown. Hook `runBenchmark(size)`; `?settle=1` shortens the scenes for tests.
 - `src/pipeline/bvh.ts` — closest-point-on-surface queries over a mesh's triangles; the bake uses it to sample the sculpt.
 - `src/pipeline/run.ts` — runs the steps in order with timings and memory figures. New steps are added there.
 - `src/worker/` — Web Worker around the pipeline: `protocol.ts` (messages), `handle.ts` (testable logic), `convert.worker.ts` (glue), `client.ts` (page side). The page never runs pipeline steps itself.

@@ -6,6 +6,7 @@ import type { IndexedMesh } from './pipeline/mesh';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
 import type { Baked, ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
+import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { encodeDetail, transcodeDetail } from './compressed-texture';
 import { Viewer, type Perf } from './viewer';
 import { Converter } from './worker/client';
@@ -66,6 +67,8 @@ declare global {
       setLook: (changes: Partial<Look>) => void;
       /** Shows the table level with baked maps (true) or with per-vertex data (false). */
       showBaked: (on: boolean) => void;
+      /** Runs the device benchmark and resolves with its Markdown result. */
+      runBenchmark: (size: BenchmarkSize) => Promise<string>;
       /** Encodes a level (1 = close, 2 = table, 3 = far) with the current look. */
       exportGlb: (level: number, compact: boolean) => Promise<ArrayBuffer>;
       /** Opens a GLB in the viewer, as dropping the file would. */
@@ -498,6 +501,7 @@ window.__mt = {
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
   setLook,
   showBaked,
+  runBenchmark: benchmark,
   exportGlb,
   loadGlb,
   startStress,
@@ -509,4 +513,36 @@ window.__mt = {
   },
   stopStress: () => showLevel(0, true),
 };
+const benchResult = document.querySelector<HTMLTextAreaElement>('#bench-result')!;
+const benchCopy = document.querySelector<HTMLButtonElement>('#bench-copy')!;
+const benchButtons = (['light', 'full'] as BenchmarkSize[]).map(
+  (size) => [size, document.querySelector<HTMLButtonElement>(`#bench-${size}`)!] as const,
+);
+async function benchmark(size: BenchmarkSize): Promise<string> {
+  benchResult.value = '';
+  for (const [, button] of benchButtons) button.disabled = true;
+  benchCopy.disabled = true;
+  try {
+    return await runBenchmark(size, (line) => {
+      benchResult.value += `${line}\n`;
+      benchResult.scrollTop = benchResult.scrollHeight;
+    });
+  } catch (error) {
+    const message = `Benchmark failed: ${error instanceof Error ? error.message : String(error)}`;
+    benchResult.value += `\n${message}\n`;
+    return message;
+  } finally {
+    for (const [, button] of benchButtons) button.disabled = false;
+    benchCopy.disabled = false;
+  }
+}
+for (const [size, button] of benchButtons) {
+  button.addEventListener('click', () => void benchmark(size));
+}
+benchCopy.addEventListener('click', () => {
+  // The clipboard API needs a secure origin; over plain http on a LAN, select the text instead.
+  if (navigator.clipboard) void navigator.clipboard.writeText(benchResult.value);
+  benchResult.select();
+});
+
 state.ready = true;

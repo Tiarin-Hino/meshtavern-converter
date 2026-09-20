@@ -40,6 +40,17 @@
       <p id="perf"></p>
     </header>
     <canvas id="viewport"></canvas>
+    <details id="bench">
+      <summary>Benchmark this device</summary>
+      <p>
+        Converts a generated mesh (or uses the mini you loaded) and runs three table scenes, about
+        40 seconds. Nothing is uploaded. Paste the result into the measurements issue.
+      </p>
+      <button id="bench-light" type="button">Run, light (phones)</button>
+      <button id="bench-full" type="button">Run, full (100 MB mesh)</button>
+      <button id="bench-copy" type="button" disabled>Copy result</button>
+      <textarea id="bench-result" readonly rows="12" aria-label="Benchmark result"></textarea>
+    </details>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

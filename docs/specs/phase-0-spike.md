@@ -242,4 +242,10 @@ Exit criterion 3 is **not met yet**: it needs the same measurement on an integra
 
 This machine has a discrete GPU and no integrated one (the 11700F has none), and far more RAM than a typical user. Numbers measured here are an upper bound: they can prove something is too slow, but not that it is fast enough.
 
-**Secondary (needed for exit criteria 1 and 3): to be named.** A laptop with an integrated GPU and 8–16 GB RAM, for example a team member's. Criteria 1 and 3 are only met when measured on this device.
+**Secondary devices (named by the PM on 2026-09-20; exact models come from the benchmark output):**
+
+- an Ubuntu laptop with an integrated GPU: the reference for exit criteria 1 and 3
+- a Steam Deck (AMD APU, 16 GB shared memory, Linux): a handheld with a mid-range integrated GPU
+- a phone: expected to play, not to convert; the light benchmark shows how far it gets
+
+Criteria 1 and 3 are only met when measured on the laptop. How to measure: `npm run lan` on the development PC, open the address it prints on the device (same network), open "Benchmark this device", run it, and paste the result into issue #35. Add `?bake=auto&ktx=0` to the address for the baked variant.

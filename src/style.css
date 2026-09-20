@@ -13,7 +13,7 @@ body {
 
 body {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
 }
 
 header {
@@ -138,4 +138,49 @@ h1 {
 
 [hidden] {
   display: none !important;
+}
+
+#bench {
+  padding: 8px 16px;
+  border-top: 1px solid #2c3038;
+  font-size: 0.85rem;
+}
+
+#bench summary {
+  cursor: pointer;
+  color: #a9afb8;
+}
+
+#bench p {
+  margin: 8px 0;
+  max-width: 70ch;
+}
+
+#bench button {
+  margin: 0 6px 8px 0;
+  padding: 4px 10px;
+  border: 1px solid #3a3f49;
+  border-radius: 4px;
+  background: #252830;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#bench button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#bench textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  background: #14161a;
+  color: inherit;
+  border: 1px solid #2c3038;
+  border-radius: 4px;
+  font:
+    0.8rem ui-monospace,
+    monospace;
 }

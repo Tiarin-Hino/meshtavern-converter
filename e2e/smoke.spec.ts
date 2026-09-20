@@ -173,3 +173,18 @@ test('spike: unwraps the table level and shows it with baked maps when asked to'
     contentType: 'image/png',
   });
 });
+
+test('runs the device benchmark and offers the result as text', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/?settle=1');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await page.getByText('Benchmark this device').click();
+
+  // The buttons run the light and full sizes, too heavy for a software renderer; the hook runs a tiny one.
+  const result = await page.evaluate(() => window.__mt.runBenchmark('tiny'));
+  expect(result).toContain('**GPU:**');
+  expect(result).toContain('| Source triangles | 7,200 |');
+  expect(result).toContain('| 400 minis, detail by distance |');
+  await expect(page.locator('#bench-result')).toHaveValue(/100 minis, all at table level/);
+  await expect(page.getByRole('button', { name: 'Copy result' })).toBeEnabled();
+});
