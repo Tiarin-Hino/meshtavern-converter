@@ -10,13 +10,20 @@ export interface IndexedMesh {
   cavity?: Float32Array;
   /** Openness per vertex, 0 (buried) to 1 (open). See shade.ts. */
   occlusion?: Float32Array;
+  /** Texture coordinates per vertex, 0..1, two numbers each. See unwrap.ts. */
+  uvs?: Float32Array;
 }
 
 /** Every buffer of a mesh, for handing it between threads without copying. */
 export function meshBuffers(mesh: IndexedMesh): ArrayBufferLike[] {
-  return [mesh.positions, mesh.indices, mesh.normals, mesh.cavity, mesh.occlusion].flatMap(
-    (array) => (array ? [array.buffer] : []),
-  );
+  return [
+    mesh.positions,
+    mesh.indices,
+    mesh.normals,
+    mesh.cavity,
+    mesh.occlusion,
+    mesh.uvs,
+  ].flatMap((array) => (array ? [array.buffer] : []));
 }
 
 /** Area-weighted vertex normals, the same rule three.js uses. */

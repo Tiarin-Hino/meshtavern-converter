@@ -102,6 +102,42 @@ Variant A from the pipeline list, done without textures. Two numbers are measure
 
 The shade step costs 0.16–0.86 s on the corpus minis (25k–100k vertices) on the primary reference machine. Defaults: shadows 0.75, wash 0.6, edges 0.45, base coat #9aa0a8. Visual call: PM.
 
+### Unwrap and baked detail maps (issue #10, spike, 2026-09-20)
+
+Variant B from the pipeline list: give the table level texture coordinates with xatlas (WebAssembly, in the worker), then bake the full sculpt's normals and fine creases into textures. Switched on with `?bake=2048` in the address; off by default.
+
+**It works.** Measured in Chrome 153 on the primary reference machine, 2K maps:
+
+| Mini                  | Table triangles | UV islands | Vertices (before → after) | Unwrap  | Bake  | Whole conversion |
+| --------------------- | --------------- | ---------- | ------------------------- | ------- | ----- | ---------------- |
+| M-001a                | 22,632          | 1,223      | 11,260 → 19,982           | 3.7 s   | 4.4 s | 11.8 s           |
+| MINI-001              | 32,054          | 1,029      | 15,999 → 25,476           | 4.5 s   | 4.0 s | 10.4 s           |
+| Detailed 48 mm figure | 49,636          | 3,513      | 24,775 → 46,509           | 23.2 s  | 5.7 s | 36.0 s           |
+| Large detailed giant  | 59,974          | 6,952      | 29,794 → 64,307           | 132.0 s | 5.6 s | 143.0 s          |
+
+At 1K the bake drops to 1.6–1.9 s; the unwrap time does not change. About half of the texture is covered by islands; for under 2 % of covered texels no sculpt vertex was close enough and the reduced mesh's own normal was used.
+
+**What it buys, by eye:**
+
+- At table distance: nothing visible over variant A (per-vertex look).
+- Very close, on a smooth sculpt (M-001a): clearly better. Wrinkles and eyelids of the original come back on a 23k-triangle mesh.
+- Very close, on a dense detailed sculpt (the giant's beard): **worse** than variant A. The bake takes the nearest sculpt vertices; where strands lie close together and the sculpt's own vertex spacing is no finer than the texels, that gives a blotchy, noisy surface. Fixing it needs true closest-point-on-triangle or ray-cast sampling with a BVH.
+
+**What it costs:**
+
+- Time: unwrapping grows steeply with triangle count and detail, from 3 s to over 2 minutes on a fast desktop. It is xatlas's chart computation; packing and baking are minor.
+- GPU memory: a 2K normal map plus a 2K colour map with mipmaps is about 43 MB per mini; at 1K about 11 MB. The per-vertex look costs 1–2 MB. One hundred baked minis would need 1–4 GB, which integrated GPUs do not have. GPU texture compression (KTX2) would cut that by 6–8 times but needs a heavy encoder in the browser.
+- Vertices roughly double, because every UV island border splits them.
+- Object-space normal maps are not part of glTF; exporting them needs a tangent-space conversion.
+- New dependency: `xatlas-wasm` 0.1.3, pinned. It is a young single-maintainer package. Its bundle makes no network calls, and it is loaded only when baking is requested. Building xatlas from source ourselves is the clean path if this goes to production.
+
+**Recommendation: no-go for baked normal maps at release; conditional go for unwrapping when painting is built.**
+
+- Ship variant A. The error-driven levels with carried normals already look right at the distances a table is played at, which is where baked maps add nothing.
+- Painting is the real reason to unwrap: per-vertex paint on a table-level mesh has a "brush" of about 0.5 mm, too coarse for eyes and trim, while a 1K colour texture gives 0.07 mm. That needs the unwrap and one colour texture (about 5 MB), but no normal map.
+- So unwrap **on demand, when a user first paints a mini**, not at upload; show progress; accept seconds to minutes once per painted mini. Before building that, test cheaper unwrap settings on large minis.
+- Revisit baked normal maps only together with a BVH-based bake and compressed textures.
+
 ### GLB export (issue #11, 2026-09-20)
 
 One GLB per level, in two variants. **Plain**: float data, no extensions, opens everywhere including Blender. **Compressed**: 16-bit positions and 8-bit normals (KHR_mesh_quantization) packed with EXT_meshopt_compression; about a third of the plain size; needs a loader with meshopt support (three.js, Babylon.js, Godot 4; not Blender). Both pass the Khronos glTF validator with zero errors in the unit tests, carry the look as COLOR_0, and carry the raw shading data as `_SHADING` so an application can re-tint a mini later. Vertex data stays in mm; the node scale converts to glTF metres.
