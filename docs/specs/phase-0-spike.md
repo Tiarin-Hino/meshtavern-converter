@@ -167,6 +167,44 @@ Assessed, not built:
 
 Still open under #31: the measurement on the weak reference device, and the dependency decision. Recommendation: keep the pinned `xatlas-wasm` package during development and build xatlas from source before the first public release.
 
+### Texture memory for baked minis (issue #30, spike, 2026-09-20)
+
+**Where the memory went, and what was done.** The first version kept two RGBA textures per baked mini: a normal map and a colour map holding the look. Three changes:
+
+1. **One packed texture.** The sculpt's normal goes in RGB and its fine cavity in alpha; the coarse occlusion stays on the vertices. The look is computed in the fragment shader from those, so there is no colour texture at all, and changing the look is two uniforms shared by every mini. Half the memory, and the Look panel costs nothing.
+2. **Size by surface area** (`bake-policy.ts`, `?bake=auto`). The texture gets just enough texels to reach 0.1 mm on the surface: 512, 1024 or 2048. On the corpus that is 1K for the four ordinary minis (1,900–4,200 mm²) and 2K for the giant (16,100 mm²).
+3. **GPU-compressed textures** (`?ktx=0..3`). The texture is encoded to KTX2 with UASTC in the browser and transcoded by three.js to the GPU's block format (BC7 on desktops): 1 byte per texel instead of 4. By eye there is no difference, also at the closest view.
+
+GPU memory per baked mini, with mipmaps:
+
+| Texture size | First version (two maps) | Packed  | Packed and compressed |
+| ------------ | ------------------------ | ------- | --------------------- |
+| 512          | 2.7 MB                   | 1.3 MB  | 0.3 MB                |
+| 1024         | 10.7 MB                  | 5.3 MB  | 1.3 MB                |
+| 2048         | 42.7 MB                  | 21.3 MB | 5.3 MB                |
+
+One hundred ordinary minis at 1K, packed and compressed: **133 MB**, against 1.1 GB for the first version.
+
+**Cost of compressing**, Chrome 153, primary reference machine, on the page's main thread:
+
+| Texture | UASTC effort 0             | Effort 1     | Effort 2     |
+| ------- | -------------------------- | ------------ | ------------ |
+| 1K      | 1.4–2.3 s, 1.1 MB file     | 4.0 s        | 15.1 s       |
+| 2K      | 5.7–6.3 s, 3.6–4.9 MB file | not measured | not measured |
+
+Effort 0 shows no visible loss, so that is the setting. The encoder is 3.3 MB of WebAssembly, loaded on first use only. File sizes are without KTX2's own Zstandard compression, which is the next thing to switch on for downloads.
+
+**Frame rate** is not the problem on this GPU. 100 baked minis at the table level: 1,081 fps with the cap lifted, against 1,734 with the per-vertex look; 400 baked minis with LOD by distance: 365 fps. The numbers at this level are noisy; what they show is that texturing costs little. Whether an integrated GPU agrees is part of #35.
+
+**Fallback.** The stress scene takes a texture budget: minis are baked until the budget is used up, the rest use the per-vertex look (with 128 MB and compressed 1K textures: 96 of 100). In the table application the order should be nearest-first, and the budget should come from the device, not a constant.
+
+**Recommendation**
+
+- Table level: packed detail texture, size by surface area, compressed at UASTC effort 0. Far level: per-vertex look, no texture.
+- A texture budget per device with the per-vertex look as the fallback. Starting value to test on the weak device: 256 MB.
+- Encode in the worker, not on the page, before this leaves the spike stage; add Zstandard supercompression and measure the download size.
+- Painting adds one colour texture per _painted_ mini (1K compressed: another 1.3 MB). Unpainted minis never need one.
+
 ### GLB export (issue #11, 2026-09-20)
 
 One GLB per level, in two variants. **Plain**: float data, no extensions, opens everywhere including Blender. **Compressed**: 16-bit positions and 8-bit normals (KHR_mesh_quantization) packed with EXT_meshopt_compression; about a third of the plain size; needs a loader with meshopt support (three.js, Babylon.js, Godot 4; not Blender). Both pass the Khronos glTF validator with zero errors in the unit tests, carry the look as COLOR_0, and carry the raw shading data as `_SHADING` so an application can re-tint a mini later. Vertex data stays in mm; the node scale converts to glTF metres.

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { bake, type BakedMaps } from './bake';
 import { generateBumpySheet } from './generate';
-import { DEFAULT_LOOK, textureColours } from './look';
+import { cavityToByte } from './look';
 import { computeVertexNormals, weldVertices, type IndexedMesh } from './mesh';
 import { shade } from './shade';
 import { simplifierReady, simplifyToSpec } from './simplify';
@@ -56,10 +56,10 @@ describe('bake', () => {
     let facing = 0;
     let count = 0;
     for (let texel = 0; texel < RESOLUTION * RESOLUTION; texel++) {
-      const x = (maps.normal[texel * 4]! / 255) * 2 - 1;
-      const y = (maps.normal[texel * 4 + 1]! / 255) * 2 - 1;
-      const z = (maps.normal[texel * 4 + 2]! / 255) * 2 - 1;
-      if (x === -1 && y === -1 && z === -1) continue; // never-filled texel
+      const x = (maps.detail[texel * 4]! / 255) * 2 - 1;
+      const y = (maps.detail[texel * 4 + 1]! / 255) * 2 - 1;
+      const z = (maps.detail[texel * 4 + 2]! / 255) * 2 - 1;
+      // Texels outside every island hold the neutral normal (+z) and count too; that is fine here.
       lengthError = Math.max(lengthError, Math.abs(Math.hypot(x, y, z) - 1));
       facing += z;
       count++;
@@ -72,24 +72,14 @@ describe('bake', () => {
   it('records detail the reduced mesh lost: the normal map varies more than a flat sheet would', () => {
     const xs = new Set<number>();
     for (let texel = 0; texel < RESOLUTION * RESOLUTION; texel += 7)
-      xs.add(maps.normal[texel * 4]!);
+      xs.add(maps.detail[texel * 4]!);
     expect(xs.size).toBeGreaterThan(30);
-    expect(Math.min(...maps.cavity)).toBeLessThan(127);
-    expect(Math.max(...maps.cavity)).toBeGreaterThan(128);
+    const cavities = maps.detail.filter((_, i) => i % 4 === 3);
+    expect(Math.min(...cavities)).toBeLessThan(cavityToByte(0));
+    expect(Math.max(...cavities)).toBeGreaterThan(cavityToByte(0));
   });
 
   it('refuses a mesh without texture coordinates', () => {
     expect(() => bake(sculpt, sculpt, 64)).toThrow();
-  });
-});
-
-describe('textureColours', () => {
-  it('turns the baked maps into an opaque colour texture that reacts to the look', () => {
-    const on = textureColours(maps.occlusion, maps.cavity, DEFAULT_LOOK);
-    const off = textureColours(maps.occlusion, maps.cavity, { ...DEFAULT_LOOK, enabled: false });
-    expect(on.length).toBe(RESOLUTION * RESOLUTION * 4);
-    expect(on[3]).toBe(255);
-    expect(new Set(off.filter((_, i) => i % 4 === 0)).size).toBe(1);
-    expect(new Set(on.filter((_, i) => i % 4 === 0)).size).toBeGreaterThan(5);
   });
 });

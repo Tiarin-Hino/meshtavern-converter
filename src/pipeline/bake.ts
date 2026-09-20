@@ -14,12 +14,12 @@ import { computeCavity } from './shade';
  */
 export interface BakedMaps {
   resolution: number;
-  /** RGBA per texel: object-space normal in RGB as (n + 1) / 2, alpha 255 where baked. */
-  normal: Uint8Array;
-  /** One byte per texel, see `cavityToByte`. */
-  cavity: Uint8Array;
-  /** One byte per texel, 0 (buried) to 255 (open), interpolated from the reduced mesh's vertices. */
-  occlusion: Uint8Array;
+  /**
+   * One RGBA texture: the sculpt's object-space normal in RGB as (n + 1) / 2, and its fine
+   * cavity in alpha (see `cavityToByte`). Everything a baked mini needs on the GPU: the look
+   * is computed from it in the shader, and the coarse occlusion stays on the vertices.
+   */
+  detail: Uint8Array;
   /** Share of texels that lie inside a UV island. */
   coverage: number;
   /** Share of covered texels for which no sculpt surface was found within reach. */
@@ -42,7 +42,7 @@ const SEARCH_MM = 1;
 const DILATION = 4;
 
 /**
- * `reduced` must have normals, occlusion and uvs; `sculpt` must have normals. Both must be
+ * `reduced` must have normals and uvs; `sculpt` must have normals. Both must be
  * in the same coordinate system.
  */
 export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: number): BakedMaps {
@@ -50,9 +50,16 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
     throw new Error('Baking needs an unwrapped mesh with normals and a sculpt with normals');
   }
   const texels = resolution * resolution;
-  const normal = new Uint8Array(texels * 4);
-  const cavity = new Uint8Array(texels).fill(cavityToByte(0));
-  const occlusion = new Uint8Array(texels).fill(255);
+  const detail = new Uint8Array(texels * 4);
+  // Texels outside every island: a neutral normal (+z) and flat cavity.
+  for (let texel = 0; texel < texels; texel++) {
+    detail[texel * 4] = 128;
+    detail[texel * 4 + 1] = 128;
+    detail[texel * 4 + 2] = 255;
+    detail[texel * 4 + 3] = cavityToByte(0);
+  }
+  /** 0 = empty, 1 = written. */
+  const written = new Uint8Array(texels);
 
   const sculptCavity = computeCavity(sculpt, SCULPT_CAVITY_SMOOTHING);
   const bvhStart = performance.now();
@@ -100,8 +107,9 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
         const texel = y * resolution + x;
         const inside = wa >= 0 && wb >= 0 && wc >= 0;
         // A texel already owned by the triangle it truly lies in is not overwritten by a neighbour's slack.
-        if (normal[texel * 4 + 3] === 255 && !inside) continue;
-        if (normal[texel * 4 + 3] === 0) covered++;
+        if (written[texel] === 1 && !inside) continue;
+        if (written[texel] === 0) covered++;
+        written[texel] = 1;
         wa = Math.max(0, wa);
         wb = Math.max(0, wb);
         wc = Math.max(0, wc);
@@ -149,33 +157,22 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
             sculpt.normals[sa * 3 + 2]! * hit.u +
             sculpt.normals[sb * 3 + 2]! * hit.v +
             sculpt.normals[sc * 3 + 2]! * hit.w;
-          cavity[texel] = cavityToByte(
+          detail[texel * 4 + 3] = cavityToByte(
             sculptCavity[sa]! * hit.u + sculptCavity[sb]! * hit.v + sculptCavity[sc]! * hit.w,
           );
         }
         const length = Math.hypot(ox, oy, oz) || 1;
-        normal[texel * 4] = Math.round((ox / length / 2 + 0.5) * 255);
-        normal[texel * 4 + 1] = Math.round((oy / length / 2 + 0.5) * 255);
-        normal[texel * 4 + 2] = Math.round((oz / length / 2 + 0.5) * 255);
-        normal[texel * 4 + 3] = 255;
-        if (reduced.occlusion) {
-          occlusion[texel] = Math.round(
-            (reduced.occlusion[ia]! * wa +
-              reduced.occlusion[ib]! * wb +
-              reduced.occlusion[ic]! * wc) *
-              255,
-          );
-        }
+        detail[texel * 4] = Math.round((ox / length / 2 + 0.5) * 255);
+        detail[texel * 4 + 1] = Math.round((oy / length / 2 + 0.5) * 255);
+        detail[texel * 4 + 2] = Math.round((oz / length / 2 + 0.5) * 255);
       }
     }
   }
 
-  dilate(resolution, normal, cavity, occlusion);
+  dilate(resolution, detail, written);
   return {
     resolution,
-    normal,
-    cavity,
-    occlusion,
+    detail,
     coverage: covered / texels,
     fallback: covered > 0 ? fallback / covered : 0,
     bvhBuildMs,
@@ -184,16 +181,8 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
 }
 
 /** Grows every island outwards by copying border texels into empty neighbours. */
-function dilate(
-  resolution: number,
-  normal: Uint8Array,
-  cavity: Uint8Array,
-  occlusion: Uint8Array,
-): void {
-  let filled = new Uint8Array(resolution * resolution);
-  for (let texel = 0; texel < filled.length; texel++)
-    filled[texel] = normal[texel * 4 + 3] === 255 ? 1 : 0;
-
+function dilate(resolution: number, detail: Uint8Array, written: Uint8Array): void {
+  let filled = written;
   for (let pass = 0; pass < DILATION; pass++) {
     const next = filled.slice();
     for (let y = 0; y < resolution; y++) {
@@ -211,9 +200,7 @@ function dilate(
           if (sx < 0 || sy < 0 || sx >= resolution || sy >= resolution) continue;
           const from = sy * resolution + sx;
           if (!filled[from]) continue;
-          normal.copyWithin(texel * 4, from * 4, from * 4 + 3);
-          cavity[texel] = cavity[from]!;
-          occlusion[texel] = occlusion[from]!;
+          detail.copyWithin(texel * 4, from * 4, from * 4 + 4);
           next[texel] = 1;
           break;
         }
@@ -221,6 +208,4 @@ function dilate(
     }
     filled = next;
   }
-  // Alpha marked "baked" during rasterising; the finished map is opaque everywhere.
-  for (let texel = 0; texel < filled.length; texel++) normal[texel * 4 + 3] = 255;
 }

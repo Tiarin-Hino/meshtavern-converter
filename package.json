@@ -22,6 +22,7 @@
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
+    "ktx2-encoder": "0.6.0",
     "meshoptimizer": "^1.2.0",
     "three": "^0.186.0",
     "xatlas-wasm": "0.1.3"

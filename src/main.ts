@@ -6,6 +6,7 @@ import type { IndexedMesh } from './pipeline/mesh';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
 import type { Baked, ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
+import { encodeDetail, transcodeDetail } from './compressed-texture';
 import { Viewer, type Perf } from './viewer';
 import { Converter } from './worker/client';
 
@@ -41,7 +42,11 @@ interface AppState {
     fallback: number;
     bvhBuildMs: number;
     bvhBytes: number;
+    /** Only with `?ktx=1`: size of the KTX2 file and the time it took to encode. */
+    ktx2Bytes: number | null;
+    ktx2EncodeMs: number | null;
     resolution: number;
+    tableAreaMm2: number;
   } | null;
   showingBaked: boolean;
 }
@@ -68,7 +73,7 @@ declare global {
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
-      startStress: (count: number, forcedLod?: number | null) => void;
+      startStress: (count: number, forcedLod?: number | null, textureBudgetMb?: number) => void;
       /**
        * Remembers the converted mini for mixed stress scenes. With a pool, `startStress`
        * fills the table from it: `share` is the fraction of positions this mini takes.
@@ -113,8 +118,12 @@ const state: AppState = {
   showingBaked: false,
 };
 let baked: Baked | null = null;
-/** Spike switch: `?bake=2048` unwraps the table level and bakes detail maps of that size. */
-const bakeResolution = Number(new URLSearchParams(location.search).get('bake') ?? 0);
+/** Spike switch: `?bake=2048` unwraps the table level and bakes a detail texture of that size; `?bake=auto` lets the size policy choose. */
+const bakeParameter = new URLSearchParams(location.search).get('bake');
+const bakeResolution = bakeParameter === 'auto' ? 'auto' : Number(bakeParameter ?? 0);
+/** Spike switch: `?ktx=<0..3>` (UASTC effort) also encodes the detail texture to KTX2 and draws from the compressed version. */
+const compressDetail = new URLSearchParams(location.search).has('ktx');
+const compressQuality = Number(new URLSearchParams(location.search).get('ktx') ?? 1);
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
@@ -229,12 +238,22 @@ async function setUp(up: UpAxis): Promise<void> {
   await convert(await lastSource.read(), lastSource.name, up);
 }
 
-const stressPool: { lods: IndexedMesh[]; share: number }[] = [];
+const stressPool: { lods: IndexedMesh[]; share: number; baked: Baked | null }[] = [];
 
-function startStress(count: number, forcedLod: number | null = null): void {
+/**
+ * `textureBudgetMb`: with baked minis available (`?bake=` in the address), how much GPU
+ * memory their textures may take; minis beyond it use the per-vertex look. 0 switches
+ * baked minis off, Infinity (the default) bakes them all.
+ */
+function startStress(
+  count: number,
+  forcedLod: number | null = null,
+  textureBudgetMb = Infinity,
+): void {
   if (levels.length < 2) return;
+  const budget = textureBudgetMb * 1024 * 1024;
   if (stressPool.length === 0) {
-    viewer.showStress([levels.slice(1)], count, forcedLod);
+    viewer.showStress([levels.slice(1)], count, forcedLod, () => 0, [baked], budget);
   } else {
     // Spread each pooled mini evenly over the table according to its share.
     const total = stressPool.reduce((sum, entry) => sum + entry.share, 0);
@@ -254,6 +273,8 @@ function startStress(count: number, forcedLod: number | null = null): void {
       count,
       forcedLod,
       setFor,
+      stressPool.map((entry) => entry.baked),
+      budget,
     );
   }
   state.stressCount = count;
@@ -262,7 +283,14 @@ function startStress(count: number, forcedLod: number | null = null): void {
 function showPerf(): void {
   const perf = viewer.perf();
   state.perf = perf;
-  const lods = state.stressCount > 0 ? ` · minis per LOD ${perf.minisPerLod.join(' / ')}` : '';
+  const textures =
+    perf.bakedMinis > 0
+      ? ` · ${perf.bakedMinis} baked, ${Math.round(perf.textureBytes / 1048576)} MB of textures`
+      : '';
+  const lods =
+    state.stressCount > 0
+      ? ` · minis per LOD ${perf.minisPerLod.join(' / ')}${textures}`
+      : textures;
   perfLine.textContent =
     `${perf.fps.toFixed(0)} fps · ${perf.frameMs.toFixed(1)} ms/frame (worst ${perf.worstFrameMs.toFixed(0)}) · ` +
     `CPU ${perf.renderCpuMs.toFixed(1)} ms · ${perf.triangles.toLocaleString()} triangles · ${perf.drawCalls} draw calls${lods}`;
@@ -320,8 +348,21 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
       fallback: baked.maps.fallback,
       bvhBuildMs: baked.maps.bvhBuildMs,
       bvhBytes: baked.maps.bvhBytes,
+      ktx2Bytes: null,
+      ktx2EncodeMs: null,
       resolution: baked.maps.resolution,
+      tableAreaMm2: baked.tableAreaMm2,
     };
+    if (baked && state.baked && compressDetail) {
+      const { ktx2, encodeMs } = await encodeDetail(
+        baked.maps.detail,
+        baked.maps.resolution,
+        compressQuality,
+      );
+      viewer.setCompressedDetail(baked.maps, await transcodeDetail(ktx2, viewer.webglRenderer));
+      state.baked.ktx2Bytes = ktx2.byteLength;
+      state.baked.ktx2EncodeMs = encodeMs;
+    }
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = result.stats;
     showLevelButtons(result.stats);
@@ -461,7 +502,7 @@ window.__mt = {
   loadGlb,
   startStress,
   poolForStress: (share) => {
-    if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share });
+    if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share, baked });
   },
   clearStressPool: () => {
     stressPool.length = 0;

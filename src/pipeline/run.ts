@@ -1,4 +1,5 @@
 import { bake, type BakedMaps } from './bake';
+import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, weldVertices } from './mesh';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
@@ -60,6 +61,8 @@ export interface Baked {
   /** The table level with texture coordinates; more vertices than the level itself, because UV islands split them. */
   mesh: IndexedMesh;
   maps: BakedMaps;
+  /** Surface area of the table level, which decides the texture size when that is left to the policy. */
+  tableAreaMm2: number;
   charts: number;
   utilisation: number;
 }
@@ -89,10 +92,13 @@ export async function runPipeline(
   onProgress: (progress: Progress) => void = () => {},
   /** Overrides up-axis detection, for when the guess is wrong. */
   forcedUp: UpAxis | null = null,
-  /** Texture size for baked detail maps on the table level; 0 skips unwrapping and baking. */
-  bakeResolution = 0,
+  /**
+   * Texture size for baked detail maps on the table level: a size in texels, 'auto' to
+   * pick one from the mini's surface area (see bake-policy.ts), or 0 to skip baking.
+   */
+  bakeRequest: number | 'auto' = 0,
 ): Promise<ConversionResult> {
-  const stepCount = STEPS.length + (bakeResolution > 0 ? BAKE_STEPS.length : 0);
+  const stepCount = STEPS.length + (bakeRequest !== 0 ? BAKE_STEPS.length : 0);
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
 
@@ -157,7 +163,9 @@ export async function runPipeline(
   );
 
   let baked: Baked | undefined;
-  if (bakeResolution > 0) {
+  if (bakeRequest !== 0) {
+    const tableAreaMm2 = surfaceAreaMm2(lods[BAKED_LEVEL]!.mesh);
+    const bakeResolution = bakeRequest === 'auto' ? detailResolutionFor(tableAreaMm2) : bakeRequest;
     // xatlas is asynchronous to load, so this step is timed by hand.
     onProgress({ step: 'unwrap', percent: Math.round((timings.length / stepCount) * 100) });
     const start = performance.now();
@@ -169,10 +177,11 @@ export async function runPipeline(
     const maps = run(
       'bake',
       () => bake(unwrapped.mesh, placed.mesh, bakeResolution),
-      // Normal map (4 bytes a texel), cavity and occlusion (1 each), plus the sculpt's grid.
-      (m) => meshBytes(placed.mesh) * 2 + m.resolution ** 2 * 6,
+      // The detail texture (4 bytes a texel), the rasteriser's mask (1) and the search tree.
+      (m) => meshBytes(placed.mesh) + m.resolution ** 2 * 5 + m.bvhBytes,
     );
     baked = {
+      tableAreaMm2,
       mesh: unwrapped.mesh,
       maps,
       charts: unwrapped.charts,
