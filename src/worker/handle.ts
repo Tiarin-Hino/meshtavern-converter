@@ -8,7 +8,6 @@ export async function handleRequest(request: WorkerRequest, post: Post): Promise
       request.stl,
       (progress) => post({ type: 'progress', id: request.id, progress }),
       request.up ?? null,
-      request.sourceNormals ?? true,
     );
     // Transfer instead of copy: mesh buffers can be hundreds of megabytes.
     const meshes = [result.mesh, ...result.lods.map((lod) => lod.mesh)];

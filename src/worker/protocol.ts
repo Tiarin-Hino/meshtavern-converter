@@ -7,7 +7,6 @@ export type WorkerRequest = {
   id: number;
   stl: ArrayBuffer;
   up?: UpAxis;
-  sourceNormals?: boolean;
 };
 
 export type WorkerResponse =

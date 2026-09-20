@@ -20,7 +20,8 @@ export interface StepTiming {
 }
 
 export interface LodStats {
-  targetTriangles: number;
+  name: Lod['name'];
+  decidedBy: Lod['decidedBy'];
   triangles: number;
   vertices: number;
   errorMm: number;
@@ -68,8 +69,6 @@ export async function runPipeline(
   onProgress: (progress: Progress) => void = () => {},
   /** Overrides up-axis detection, for when the guess is wrong. */
   forcedUp: UpAxis | null = null,
-  /** Experiment switch: carry the source normals through the LODs. */
-  sourceNormals = true,
 ): Promise<ConversionResult> {
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
@@ -114,7 +113,8 @@ export async function runPipeline(
   const lods = run(
     'simplify',
     () => {
-      if (sourceNormals) placed.mesh.normals = computeVertexNormals(placed.mesh);
+      // Every LOD keeps the shading of the full sculpt at the vertices that survive.
+      placed.mesh.normals = computeVertexNormals(placed.mesh);
       return buildLods(placed.mesh);
     },
     // The simplifier copies the mesh into WebAssembly memory while it works.
@@ -134,7 +134,8 @@ export async function runPipeline(
       up: placed.up,
       upMethod: forcedUp ? 'manual' : placed.detection.method,
       lods: lods.map((lod) => ({
-        targetTriangles: lod.targetTriangles,
+        name: lod.name,
+        decidedBy: lod.decidedBy,
         triangles: lod.triangles,
         vertices: lod.mesh.positions.length / 3,
         errorMm: lod.errorMm,

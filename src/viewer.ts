@@ -95,17 +95,23 @@ export class Viewer {
    * Fills the table with `count` copies of a mini, each with its own GPU buffers and its
    * own draw calls, so the cost equals that many different minis of this size. `lods` runs
    * from highest to lowest detail. With `forcedLod` every mini shows that level at any
-   * distance; otherwise the level follows the camera distance.
+   * distance; otherwise the level follows the camera distance. Several minis can be mixed:
+   * `sets` holds the LODs of each, and `setFor` says which one stands at position i.
    */
-  showStress(lods: IndexedMesh[], count: number, forcedLod: number | null = null): void {
+  showStress(
+    sets: IndexedMesh[][],
+    count: number,
+    forcedLod: number | null = null,
+    setFor: (index: number) => number = () => 0,
+  ): void {
     this.clear();
-    const templates = lods.map((lod) => this.toGeometry(lod));
+    const templateSets = sets.map((lods) => lods.map((lod) => this.toGeometry(lod)));
     const side = Math.ceil(Math.sqrt(count));
     const offset = ((side - 1) * STRESS_SPACING_MM) / 2;
 
     for (let i = 0; i < count; i++) {
       const mini = new THREE.LOD();
-      templates.forEach((template, level) => {
+      templateSets[setFor(i)]!.forEach((template, level) => {
         if (forcedLod !== null && level !== forcedLod) return;
         // clone() copies the vertex data, so every mini uploads its own buffers.
         const distance = forcedLod === null ? LOD_DISTANCES_MM[level]! : 0;
@@ -120,7 +126,7 @@ export class Viewer {
       this.scene.add(mini);
       this.stress.push(mini);
     }
-    templates.forEach((template) => template.dispose());
+    templateSets.flat().forEach((template) => template.dispose());
 
     const span = side * STRESS_SPACING_MM;
     this.controls.target.set(0, 0, 0);

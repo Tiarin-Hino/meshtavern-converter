@@ -43,7 +43,9 @@ try {
     const stats = await page.evaluate(() => window.__mt.state.stats);
     const labels = [
       'Full',
-      ...stats.lods.map((lod) => `${Math.round(lod.targetTriangles / 1000)}k`),
+      ...stats.lods.map(
+        (lod) => `${lod.name} ${Math.round(lod.triangles / 1000)}k (${lod.decidedBy})`,
+      ),
     ];
 
     const shots = [];
