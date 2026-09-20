@@ -8,6 +8,7 @@ import type { Baked, ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { encodeDetail, transcodeDetail } from './compressed-texture';
+import { parsePageOptions } from './options';
 import { Viewer, type Perf } from './viewer';
 import { Converter } from './worker/client';
 
@@ -122,11 +123,11 @@ const state: AppState = {
 };
 let baked: Baked | null = null;
 /** Spike switch: `?bake=2048` unwraps the table level and bakes a detail texture of that size; `?bake=auto` lets the size policy choose. */
-const bakeParameter = new URLSearchParams(location.search).get('bake');
-const bakeResolution = bakeParameter === 'auto' ? 'auto' : Number(bakeParameter ?? 0);
+const pageOptions = parsePageOptions(location.search);
+const bakeResolution = pageOptions.bake;
 /** Spike switch: `?ktx=<0..3>` (UASTC effort) also encodes the detail texture to KTX2 and draws from the compressed version. */
-const compressDetail = new URLSearchParams(location.search).has('ktx');
-const compressQuality = Number(new URLSearchParams(location.search).get('ktx') ?? 1);
+const compressDetail = pageOptions.ktx !== null;
+const compressQuality = pageOptions.ktx ?? 1;
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
@@ -545,4 +546,8 @@ benchCopy.addEventListener('click', () => {
   benchResult.select();
 });
 
+if (pageOptions.problems.length > 0) {
+  status.textContent = `Check the address: ${pageOptions.problems.join('; ')}.`;
+  status.classList.add('problem');
+}
 state.ready = true;

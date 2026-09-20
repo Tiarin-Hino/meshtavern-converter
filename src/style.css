@@ -184,3 +184,11 @@ h1 {
     0.8rem ui-monospace,
     monospace;
 }
+
+#status.problem {
+  color: #f0b35e;
+}
+
+#bench a {
+  color: #7aa2f7;
+}

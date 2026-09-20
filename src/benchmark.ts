@@ -6,6 +6,8 @@
  * It drives the app through the same `window.__mt` hooks the tests use.
  */
 
+import { parsePageOptions } from './options';
+
 /** Seconds each table scene runs before its figures are read. `?settle=1` shortens it for tests. */
 const SETTLE_SECONDS = Number(new URLSearchParams(location.search).get('settle') ?? 8);
 
@@ -50,6 +52,9 @@ export async function runBenchmark(
     `**GPU:** ${gpuName()} · **cores:** ${navigator.hardwareConcurrency} · **memory hint:** ${memory ?? 'n/a'} GB · **screen:** ${innerWidth}×${innerHeight} at ×${devicePixelRatio}`,
   );
   add(`**Address:** \`${location.search || '(no options)'}\` · **size:** ${size}`);
+  for (const problem of parsePageOptions(location.search).problems) {
+    add(`**Option problem:** ${problem}`);
+  }
   add('');
 
   // 1. Conversion. Skipped when the user loaded a real mini: that conversion already happened.
@@ -98,15 +103,17 @@ export async function runBenchmark(
   let held = { count: 0, triangles: 0 };
   let dropped: string | null = null;
   add('');
-  add('| Headroom ramp, all at table level | fps | Worst frame | CPU per frame | Triangles |');
-  add('| --- | --- | --- | --- | --- |');
+  add(
+    '| Headroom ramp, all at table level | fps | Worst frame | CPU per frame | Triangles | Baked, textures |',
+  );
+  add('| --- | --- | --- | --- | --- | --- |');
   for (const count of [100, ...RAMP_COUNTS]) {
     mt.startStress(count, 1);
     await wait(Math.min(SETTLE_SECONDS, 5));
     const perf = mt.state.perf;
     if (!perf) break;
     add(
-      `| ${count} minis | ${perf.fps.toFixed(0)} | ${perf.worstFrameMs.toFixed(0)} ms | ${perf.renderCpuMs.toFixed(1)} ms | ${perf.triangles.toLocaleString()} |`,
+      `| ${count} minis | ${perf.fps.toFixed(0)} | ${perf.worstFrameMs.toFixed(0)} ms | ${perf.renderCpuMs.toFixed(1)} ms | ${perf.triangles.toLocaleString()} | ${perf.bakedMinis}, ${Math.round(perf.textureBytes / 1048576)} MB |`,
     );
     best = Math.max(best, perf.fps);
     if (perf.fps < best * RAMP_HOLD) {
