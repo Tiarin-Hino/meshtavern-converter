@@ -16,12 +16,7 @@ export async function handleRequest(request: WorkerRequest, post: Post): Promise
     const transfer = meshes.flatMap(meshBuffers);
     if (result.baked) {
       const { mesh, maps } = result.baked;
-      transfer.push(
-        ...meshBuffers(mesh),
-        maps.normal.buffer,
-        maps.cavity.buffer,
-        maps.occlusion.buffer,
-      );
+      transfer.push(...meshBuffers(mesh), maps.detail.buffer);
     }
     post({ type: 'done', id: request.id, result }, transfer);
   } catch (error) {

@@ -2,8 +2,18 @@ import * as THREE from 'three';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import {
+  bakedTextureBytes,
+  createBakedGeometry,
+  createBakedMaterial,
+  createDetailTexture,
+  createLookUniforms,
+  disposeBakedMaterial,
+  updateLookUniforms,
+} from './baked-material';
+import { compressedTextureBytes, ownCopy } from './compressed-texture';
 import type { BakedMaps } from './pipeline/bake';
-import { DEFAULT_LOOK, textureColours, vertexColours, type Look } from './pipeline/look';
+import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 
 /** One inch: the usual tabletop grid square. */
@@ -17,6 +27,8 @@ const STRESS_SPACING_MM = GRID_SQUARE_MM * 2;
 export const LOD_DISTANCES_MM = [0, 250, 600] as const;
 /** Frames averaged for the performance read-out. */
 const PERF_WINDOW = 120;
+/** Which stress-scene level (0 = close, 1 = table, 2 = far) is drawn from baked data. */
+const BAKED_LOD = 1;
 
 export interface Perf {
   /** Frames per second, averaged over the last frames. Capped by the display refresh rate. */
@@ -30,6 +42,9 @@ export interface Perf {
   minis: number;
   /** How many minis currently show each LOD, highest detail first. */
   minisPerLod: number[];
+  /** Minis drawn with a baked detail texture, and the GPU memory those textures take (with mipmaps). */
+  bakedMinis: number;
+  textureBytes: number;
 }
 
 /**
@@ -46,10 +61,14 @@ export class Viewer {
   private mesh: THREE.Mesh | null = null;
   private stress: THREE.LOD[] = [];
   private imported: THREE.Group | null = null;
-  private bakedMaps: BakedMaps | null = null;
-  private bakedMaterial: THREE.MeshStandardMaterial | null = null;
+  /** Every baked material on screen: each owns a texture that has to be released. */
+  private bakedMaterials: THREE.MeshStandardMaterial[] = [];
+  private textureBytes = 0;
+  /** Spike, issue #30: GPU-compressed versions of detail textures, where one was made. */
+  private readonly compressed = new Map<BakedMaps, THREE.CompressedTexture>();
   private readonly size = new THREE.Vector3(1, 1, 1);
   private look: Look = { ...DEFAULT_LOOK };
+  private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
   private readonly material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -107,25 +126,44 @@ export class Viewer {
    * from highest to lowest detail. With `forcedLod` every mini shows that level at any
    * distance; otherwise the level follows the camera distance. Several minis can be mixed:
    * `sets` holds the LODs of each, and `setFor` says which one stands at position i.
+   *
+   * With `baked`, the table level (index 1) of a mini is drawn from its baked mesh and its
+   * own copy of the detail texture, as long as `textureBudgetBytes` allows; minis beyond the
+   * budget fall back to the per-vertex look. That is the policy for weak devices.
    */
   showStress(
     sets: IndexedMesh[][],
     count: number,
     forcedLod: number | null = null,
     setFor: (index: number) => number = () => 0,
+    baked: ({ mesh: IndexedMesh; maps: BakedMaps } | null)[] = [],
+    textureBudgetBytes = Infinity,
   ): void {
     this.clear();
+    const bakedTemplates = baked.map((entry) => entry && createBakedGeometry(entry.mesh));
     const templateSets = sets.map((lods) => lods.map((lod) => this.toGeometry(lod)));
     const side = Math.ceil(Math.sqrt(count));
     const offset = ((side - 1) * STRESS_SPACING_MM) / 2;
 
     for (let i = 0; i < count; i++) {
       const mini = new THREE.LOD();
-      templateSets[setFor(i)]!.forEach((template, level) => {
+      const set = setFor(i);
+      const entry = baked[set];
+      const cost = entry
+        ? this.compressed.has(entry.maps)
+          ? compressedTextureBytes(entry.maps.resolution)
+          : bakedTextureBytes(entry.maps.resolution)
+        : 0;
+      const fits = entry && this.textureBytes + cost <= textureBudgetBytes;
+      templateSets[set]!.forEach((template, level) => {
         if (forcedLod !== null && level !== forcedLod) return;
         // clone() copies the vertex data, so every mini uploads its own buffers.
         const distance = forcedLod === null ? LOD_DISTANCES_MM[level]! : 0;
-        mini.addLevel(new THREE.Mesh(template.clone(), this.material), distance);
+        const mesh =
+          level === BAKED_LOD && entry && fits
+            ? new THREE.Mesh(bakedTemplates[set]!.clone(), this.addBakedMaterial(entry.maps, true))
+            : new THREE.Mesh(template.clone(), this.material);
+        mini.addLevel(mesh, distance);
       });
       mini.position.set(
         (i % side) * STRESS_SPACING_MM - offset,
@@ -137,6 +175,7 @@ export class Viewer {
       this.stress.push(mini);
     }
     templateSets.flat().forEach((template) => template.dispose());
+    bakedTemplates.forEach((template) => template?.dispose());
 
     const span = side * STRESS_SPACING_MM;
     this.controls.target.set(0, 0, 0);
@@ -187,6 +226,8 @@ export class Viewer {
       triangles: this.renderer.info.render.triangles,
       drawCalls: this.renderer.info.render.calls,
       minis: this.stress.length,
+      bakedMinis: this.bakedMaterials.length,
+      textureBytes: this.textureBytes,
       minisPerLod: LOD_DISTANCES_MM.map(
         (_, level) => this.stress.filter((mini) => mini.getCurrentLevel() === level).length,
       ),
@@ -194,8 +235,7 @@ export class Viewer {
   }
 
   /**
-   * Shows an unwrapped mesh with its baked maps: the sculpt's normals from a texture and
-   * the look as a colour texture, instead of per-vertex data.
+   * Shows an unwrapped mesh with its baked detail texture instead of per-vertex data.
    */
   showBaked(
     mesh: IndexedMesh,
@@ -204,54 +244,44 @@ export class Viewer {
     reframe = false,
   ): void {
     this.clear();
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals!, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs!, 2));
-    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-
-    const normalMap = new THREE.DataTexture(maps.normal, maps.resolution, maps.resolution);
-    normalMap.minFilter = THREE.LinearMipmapLinearFilter;
-    normalMap.magFilter = THREE.LinearFilter;
-    normalMap.generateMipmaps = true;
-    normalMap.needsUpdate = true;
-    this.bakedMaps = maps;
-    this.bakedMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.75,
-      metalness: 0,
-      normalMap,
-      normalMapType: THREE.ObjectSpaceNormalMap,
-      map: this.colourTexture(maps),
-      wireframe: this.material.wireframe,
-    });
-    this.mesh = new THREE.Mesh(geometry, this.bakedMaterial);
+    this.mesh = new THREE.Mesh(createBakedGeometry(mesh), this.addBakedMaterial(maps, false));
     this.scene.add(this.mesh);
     this.size.set(...sizeMm);
     if (reframe) this.setCamera(34, 22, 1);
   }
 
-  private colourTexture(maps: BakedMaps): THREE.DataTexture {
-    const texture = new THREE.DataTexture(
-      textureColours(maps.occlusion, maps.cavity, this.look),
-      maps.resolution,
-      maps.resolution,
-    );
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = true;
-    texture.needsUpdate = true;
-    return texture;
+  /** The renderer, for code that has to ask it which compressed formats the GPU supports. */
+  get webglRenderer(): THREE.WebGLRenderer {
+    return this.renderer;
+  }
+
+  /** From now on, minis baked with `maps` are drawn from this compressed texture. Null switches back. */
+  setCompressedDetail(maps: BakedMaps, texture: THREE.CompressedTexture | null): void {
+    if (texture) this.compressed.set(maps, texture);
+    else this.compressed.delete(maps);
+  }
+
+  private addBakedMaterial(maps: BakedMaps, own: boolean): THREE.MeshStandardMaterial {
+    const packed = this.compressed.get(maps);
+    const texture = packed
+      ? own
+        ? ownCopy(packed)
+        : packed
+      : createDetailTexture(own ? maps.detail.slice() : maps.detail, maps.resolution);
+    const material = createBakedMaterial(texture, this.lookUniforms);
+    material.wireframe = this.material.wireframe;
+    this.bakedMaterials.push(material);
+    this.textureBytes += packed
+      ? compressedTextureBytes(maps.resolution)
+      : bakedTextureBytes(maps.resolution);
+    return material;
   }
 
   /** Re-colours everything on screen. Cheap: no conversion, just new vertex colours. */
   setLook(look: Look): void {
     this.look = { ...look };
-    if (this.bakedMaterial && this.bakedMaps) {
-      this.bakedMaterial.map?.dispose();
-      this.bakedMaterial.map = this.colourTexture(this.bakedMaps);
-    }
+    // Baked minis read the look from shared uniforms: nothing to rebuild.
+    updateLookUniforms(this.lookUniforms, this.look);
     const recolour = (object: THREE.Object3D): void => {
       const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
       const source = geometry?.userData.source as IndexedMesh | undefined;
@@ -277,7 +307,7 @@ export class Viewer {
 
   setWireframe(wireframe: boolean): void {
     this.material.wireframe = wireframe;
-    if (this.bakedMaterial) this.bakedMaterial.wireframe = wireframe;
+    for (const material of this.bakedMaterials) material.wireframe = wireframe;
   }
 
   /**
@@ -319,13 +349,9 @@ export class Viewer {
       this.mesh.geometry.dispose();
       this.mesh = null;
     }
-    if (this.bakedMaterial) {
-      this.bakedMaterial.map?.dispose();
-      this.bakedMaterial.normalMap?.dispose();
-      this.bakedMaterial.dispose();
-      this.bakedMaterial = null;
-      this.bakedMaps = null;
-    }
+    this.bakedMaterials.forEach(disposeBakedMaterial);
+    this.bakedMaterials = [];
+    this.textureBytes = 0;
     for (const mini of this.stress) {
       this.scene.remove(mini);
       for (const level of mini.levels) (level.object as THREE.Mesh).geometry.dispose();
