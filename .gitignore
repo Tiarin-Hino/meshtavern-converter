@@ -12,3 +12,4 @@ test-results
 corpus/
 *.stl
 !src/**/fixtures/*.stl
+out/

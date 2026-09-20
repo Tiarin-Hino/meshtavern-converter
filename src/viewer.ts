@@ -13,6 +13,12 @@ export class Viewer {
   private readonly camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
   private readonly controls: OrbitControls;
   private mesh: THREE.Mesh | null = null;
+  private readonly size = new THREE.Vector3(1, 1, 1);
+  private readonly material = new THREE.MeshStandardMaterial({
+    color: 0x9aa0a8,
+    roughness: 0.75,
+    metalness: 0,
+  });
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -37,7 +43,8 @@ export class Viewer {
     });
   }
 
-  showMesh(mesh: IndexedMesh, sizeMm: [number, number, number]): void {
+  /** Shows a mesh. With `reframe` false the camera stays put, so versions of one mini can be compared. */
+  showMesh(mesh: IndexedMesh, sizeMm: [number, number, number], reframe = true): void {
     if (this.mesh) {
       this.scene.remove(this.mesh);
       this.mesh.geometry.dispose();
@@ -47,20 +54,33 @@ export class Viewer {
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     geometry.computeVertexNormals();
 
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x9aa0a8,
-      roughness: 0.75,
-      metalness: 0,
-    });
-    this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh = new THREE.Mesh(geometry, this.material);
     this.scene.add(this.mesh);
-    this.frame(new THREE.Vector3(...sizeMm));
+    this.size.set(...sizeMm);
+    if (reframe) this.setCamera(34, 22, 1);
   }
 
-  private frame(size: THREE.Vector3): void {
-    const radius = Math.max(size.x, size.y, size.z, 1);
-    this.controls.target.set(0, size.y / 2, 0);
-    this.camera.position.set(radius * 1.2, size.y / 2 + radius * 0.8, radius * 1.8);
+  setWireframe(wireframe: boolean): void {
+    this.material.wireframe = wireframe;
+  }
+
+  /**
+   * Puts the camera on a sphere around the mini: `azimuthDeg` around the vertical axis
+   * (0 = front, looking down -z), `elevationDeg` above the horizon, `zoom` 1 = whole mini
+   * in frame, 2 = twice as close. Fixed positions make screenshots comparable.
+   */
+  setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void {
+    const radius = Math.max(this.size.x, this.size.y, this.size.z, 1);
+    const distance = (radius * 2.3) / zoom;
+    const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
+    const elevation = THREE.MathUtils.degToRad(elevationDeg);
+    const target = new THREE.Vector3(0, this.size.y * (zoom > 1 ? 0.7 : 0.5), 0);
+    this.controls.target.copy(target);
+    this.camera.position.set(
+      target.x + distance * Math.cos(elevation) * Math.sin(azimuth),
+      target.y + distance * Math.sin(elevation),
+      target.z + distance * Math.cos(elevation) * Math.cos(azimuth),
+    );
     this.camera.near = radius / 100;
     this.camera.far = radius * 100;
     this.camera.updateProjectionMatrix();

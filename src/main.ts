@@ -1,5 +1,6 @@
 import './style.css';
 import { generateBumpySheet } from './pipeline/generate';
+import type { IndexedMesh } from './pipeline/mesh';
 import type { ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
 import { Viewer } from './viewer';
@@ -19,6 +20,8 @@ interface AppState {
   longestFrameGapMs: number;
   /** Main-thread time to build normals and hand the mesh to the GPU. */
   showMeshMs: number | null;
+  /** Which version is on screen: 0 = full detail, 1… = LODs from highest to lowest. */
+  shownLevel: number;
 }
 
 declare global {
@@ -29,6 +32,9 @@ declare global {
       loadDemo: () => Promise<void>;
       /** Converts a generated sheet of `quadsPerSide`² × 2 triangles; 1000 gives a 100 MB STL. */
       loadGenerated: (quadsPerSide: number) => Promise<void>;
+      showLevel: (level: number) => void;
+      setCamera: (azimuthDeg: number, elevationDeg: number, zoom: number) => void;
+      setWireframe: (wireframe: boolean) => void;
     };
   }
 }
@@ -38,6 +44,7 @@ const status = document.querySelector<HTMLElement>('#status')!;
 const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
 const statsList = document.querySelector<HTMLElement>('#stats')!;
 const fileInput = document.querySelector<HTMLInputElement>('#file')!;
+const levelButtons = document.querySelector<HTMLElement>('#levels')!;
 
 const viewer = new Viewer(canvas);
 const converter = new Converter();
@@ -52,7 +59,10 @@ const state: AppState = {
   framesWhileConverting: 0,
   longestFrameGapMs: 0,
   showMeshMs: null,
+  shownLevel: 0,
 };
+/** Full-detail mesh first, then the LODs. */
+let levels: IndexedMesh[] = [];
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 
@@ -62,6 +72,10 @@ function showStats(stats: ConversionStats): void {
     ['Triangles', stats.triangles.toLocaleString()],
     ['Vertices', stats.vertices.toLocaleString()],
     ['Dropped', stats.degenerateTriangles.toLocaleString()],
+    ...stats.lods.map((lod): [string, string] => [
+      `LOD ${Math.round(lod.targetTriangles / 1000)}k`,
+      `${lod.triangles.toLocaleString()} tris, ±${lod.errorMm.toFixed(2)} mm`,
+    ]),
     ...stats.timings.map((t): [string, string] => [t.step, `${t.ms.toFixed(0)} ms`]),
     ['Total', `${stats.totalMs.toFixed(0)} ms`],
     ['Show', `${(state.showMeshMs ?? 0).toFixed(0)} ms`],
@@ -81,6 +95,30 @@ function showStats(stats: ConversionStats): void {
     }),
   );
   statsList.hidden = false;
+}
+
+function showLevel(level: number, reframe = false): void {
+  const mesh = levels[level];
+  if (!mesh || !state.stats) return;
+  viewer.showMesh(mesh, state.stats.sizeMm, reframe);
+  state.shownLevel = level;
+  for (const [index, button] of [...levelButtons.children].entries()) {
+    button.setAttribute('aria-pressed', String(index === level));
+  }
+}
+
+function showLevelButtons(stats: ConversionStats): void {
+  const labels = ['Full', ...stats.lods.map((lod) => `${Math.round(lod.triangles / 1000)}k`)];
+  levelButtons.replaceChildren(
+    ...labels.map((label, level) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', () => showLevel(level));
+      return button;
+    }),
+  );
+  levelButtons.hidden = false;
 }
 
 /** Counts animation frames until stopped, to prove the page stayed responsive. */
@@ -104,6 +142,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
   if (state.busy) return;
   Object.assign(state, { busy: true, fileName, stats: null, error: null, progressLog: [] });
   statsList.hidden = true;
+  levelButtons.hidden = true;
   progressBar.hidden = false;
   const stopWatching = watchFrames();
   try {
@@ -114,10 +153,12 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
       status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%`;
     });
     stopWatching();
-    const start = performance.now();
-    viewer.showMesh(result.mesh, result.stats.sizeMm);
-    state.showMeshMs = performance.now() - start;
+    levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = result.stats;
+    showLevelButtons(result.stats);
+    const start = performance.now();
+    showLevel(0, true);
+    state.showMeshMs = performance.now() - start;
     status.textContent = `${fileName} (${result.stats.format} STL, ${result.stats.sourceTriangles.toLocaleString()} triangles)`;
     showStats(result.stats);
   } catch (error) {
@@ -173,5 +214,8 @@ window.__mt = {
   loadDemo: () => convert(demoStl(), 'demo.stl'),
   loadGenerated: (quadsPerSide) =>
     convert(encodeBinaryStl(generateBumpySheet(quadsPerSide)), `generated-${quadsPerSide}.stl`),
+  showLevel: (level) => showLevel(level),
+  setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
+  setWireframe: (wireframe) => viewer.setWireframe(wireframe),
 };
 state.ready = true;
