@@ -1,6 +1,6 @@
 # Phase 0 spike: can the browser make a good-looking mini?
 
-Status: ready · Owner: PM · Time box: 1–2 weeks
+Status: **done, 2026-09-20** · Owner: PM · Time box: 1–2 weeks (took two days of agent work, 19–20 September 2026)
 
 ## Goal
 
@@ -11,6 +11,36 @@ Answer three questions before building the product:
 3. Can a laptop with an integrated GPU show 100 different minis at 30 fps or more?
 
 Code written here is throwaway-quality unless it lands in `src/pipeline/` with tests.
+
+## Conclusion and decisions
+
+All three questions are answered with yes, on real devices.
+
+1. **A browser can process a real sculpted STL.** A 100 MB, 2-million-triangle file converts in 3.4 s on a laptop with an integrated GPU and in 5.5 s on a phone, in a worker, without freezing the page or crashing the tab. With unwrapping, baking and texture compression, an ordinary mini takes about ten seconds; the largest, most detailed corpus mini took over a minute on a fast desktop and is unmeasured on weak hardware.
+2. **A reduced mini looks good enough**, in the PM's judgement: the close-up and table levels are "great to acceptable" also on detailed commercial sculpts, the per-vertex look reads well at table distance, and baked detail maps bring the original's fine detail back on a mesh of 20–60k triangles.
+3. **A laptop with an integrated GPU shows 100 minis at 60 fps**, holds that rate up to 400 unbaked or 200 baked minis, and a flagship phone does as well or better.
+
+| Decision                          | Outcome                                                                                                                                                                                                                                                      | Decided by                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| Simplifier                        | meshoptimizer. Fast-Quadric-Mesh-Simplification was not needed                                                                                                                                                                                               | PM, on the recommendation in #8 |
+| Detail levels                     | Defined by allowed deviation from the sculpt, with a floor and a cap: close 0.02 mm / 50k / 200k, table 0.05 mm / 15k / 60k, far 0.2 mm / 4k / 20k. Fixed triangle budgets were dropped: triangle count does not measure detail                              | PM, #24                         |
+| Normals                           | Every level carries the sculpt's normals, and the reduction weighs them                                                                                                                                                                                      | PM, #24                         |
+| Orientation                       | Detected from the base; guessed for minis without one; always overridable                                                                                                                                                                                    | #21                             |
+| Variant A (per-vertex look)       | Built. It is the far level's look and the fallback where textures do not fit                                                                                                                                                                                 | PM, #9                          |
+| Variant B (baked detail maps)     | **Go, at release, on all minis.** The spike's recommendation had been no-go; the PM weighed close-up quality higher, and the device measurements then showed it is viable: one packed texture, size by surface area, GPU-compressed, within a texture budget | PM, #10, #29, #30               |
+| Painting at release               | Technically unblocked: every baked mini has texture coordinates, and a painted mini needs one more colour texture (1K compressed: 1.3 MB). Still a stretch goal; the painting tool itself is unbuilt                                                         | PM, vision                      |
+| Export                            | One GLB per level, plain or compressed. Baked minis cannot be exported yet (#36)                                                                                                                                                                             | #11                             |
+| What leaves the uploader's device | Table and far level only; the close-up level stays local (ADR-0001, revision 2, private repo)                                                                                                                                                                | PM                              |
+| Dependencies                      | meshoptimizer stays. `xatlas-wasm` is replaced by our own build before release (#33). `ktx2-encoder` is reviewed with #38                                                                                                                                    | PM                              |
+
+**Next:** Phase 1, the public converter, is epic #40 with stories #41–#47; the release blockers #33, #35 and #38 belong to it.
+
+**What Phase 0 did not answer**, carried into Phase 1 and the release blockers:
+
+- The corpus is five minis, all clean. Supported, non-manifold and multi-part files, files in inches or metres, and minis that need scaling to a base size are untested.
+- Unwrapping a large detailed mini on weak hardware; a mid-range phone; a session long enough to show thermal throttling (#35).
+- Download size of baked minis: texture files are still without Zstandard supercompression, and encoding runs on the page instead of in the worker (#38).
+- Large tables are bound by draw calls on a phone (one per mini). Merging or instancing belongs to the table application, not the converter.
 
 ## Pipeline under test
 
@@ -27,13 +57,13 @@ Out of scope: support removal, painting UI, accounts, anything server-side.
 
 ## Exit criteria
 
-| #   | Criterion                                                                      | Measure                                                                                                     |
-| --- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| 1   | A 100 MB binary STL converts in the browser on the reference hardware          | **Met:** 3.4 s on the reference laptop, 5.5 s on a phone, no crash. Peak memory is calculated, not measured |
-| 2   | Variant A and Variant B screenshots for every mini in the corpus (20–30 files) | Side-by-side contact sheet in `docs/design/` (renders only, no source files)                                |
-| 3   | 100 unique converted minis on screen                                           | **Met:** 60 fps on Intel Iris Xe; holds 60 fps up to 400 minis at table level                               |
-| 4   | Output size                                                                    | Typical GLB ≤1 MB (A) / ≤4 MB with textures (B)                                                             |
-| 5   | Decision                                                                       | Go/no-go on Variant B; chosen simplifier; triangle budgets                                                  |
+| #   | Criterion                                                                      | Measure                                                                                                                                                                                                                                                   |
+| --- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | A 100 MB binary STL converts in the browser on the reference hardware          | **Met:** 3.4 s on the reference laptop, 5.5 s on a phone, no crash. Peak memory is calculated, not measured                                                                                                                                               |
+| 2   | Variant A and Variant B screenshots for every mini in the corpus (20–30 files) | **Partly met:** comparison sheets for all five corpus minis, written by `scripts/compare-*.mjs` to the git-ignored `out/` folder and sent to the PM. Not committed, because the minis are the PM's own or licensed; a corpus of 20–30 was never assembled |
+| 3   | 100 unique converted minis on screen                                           | **Met:** 60 fps on Intel Iris Xe; holds 60 fps up to 400 minis at table level                                                                                                                                                                             |
+| 4   | Output size                                                                    | **Met for A:** table plus far level, compressed GLB, 0.2–0.6 MB. **B:** plus a texture file of 1.1 MB at 1K, so about 1.3–1.7 MB for an ordinary mini; a 2K texture is 3.6–4.9 MB and breaks the 4 MB target until Zstandard is on (#38)                  |
+| 5   | Decision                                                                       | **Met:** see "Conclusion and decisions"                                                                                                                                                                                                                   |
 
 ## Work items
 
@@ -47,7 +77,7 @@ Out of scope: support removal, painting UI, accounts, anything server-side.
 8. Contact-sheet generator (Playwright) for the corpus.
 9. Write up results and decisions.
 
-## Results so far
+## Results
 
 ### Simplifier (issue #8, 2026-09-20)
 
