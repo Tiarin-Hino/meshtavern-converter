@@ -39,6 +39,8 @@ interface AppState {
     vertices: number;
     coverage: number;
     fallback: number;
+    bvhBuildMs: number;
+    bvhBytes: number;
     resolution: number;
   } | null;
   showingBaked: boolean;
@@ -299,9 +301,11 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
       stl,
       (progress) => {
         state.progress = progress;
-        state.progressLog.push(progress);
+        if (progress.stepPercent === undefined) state.progressLog.push(progress);
         progressBar.value = progress.percent;
-        status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%`;
+        const within =
+          progress.stepPercent === undefined ? '' : ` (${progress.stepPercent}% of this step)`;
+        status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%${within}`;
       },
       up,
       bakeResolution,
@@ -314,6 +318,8 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
       vertices: baked.mesh.positions.length / 3,
       coverage: baked.maps.coverage,
       fallback: baked.maps.fallback,
+      bvhBuildMs: baked.maps.bvhBuildMs,
+      bvhBytes: baked.maps.bvhBytes,
       resolution: baked.maps.resolution,
     };
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];

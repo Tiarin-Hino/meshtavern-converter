@@ -150,6 +150,8 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
 test('spike: unwraps the table level and shows it with baked maps when asked to', async ({
   page,
 }, testInfo) => {
+  // Loading and warming up the unwrapper, unwrapping and baking are slow on CI runners.
+  test.setTimeout(240_000);
   await page.goto('/?bake=256');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.evaluate(() => window.__mt.loadGenerated(100));

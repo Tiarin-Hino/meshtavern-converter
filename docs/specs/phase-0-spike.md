@@ -138,3 +138,70 @@ At 1K the bake drops to 1.6–1.9 s; the unwrap time does not change. About half
 - **#31 Unwrap time.** Up to minutes on large detailed minis; needs cheaper chart settings or another strategy, honest progress, a measurement on the weak device, and a decision on the `xatlas-wasm` dependency.
 
 Unchanged from the spike: painting needs these texture coordinates anyway, and object-space normal maps need a tangent-space conversion before they can go into a GLB export.
+
+### Bake sampling and unwrap time (issues #29 and #31, 2026-09-20)
+
+**Sampling (#29).** The bake now finds, for every texel, the closest point on the sculpt's own triangles through a bounding volume hierarchy, and interpolates normal and cavity across the triangle that was hit. The facing test stays (the inside of a cloak must not answer for its outside), and each search starts from the previous texel's answer, which prunes most of the tree. The blotchy beard on the large detailed giant is gone; on all five corpus minis the baked table level is at least as good as the per-vertex look at the closest view. Visual call: PM.
+
+**Unwrap time (#31).** Two findings, both applied:
+
+- A fresh WebAssembly instance runs its first unwrap two to three times slower than later ones (giant, Node: 111 s cold against 40 s warm, same settings). A throwaway unwrap of a small generated mesh, 0.6 s, takes that penalty instead of the user's mini.
+- `maxCost` 8 instead of xatlas's default 2 lets islands grow larger: about 40 % faster, slightly fewer islands, no visible difference. Higher values change nothing. Limits on island area or border length made it slower; a higher normal-deviation weight made it eight times slower.
+
+Chrome 153, primary reference machine, all five corpus minis:
+
+| Mini                  | Table triangles | UV islands | Unwrap           | Bake 2K | Bake 1K | Whole conversion 2K / 1K |
+| --------------------- | --------------- | ---------- | ---------------- | ------- | ------- | ------------------------ |
+| Large detailed giant  | 59,974          | 6,457      | 61 s (was 132 s) | 17.5 s  | 6.0 s   | 84 s / 67 s              |
+| Detailed 48 mm figure | 49,636          | 3,431      | 21 s (was 23 s)  | 18.8 s  | 7.0 s   | 48 s / 32 s              |
+| MINI-001              | 32,054          | 996        | 5.2 s            | 13.5 s  | 4.0 s   | 21 s / 10 s              |
+| M-001a                | 22,632          | 1,162      | 4.0 s            | 16.3 s  | 5.5 s   | 24 s / 12 s              |
+| MINI-014              | 18,686          | 1,774      | 5.0 s            | 15.7 s  | 4.3 s   | 22 s / 10 s              |
+
+Building the search tree takes about 0.2 s and 13–33 MB. Exact sampling makes the bake itself about three times slower than the nearest-vertex version (2K: 14–19 s instead of 4–6 s); at 1K it is 4–7 s. The unwrap reports its progress to the progress line.
+
+Assessed, not built:
+
+- _Unwrapping a lower level and transferring the coordinates_ does not work: the islands' borders of a coarse mesh do not follow the edges of a finer one, so triangles would straddle seams.
+- _Splitting the mini into connected parts and unwrapping them in parallel workers_ would help multi-part sculpts on multi-core machines, since xatlas in WebAssembly is single-threaded. Worth trying if one minute for the largest minis is still too long.
+
+Still open under #31: the measurement on the weak reference device, and the dependency decision. Recommendation: keep the pinned `xatlas-wasm` package during development and build xatlas from source before the first public release.
+
+### GLB export (issue #11, 2026-09-20)
+
+One GLB per level, in two variants. **Plain**: float data, no extensions, opens everywhere including Blender. **Compressed**: 16-bit positions and 8-bit normals (KHR_mesh_quantization) packed with EXT_meshopt_compression; about a third of the plain size; needs a loader with meshopt support (three.js, Babylon.js, Godot 4; not Blender). Both pass the Khronos glTF validator with zero errors in the unit tests, carry the look as COLOR_0, and carry the raw shading data as `_SHADING` so an application can re-tint a mini later. Vertex data stays in mm; the node scale converts to glTF metres.
+
+| Mini                  | STL   | Level               | Triangles        | Plain                  | Compressed           |
+| --------------------- | ----- | ------------------- | ---------------- | ---------------------- | -------------------- |
+| Large detailed giant  | 24 MB | close / table / far | 200k / 60k / 20k | 5,463 / 1,284 / 425 KB | 1,398 / 439 / 150 KB |
+| Detailed 48 mm figure | 56 MB | close / table / far | 94k / 50k / 8k   | 2,018 / 1,067 / 175 KB | 659 / 359 / 63 KB    |
+| MINI-001              | 26 MB | close / table / far | 66k / 32k / 5k   | 1,417 / 689 / 107 KB   | 461 / 233 / 40 KB    |
+| M-001a                | 60 MB | close / table / far | 50k / 23k / 4k   | 1,074 / 486 / 86 KB    | 350 / 165 / 33 KB    |
+| MINI-014              | 26 MB | close / table / far | 50k / 19k / 5k   | 1,075 / 402 / 102 KB   | 350 / 137 / 38 KB    |
+
+All 15 compressed files were opened again in the viewer with matching triangle counts. Compressing takes 2–130 ms. What other players would download per mini (table + far, compressed) is 0.2–0.6 MB, against exit criterion 4's "typical GLB ≤1 MB".
+
+### Stress scene (issue #12, 2026-09-20)
+
+Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of mini M-001a, each with its own buffers and draw call. "Cap lifted" runs Chrome without the display frame-rate limit to show headroom.
+
+| Case                       | Triangles per frame | Normal                | Cap lifted | CPU per frame |
+| -------------------------- | ------------------- | --------------------- | ---------- | ------------- |
+| 100 minis, LOD by distance | 1.0 M               | 165 fps (display cap) | 672 fps    | 1.1 ms        |
+| 400 minis, LOD by distance | 1.6 M               | 165 fps (display cap) | 298 fps    | 3.0 ms        |
+| 100 minis, all 50k         | 5.0 M               | 165 fps (display cap) | 384 fps    | 2.4 ms        |
+| 400 minis, all 50k         | 19.4 M              | 113 fps               | 126 fps    | 7.6 ms        |
+
+Exit criterion 3 is **not met yet**: it needs the same measurement on an integrated GPU. Reproduce with `npm run build && node scripts/measure-stress.mjs`, or by hand with the "100 minis" button.
+
+## Reference hardware
+
+**Primary (PM's desktop, read from the machine on 2026-09-19):**
+
+- Gigabyte B560M DS3H V3, Intel Core i7-11700F (8 cores / 16 threads), 64 GB RAM
+- NVIDIA GeForce RTX 3060 (driver 32.0.16.1074), 1920×1080 at 144 Hz
+- Windows 11 Home 10.0.26200, Chrome 153, Edge 153
+
+This machine has a discrete GPU and no integrated one (the 11700F has none), and far more RAM than a typical user. Numbers measured here are an upper bound: they can prove something is too slow, but not that it is fast enough.
+
+**Secondary (needed for exit criteria 1 and 3): to be named.** A laptop with an integrated GPU and 8–16 GB RAM, for example a team member's. Criteria 1 and 3 are only met when measured on this device.
