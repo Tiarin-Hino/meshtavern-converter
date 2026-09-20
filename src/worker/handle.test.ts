@@ -42,7 +42,11 @@ describe('handleRequest', () => {
     expect(stats.peakBufferBytes).toBeGreaterThan(0);
     expect(stats.lods.map((lod) => lod.triangles)).toEqual(lods.map((lod) => lod.triangles));
     expect(last.transfer).toEqual(
-      [mesh, ...lods.map((lod) => lod.mesh)].flatMap((m) => [m.positions.buffer, m.indices.buffer]),
+      [mesh, ...lods.map((lod) => lod.mesh)].flatMap((m) => [
+        m.positions.buffer,
+        m.indices.buffer,
+        m.normals!.buffer,
+      ]),
     );
   });
 

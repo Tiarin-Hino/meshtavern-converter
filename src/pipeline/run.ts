@@ -1,6 +1,6 @@
 import type { IndexedMesh } from './mesh';
-import { weldVertices } from './mesh';
-import { orientAndPlace } from './orient';
+import { computeVertexNormals, weldVertices } from './mesh';
+import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { buildLods, simplifierReady, type Lod } from './simplify';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
 
@@ -20,7 +20,8 @@ export interface StepTiming {
 }
 
 export interface LodStats {
-  targetTriangles: number;
+  name: Lod['name'];
+  decidedBy: Lod['decidedBy'];
   triangles: number;
   vertices: number;
   errorMm: number;
@@ -33,6 +34,9 @@ export interface ConversionStats {
   vertices: number;
   degenerateTriangles: number;
   sizeMm: [number, number, number];
+  /** Which way was taken as up in the file, and how that was decided. */
+  up: UpAxis;
+  upMethod: UpDetection['method'] | 'manual';
   lods: LodStats[];
   timings: StepTiming[];
   totalMs: number;
@@ -63,6 +67,8 @@ const meshBytes = (mesh: IndexedMesh): number =>
 export async function runPipeline(
   stl: ArrayBuffer,
   onProgress: (progress: Progress) => void = () => {},
+  /** Overrides up-axis detection, for when the guess is wrong. */
+  forcedUp: UpAxis | null = null,
 ): Promise<ConversionResult> {
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
@@ -97,12 +103,20 @@ export async function runPipeline(
   );
   const placed = run(
     'orient',
-    () => orientAndPlace(welded.mesh),
+    () => {
+      const detection = detectUpAxis(welded.mesh);
+      const up = forcedUp ?? detection.up;
+      return { ...orientAndPlace(welded.mesh, up), up, detection };
+    },
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
   );
   const lods = run(
     'simplify',
-    () => buildLods(placed.mesh),
+    () => {
+      // Every LOD keeps the shading of the full sculpt at the vertices that survive.
+      placed.mesh.normals = computeVertexNormals(placed.mesh);
+      return buildLods(placed.mesh);
+    },
     // The simplifier copies the mesh into WebAssembly memory while it works.
     (l) => meshBytes(placed.mesh) * 2 + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
   );
@@ -117,8 +131,11 @@ export async function runPipeline(
       vertices: placed.mesh.positions.length / 3,
       degenerateTriangles: welded.degenerateTriangles,
       sizeMm: placed.sizeMm,
+      up: placed.up,
+      upMethod: forcedUp ? 'manual' : placed.detection.method,
       lods: lods.map((lod) => ({
-        targetTriangles: lod.targetTriangles,
+        name: lod.name,
+        decidedBy: lod.decidedBy,
         triangles: lod.triangles,
         vertices: lod.mesh.positions.length / 3,
         errorMm: lod.errorMm,

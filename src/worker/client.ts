@@ -1,3 +1,4 @@
+import type { UpAxis } from '../pipeline/orient';
 import type { ConversionResult, Progress } from '../pipeline/run';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -21,9 +22,13 @@ export class Converter {
   }
 
   /** The STL buffer is transferred to the worker and is unusable on the page afterwards. */
-  convert(stl: ArrayBuffer, onProgress: (progress: Progress) => void): Promise<ConversionResult> {
+  convert(
+    stl: ArrayBuffer,
+    onProgress: (progress: Progress) => void,
+    up?: UpAxis,
+  ): Promise<ConversionResult> {
     const id = this.nextId++;
-    const request: WorkerRequest = { type: 'convert', id, stl };
+    const request: WorkerRequest = { type: 'convert', id, stl, up };
     return new Promise((resolve, reject) => {
       this.jobs.set(id, { onProgress, resolve, reject });
       this.worker.postMessage(request, [stl]);

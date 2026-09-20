@@ -1,9 +1,10 @@
 import './style.css';
 import { generateBumpySheet } from './pipeline/generate';
 import type { IndexedMesh } from './pipeline/mesh';
+import { UP_AXES, type UpAxis } from './pipeline/orient';
 import type { ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
-import { Viewer } from './viewer';
+import { Viewer, type Perf } from './viewer';
 import { Converter } from './worker/client';
 
 interface AppState {
@@ -22,6 +23,10 @@ interface AppState {
   showMeshMs: number | null;
   /** Which version is on screen: 0 = full detail, 1… = LODs from highest to lowest. */
   shownLevel: number;
+  /** Live rendering figures, refreshed twice a second. */
+  perf: Perf | null;
+  /** Number of minis in the stress scene; 0 when a single mini is shown. */
+  stressCount: number;
 }
 
 declare global {
@@ -35,6 +40,17 @@ declare global {
       showLevel: (level: number) => void;
       setCamera: (azimuthDeg: number, elevationDeg: number, zoom: number) => void;
       setWireframe: (wireframe: boolean) => void;
+      /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
+      /** Converts the last file again with a fixed up axis. */
+      setUp: (up: UpAxis) => Promise<void>;
+      startStress: (count: number, forcedLod?: number | null) => void;
+      /**
+       * Remembers the converted mini for mixed stress scenes. With a pool, `startStress`
+       * fills the table from it: `share` is the fraction of positions this mini takes.
+       */
+      poolForStress: (share: number) => void;
+      clearStressPool: () => void;
+      stopStress: () => void;
     };
   }
 }
@@ -45,6 +61,10 @@ const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
 const statsList = document.querySelector<HTMLElement>('#stats')!;
 const fileInput = document.querySelector<HTMLInputElement>('#file')!;
 const levelButtons = document.querySelector<HTMLElement>('#levels')!;
+const stressButtons = document.querySelector<HTMLElement>('#stress')!;
+const upSelect = document.querySelector<HTMLSelectElement>('#up')!;
+const upLabel = document.querySelector<HTMLElement>('#up-label')!;
+const perfLine = document.querySelector<HTMLElement>('#perf')!;
 
 const viewer = new Viewer(canvas);
 const converter = new Converter();
@@ -60,21 +80,26 @@ const state: AppState = {
   longestFrameGapMs: 0,
   showMeshMs: null,
   shownLevel: 0,
+  perf: null,
+  stressCount: 0,
 };
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
+/** Re-reads the last source, because its buffer moves to the worker on every conversion. */
+let lastSource: { name: string; read: () => Promise<ArrayBuffer> } | null = null;
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 
 function showStats(stats: ConversionStats): void {
   const rows: [string, string][] = [
+    ['Up', `${stats.up} (${stats.upMethod})`],
     ['Size', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
     ['Triangles', stats.triangles.toLocaleString()],
     ['Vertices', stats.vertices.toLocaleString()],
     ['Dropped', stats.degenerateTriangles.toLocaleString()],
     ...stats.lods.map((lod): [string, string] => [
-      `LOD ${Math.round(lod.targetTriangles / 1000)}k`,
-      `${lod.triangles.toLocaleString()} tris, ±${lod.errorMm.toFixed(2)} mm`,
+      lod.name,
+      `${lod.triangles.toLocaleString()} tris, ±${lod.errorMm.toFixed(3)} mm (${lod.decidedBy})`,
     ]),
     ...stats.timings.map((t): [string, string] => [t.step, `${t.ms.toFixed(0)} ms`]),
     ['Total', `${stats.totalMs.toFixed(0)} ms`],
@@ -100,6 +125,7 @@ function showStats(stats: ConversionStats): void {
 function showLevel(level: number, reframe = false): void {
   const mesh = levels[level];
   if (!mesh || !state.stats) return;
+  state.stressCount = 0;
   viewer.showMesh(mesh, state.stats.sizeMm, reframe);
   state.shownLevel = level;
   for (const [index, button] of [...levelButtons.children].entries()) {
@@ -108,7 +134,10 @@ function showLevel(level: number, reframe = false): void {
 }
 
 function showLevelButtons(stats: ConversionStats): void {
-  const labels = ['Full', ...stats.lods.map((lod) => `${Math.round(lod.triangles / 1000)}k`)];
+  const labels = [
+    'Full',
+    ...stats.lods.map((lod) => `${lod.name} ${Math.round(lod.triangles / 1000)}k`),
+  ];
   levelButtons.replaceChildren(
     ...labels.map((label, level) => {
       const button = document.createElement('button');
@@ -120,6 +149,51 @@ function showLevelButtons(stats: ConversionStats): void {
   );
   levelButtons.hidden = false;
 }
+
+async function setUp(up: UpAxis): Promise<void> {
+  if (!lastSource) return;
+  await convert(await lastSource.read(), lastSource.name, up);
+}
+
+const stressPool: { lods: IndexedMesh[]; share: number }[] = [];
+
+function startStress(count: number, forcedLod: number | null = null): void {
+  if (levels.length < 2) return;
+  if (stressPool.length === 0) {
+    viewer.showStress([levels.slice(1)], count, forcedLod);
+  } else {
+    // Spread each pooled mini evenly over the table according to its share.
+    const total = stressPool.reduce((sum, entry) => sum + entry.share, 0);
+    const filled = stressPool.map(() => 0);
+    const setFor = (index: number): number => {
+      let pick = 0;
+      let deficit = -Infinity;
+      stressPool.forEach((entry, set) => {
+        const owed = ((index + 1) * entry.share) / total - filled[set]!;
+        if (owed > deficit) [pick, deficit] = [set, owed];
+      });
+      filled[pick] = filled[pick]! + 1;
+      return pick;
+    };
+    viewer.showStress(
+      stressPool.map((entry) => entry.lods),
+      count,
+      forcedLod,
+      setFor,
+    );
+  }
+  state.stressCount = count;
+}
+
+function showPerf(): void {
+  const perf = viewer.perf();
+  state.perf = perf;
+  const lods = state.stressCount > 0 ? ` · minis per LOD ${perf.minisPerLod.join(' / ')}` : '';
+  perfLine.textContent =
+    `${perf.fps.toFixed(0)} fps · ${perf.frameMs.toFixed(1)} ms/frame (worst ${perf.worstFrameMs.toFixed(0)}) · ` +
+    `CPU ${perf.renderCpuMs.toFixed(1)} ms · ${perf.triangles.toLocaleString()} triangles · ${perf.drawCalls} draw calls${lods}`;
+}
+setInterval(showPerf, 500);
 
 /** Counts animation frames until stopped, to prove the page stayed responsive. */
 function watchFrames(): () => void {
@@ -138,24 +212,32 @@ function watchFrames(): () => void {
   return () => (running = false);
 }
 
-async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
+async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise<void> {
   if (state.busy) return;
   Object.assign(state, { busy: true, fileName, stats: null, error: null, progressLog: [] });
   statsList.hidden = true;
   levelButtons.hidden = true;
+  stressButtons.hidden = true;
   progressBar.hidden = false;
   const stopWatching = watchFrames();
   try {
-    const result = await converter.convert(stl, (progress) => {
-      state.progress = progress;
-      state.progressLog.push(progress);
-      progressBar.value = progress.percent;
-      status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%`;
-    });
+    const result = await converter.convert(
+      stl,
+      (progress) => {
+        state.progress = progress;
+        state.progressLog.push(progress);
+        progressBar.value = progress.percent;
+        status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%`;
+      },
+      up,
+    );
     stopWatching();
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = result.stats;
     showLevelButtons(result.stats);
+    stressButtons.hidden = false;
+    upSelect.value = result.stats.up;
+    upLabel.hidden = false;
     const start = performance.now();
     showLevel(0, true);
     state.showMeshMs = performance.now() - start;
@@ -194,6 +276,7 @@ async function loadFile(file: File | undefined): Promise<void> {
     return;
   }
   // The file is read locally and handed to a worker in this tab. It is never sent anywhere.
+  lastSource = { name: file.name, read: () => file.arrayBuffer() };
   await convert(await file.arrayBuffer(), file.name);
 }
 
@@ -203,6 +286,22 @@ fileInput.addEventListener('change', () => {
   fileInput.value = '';
   void loadFile(file);
 });
+for (const button of stressButtons.querySelectorAll<HTMLButtonElement>('button')) {
+  button.addEventListener('click', () => {
+    const count = Number(button.dataset.count);
+    if (count === 0) return showLevel(0, true);
+    startStress(count, button.dataset.lod === undefined ? null : Number(button.dataset.lod));
+  });
+}
+upSelect.replaceChildren(
+  ...UP_AXES.map((axis) => {
+    const option = document.createElement('option');
+    option.value = axis;
+    option.textContent = axis;
+    return option;
+  }),
+);
+upSelect.addEventListener('change', () => void setUp(upSelect.value as UpAxis));
 document.body.addEventListener('dragover', (event) => event.preventDefault());
 document.body.addEventListener('drop', (event) => {
   event.preventDefault();
@@ -211,11 +310,27 @@ document.body.addEventListener('drop', (event) => {
 
 window.__mt = {
   state,
-  loadDemo: () => convert(demoStl(), 'demo.stl'),
-  loadGenerated: (quadsPerSide) =>
-    convert(encodeBinaryStl(generateBumpySheet(quadsPerSide)), `generated-${quadsPerSide}.stl`),
+  loadDemo: () => {
+    lastSource = { name: 'demo.stl', read: async () => demoStl() };
+    return convert(demoStl(), 'demo.stl');
+  },
+  loadGenerated: (quadsPerSide) => {
+    const read = async (): Promise<ArrayBuffer> =>
+      encodeBinaryStl(generateBumpySheet(quadsPerSide));
+    lastSource = { name: `generated-${quadsPerSide}.stl`, read };
+    return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
+  },
+  setUp,
   showLevel: (level) => showLevel(level),
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
+  startStress,
+  poolForStress: (share) => {
+    if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share });
+  },
+  clearStressPool: () => {
+    stressPool.length = 0;
+  },
+  stopStress: () => showLevel(0, true),
 };
 state.ready = true;
