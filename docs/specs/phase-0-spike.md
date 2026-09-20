@@ -67,6 +67,19 @@ Measured in Chrome 153 on the primary reference machine, three of the PM's own m
 
 The ± figure is the simplifier's own estimate of the largest deviation from the source surface. Comparison images: `npm run build && node scripts/compare-lods.mjs` writes them to the git-ignored `out/lods/`.
 
+### Stress scene (issue #12, 2026-09-20)
+
+Primary reference machine only (RTX 3060, Chrome 153, 1920 × 1000). Copies of mini M-001a, each with its own buffers and draw call. "Cap lifted" runs Chrome without the display frame-rate limit to show headroom.
+
+| Case                       | Triangles per frame | Normal                | Cap lifted | CPU per frame |
+| -------------------------- | ------------------- | --------------------- | ---------- | ------------- |
+| 100 minis, LOD by distance | 1.0 M               | 165 fps (display cap) | 672 fps    | 1.1 ms        |
+| 400 minis, LOD by distance | 1.6 M               | 165 fps (display cap) | 298 fps    | 3.0 ms        |
+| 100 minis, all 50k         | 5.0 M               | 165 fps (display cap) | 384 fps    | 2.4 ms        |
+| 400 minis, all 50k         | 19.4 M              | 113 fps               | 126 fps    | 7.6 ms        |
+
+Exit criterion 3 is **not met yet**: it needs the same measurement on an integrated GPU. Reproduce with `npm run build && node scripts/measure-stress.mjs`, or by hand with the "100 minis" button.
+
 ## Reference hardware
 
 **Primary (PM's desktop, read from the machine on 2026-09-19):**

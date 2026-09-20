@@ -47,12 +47,14 @@ h1 {
   width: 160px;
 }
 
-#levels {
+#levels,
+#stress {
   display: flex;
   gap: 4px;
 }
 
-#levels button {
+#levels button,
+#stress button {
   padding: 3px 10px;
   border: 1px solid #3a3f49;
   border-radius: 4px;
@@ -66,6 +68,14 @@ h1 {
 #levels button[aria-pressed='true'] {
   border-color: #7aa2f7;
   background: #2f3b57;
+}
+
+#perf {
+  flex-basis: 100%;
+  margin: 0;
+  color: #a9afb8;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 
 #stats {

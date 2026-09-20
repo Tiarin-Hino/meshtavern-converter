@@ -12,7 +12,14 @@
       <p id="status">Drop an STL anywhere on the page. The file stays on your computer.</p>
       <progress id="progress" max="100" value="0" hidden></progress>
       <div id="levels" role="group" aria-label="Detail level" hidden></div>
+      <div id="stress" role="group" aria-label="Stress test" hidden>
+        <button type="button" data-count="100">100 minis</button>
+        <button type="button" data-count="400">400 minis</button>
+        <button type="button" data-count="100" data-lod="0">100 minis, all 50k</button>
+        <button type="button" data-count="0">Single mini</button>
+      </div>
       <dl id="stats" hidden></dl>
+      <p id="perf"></p>
     </header>
     <canvas id="viewport"></canvas>
     <script type="module" src="/src/main.ts"></script>

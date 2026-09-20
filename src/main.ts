@@ -3,7 +3,7 @@ import { generateBumpySheet } from './pipeline/generate';
 import type { IndexedMesh } from './pipeline/mesh';
 import type { ConversionStats, Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
-import { Viewer } from './viewer';
+import { Viewer, type Perf } from './viewer';
 import { Converter } from './worker/client';
 
 interface AppState {
@@ -22,6 +22,10 @@ interface AppState {
   showMeshMs: number | null;
   /** Which version is on screen: 0 = full detail, 1… = LODs from highest to lowest. */
   shownLevel: number;
+  /** Live rendering figures, refreshed twice a second. */
+  perf: Perf | null;
+  /** Number of minis in the stress scene; 0 when a single mini is shown. */
+  stressCount: number;
 }
 
 declare global {
@@ -35,6 +39,9 @@ declare global {
       showLevel: (level: number) => void;
       setCamera: (azimuthDeg: number, elevationDeg: number, zoom: number) => void;
       setWireframe: (wireframe: boolean) => void;
+      /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
+      startStress: (count: number, forcedLod?: number | null) => void;
+      stopStress: () => void;
     };
   }
 }
@@ -45,6 +52,8 @@ const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
 const statsList = document.querySelector<HTMLElement>('#stats')!;
 const fileInput = document.querySelector<HTMLInputElement>('#file')!;
 const levelButtons = document.querySelector<HTMLElement>('#levels')!;
+const stressButtons = document.querySelector<HTMLElement>('#stress')!;
+const perfLine = document.querySelector<HTMLElement>('#perf')!;
 
 const viewer = new Viewer(canvas);
 const converter = new Converter();
@@ -60,6 +69,8 @@ const state: AppState = {
   longestFrameGapMs: 0,
   showMeshMs: null,
   shownLevel: 0,
+  perf: null,
+  stressCount: 0,
 };
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
@@ -100,6 +111,7 @@ function showStats(stats: ConversionStats): void {
 function showLevel(level: number, reframe = false): void {
   const mesh = levels[level];
   if (!mesh || !state.stats) return;
+  state.stressCount = 0;
   viewer.showMesh(mesh, state.stats.sizeMm, reframe);
   state.shownLevel = level;
   for (const [index, button] of [...levelButtons.children].entries()) {
@@ -120,6 +132,22 @@ function showLevelButtons(stats: ConversionStats): void {
   );
   levelButtons.hidden = false;
 }
+
+function startStress(count: number, forcedLod: number | null = null): void {
+  if (levels.length < 2) return;
+  viewer.showStress(levels.slice(1), count, forcedLod);
+  state.stressCount = count;
+}
+
+function showPerf(): void {
+  const perf = viewer.perf();
+  state.perf = perf;
+  const lods = state.stressCount > 0 ? ` · minis per LOD ${perf.minisPerLod.join(' / ')}` : '';
+  perfLine.textContent =
+    `${perf.fps.toFixed(0)} fps · ${perf.frameMs.toFixed(1)} ms/frame (worst ${perf.worstFrameMs.toFixed(0)}) · ` +
+    `CPU ${perf.renderCpuMs.toFixed(1)} ms · ${perf.triangles.toLocaleString()} triangles · ${perf.drawCalls} draw calls${lods}`;
+}
+setInterval(showPerf, 500);
 
 /** Counts animation frames until stopped, to prove the page stayed responsive. */
 function watchFrames(): () => void {
@@ -143,6 +171,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
   Object.assign(state, { busy: true, fileName, stats: null, error: null, progressLog: [] });
   statsList.hidden = true;
   levelButtons.hidden = true;
+  stressButtons.hidden = true;
   progressBar.hidden = false;
   const stopWatching = watchFrames();
   try {
@@ -156,6 +185,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = result.stats;
     showLevelButtons(result.stats);
+    stressButtons.hidden = false;
     const start = performance.now();
     showLevel(0, true);
     state.showMeshMs = performance.now() - start;
@@ -203,6 +233,13 @@ fileInput.addEventListener('change', () => {
   fileInput.value = '';
   void loadFile(file);
 });
+for (const button of stressButtons.querySelectorAll<HTMLButtonElement>('button')) {
+  button.addEventListener('click', () => {
+    const count = Number(button.dataset.count);
+    if (count === 0) return showLevel(0, true);
+    startStress(count, button.dataset.lod === undefined ? null : Number(button.dataset.lod));
+  });
+}
 document.body.addEventListener('dragover', (event) => event.preventDefault());
 document.body.addEventListener('drop', (event) => {
   event.preventDefault();
@@ -217,5 +254,7 @@ window.__mt = {
   showLevel: (level) => showLevel(level),
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
+  startStress,
+  stopStress: () => showLevel(0, true),
 };
 state.ready = true;

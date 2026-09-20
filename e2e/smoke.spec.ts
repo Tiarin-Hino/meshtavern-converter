@@ -57,3 +57,26 @@ test('switches between detail levels without moving the camera', async ({ page }
     contentType: 'image/png',
   });
 });
+
+test('fills the table with 100 minis and reports rendering figures', async ({ page }, testInfo) => {
+  // Software rendering of 100 minis is slow on CI runners.
+  test.setTimeout(180_000);
+  await page.evaluate(() => window.__mt.loadGenerated(200));
+  await page.getByRole('button', { name: '100 minis', exact: true }).click();
+  await page.waitForFunction(() => window.__mt.state.perf?.minis === 100);
+  await page.waitForTimeout(1500);
+  const perf = await page.evaluate(() => window.__mt.state.perf!);
+
+  // Structure only. CI renders in software, so its speed says nothing about real hardware.
+  expect(perf.drawCalls).toBeGreaterThanOrEqual(100);
+  expect(perf.minisPerLod.reduce((sum, count) => sum + count, 0)).toBe(100);
+  expect(perf.triangles).toBeGreaterThan(100 * 3000);
+  expect(perf.frameMs).toBeGreaterThan(0);
+  await testInfo.attach('stress-100', {
+    body: await page.locator('#viewport').screenshot(),
+    contentType: 'image/png',
+  });
+
+  await page.getByRole('button', { name: 'Single mini' }).click();
+  expect(await page.evaluate(() => window.__mt.state.stressCount)).toBe(0);
+});
