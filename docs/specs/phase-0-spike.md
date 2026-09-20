@@ -33,12 +33,12 @@ All three questions are answered with yes, on real devices.
 | What leaves the uploader's device | Table and far level only; the close-up level stays local (ADR-0001, revision 2, private repo)                                                                                                                                                                | PM                              |
 | Dependencies                      | meshoptimizer stays. `xatlas-wasm` is replaced by our own build before release (#33). `ktx2-encoder` is reviewed with #38                                                                                                                                    | PM                              |
 
-**Next:** Phase 1, the public converter, is epic #40 with stories #41–#47; the release blockers #33, #35 and #38 belong to it.
+**Next:** Phase 1, the converter at product quality, is epic #40; its spec is [phase-1-converter.md](phase-1-converter.md). The release blockers #33, #35 and #38 belong to it. The converter is not published in Phase 1 (PM decision, 2026-09-20), so publishing (#47) waits outside the epic.
 
 **What Phase 0 did not answer**, carried into Phase 1 and the release blockers:
 
 - The corpus is five minis, all clean. Supported, non-manifold and multi-part files, files in inches or metres, and minis that need scaling to a base size are untested.
-- Unwrapping a large detailed mini on weak hardware; a mid-range phone; a session long enough to show thermal throttling (#35).
+- Unwrapping a large detailed mini on weak hardware; a session long enough to show thermal throttling (#35). A mid-range phone and the Steam Deck were dropped by the PM on 2026-09-20.
 - Download size of baked minis: texture files are still without Zstandard supercompression, and encoding runs on the page instead of in the worker (#38).
 - Large tables are bound by draw calls on a phone (one per mini). Merging or instancing belongs to the table application, not the converter.
 
