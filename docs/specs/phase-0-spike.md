@@ -247,7 +247,21 @@ Taken by the PM with the "Benchmark this device" panel, served over the local ne
 
 **Exit criterion 1 is met** (a 100 MB binary STL converts in the browser on the reference laptop: 3.4 s, no crash) and **exit criterion 3 is met** (100 minis at 30 fps or more on an integrated GPU: 60 fps, with four times that scene in hand). A flagship phone converts as fast as the desktop, because the conversion is single-threaded.
 
-Still owed: the Steam Deck; the ramp on the phone; baked minis (`?bake=auto&ktx=0`) on all of them, which also shows whether compressed textures work on a mobile GPU; a mid-range phone; a session long enough to show thermal throttling.
+**Baked minis on the same devices** (`?bake=auto&ktx=0`, the PM's mini M-001a with 1.25 M triangles, 1K detail texture, KTX2-compressed, every mini owning its texture):
+
+|                                     | Ubuntu laptop, Iris Xe                | Pixel 9, Mali-G715                                                    |
+| ----------------------------------- | ------------------------------------- | --------------------------------------------------------------------- |
+| Conversion without baking           | 2.0 s                                 | 3.0 s                                                                 |
+| Unwrap / bake / KTX2 encode         | 2.4 / 3.6 / 1.3 s                     | 3.0 / 3.3 / 1.6 s                                                     |
+| Whole conversion including textures | 9.3 s                                 | 10.9 s                                                                |
+| 100 baked minis, detail by distance | 60 fps (cap), 133 MB of textures      | 60 fps (cap), 133 MB                                                  |
+| 400 baked minis, detail by distance | 60 fps (cap), 533 MB                  | 60 fps (cap), 533 MB                                                  |
+| Ramp, all baked at table level      | 60 fps to 200 minis; 44 fps at 400    | 60 fps to 400 minis; 22 fps at 800 with 1,067 MB of textures          |
+| Ramp without baking, for comparison | 60 fps to 400 minis; 28–50 fps at 800 | 60 fps to 400 minis; 32–39 fps at 800, CPU-bound (17–22 ms per frame) |
+
+What this settles: **baked minis at release are viable** on an integrated GPU and on a flagship phone. The target scene of 100 minis runs at the display rate with room to spare, compressed textures work on a mobile GPU (three.js transcodes the same file to a format the Mali supports), and a ten-second conversion including textures is acceptable for a one-off. Baking halves the laptop's headroom (200 instead of 400 table-level minis at 60 fps), and a phone collapses once textures pass about 1 GB, which is what the texture budget with its per-vertex fallback is for.
+
+Still owed: the Steam Deck; a large detailed mini with a 2K texture on the weak devices (unwrap time above all); a mid-range phone; a session long enough to show thermal throttling.
 
 ## Reference hardware
 
