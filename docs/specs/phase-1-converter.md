@@ -23,9 +23,9 @@ Turn the spike into the component the MeshTavern table will use to take in minis
 
 ## Scope
 
-In: the stories below; the release blockers carried over from Phase 0 (#33, #35, #38); a stable way for another application to call the converter.
+In: the stories below; the release blockers carried over from Phase 0 (#33, #35, #38); a stable way for another application to call the converter; a faster unwrap (#34, moved into this phase on 2026-09-21, see story 9).
 
-Out: publishing (#47 leaves this phase and waits for the table); accounts, storage, sharing, the table; painting; exporters for other VTTs (Phase 1.5); export of baked minis (#36, only needed once something outside our own app consumes them); parallel-worker unwrap (#34, unless the weak-device measurement in #35 shows the unwrap is too slow).
+Out: publishing (#47 leaves this phase and waits for the table); accounts, storage, sharing, the table; painting; exporters for other VTTs (Phase 1.5); export of baked minis (#36, only needed once something outside our own app consumes them).
 
 ## Stories, in proposed order
 
@@ -46,11 +46,16 @@ Order rationale _(proposal)_: first the net that catches regressions, then the s
 6. **The page (#41).** Empty, converting, done and error states, wireframes in `docs/design/` first; usable on a phone; the done state shows the mini, its size and the downloads (table and far); level switching available but secondary; the spike's tools (stress scene, benchmark, raw figures) behind `?dev`; an end-to-end test proves that no network request carries file data. Visual call: PM.
 7. **Look presets (#45).** Four to six starting points on top of the existing controls _(proposal: grey primer, bone, black with drybrush, steel, bronze)_; the choice is stored with the mini. Defaults: PM.
 8. **Carried-over blockers.** Own xatlas build (#33); measurements on the weak devices (#35). The Iris Xe laptop and the Pixel 9 cover the low end and the development PC the middle and the high end (PM decision, 2026-09-20: no Steam Deck, no further phone). Still owed on the laptop: a large mini with a 2K texture.
+9. **A faster unwrap (#34).** Moved into this phase by the PM on 2026-09-21, on the evidence of two corpus runs on the development PC (figures in #34): the unwrap is 52 % of all conversion time; minis that get a 2048 px texture spend 12–84 s in it and none of the 16 converts within 15 s; the time does not depend on the texture size, so a smaller texture does not help; and for an ordinary mini the reference laptop unwraps about as fast as the development PC, so the laptop will not be better. Two steps, because nobody knows yet which lever works:
+   - **Spike first, time-boxed to three working days _(proposal)_.** On the six slowest corpus minis and three ordinary ones, measure: (a) the mini split into its connected parts, the parts unwrapped in several workers, one packing pass over all islands at the end (xatlas can pack islands it did not make); (b) cheaper island finding through xatlas's chart options; (c) both together. Per variant: unwrap time, whole conversion, peak memory per worker and in total, number of islands, share of the texture used, and a comparison sheet against today's result. Threads inside one WebAssembly module are not an option: they need response headers that GitHub Pages cannot send, so parallel means several workers. A mini that is one connected piece gains nothing from (a); the spike says how many corpus minis that is.
+   - **Then the change itself,** as its own issue, only if the spike finds a variant that meets the target below. Same rules as every step: in the worker, timed, with progress, cancellable, per-vertex look when it fails; the regression baseline is updated on purpose.
+   - Target _(proposal)_: on the development PC every corpus mini except the largest file unwraps in 15 s or less, and no mini looks worse on its comparison sheet (PM's call). Texture coordinates also carry painting later, so visibly more seams count as worse.
+   - If no variant gets there, the spike's recommendation says what to do instead: for example accept the time for large minis and show the per-vertex mini at once while the baked one finishes _(proposal, a product decision for the PM)_.
 
 ## Exit criteria
 
 - Every file in the 20–30 mini corpus converts to an upright, correctly scaled, baked mini without manual help, or fails with an understandable message; the PM has looked at every comparison sheet.
-- On the reference laptop (Intel Iris Xe): an ordinary mini converts, baked and compressed, in 15 s or less; the largest corpus mini in 3 minutes or less _(proposal)_; 100 baked minis run at 30 fps or more.
+- On the reference laptop (Intel Iris Xe): an ordinary mini, meaning a single figure on a base of up to 32 mm _(proposal; to be confirmed by the PM)_, converts, baked and compressed, in 15 s or less; the largest corpus mini in 3 minutes or less _(proposal)_; 100 baked minis run at 30 fps or more.
 - The table application can call the converter through the library API.
 - #33, #35 and #38 are closed.
 
@@ -61,8 +66,8 @@ No server, no storage, no accounts, no analytics. Files are read in the browser 
 ## Risks
 
 - **Messy files are open-ended.** Time-box #43 per kind of mess; what cannot be repaired cheaply becomes a clear refusal.
-- **Base detection is a heuristic** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
-- **Unwrap time on weak devices** is unmeasured for large minis. If #35 shows minutes, #34 (parallel unwrap) moves into this phase.
+- **Base and support detection are heuristics** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
+- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. #34 (story 9) is the answer; it may not find one, and then the 15 s target holds for ordinary minis only.
 - **Two young dependencies** (`xatlas-wasm`, `ktx2-encoder`) sit in the critical path until #33 and #38 are done.
 - **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus.
 
