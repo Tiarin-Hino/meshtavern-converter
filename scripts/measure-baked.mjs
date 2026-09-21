@@ -4,9 +4,10 @@
 //   node scripts/measure-baked.mjs 512 1024 2048
 //   node scripts/measure-baked.mjs 1024 -- MINI-014.stl:0.8 HillGiant_32mm_FDM.stl:0.2
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4180;
 const split = process.argv.indexOf('--');
@@ -15,7 +16,7 @@ const mix = (split < 0 ? [] : process.argv.slice(split + 1)).map((arg) => {
   const [file, share] = arg.split(':');
   return { file, share: Number(share ?? 1) };
 });
-const first = readdirSync('corpus').find((name) => name.toLowerCase().endsWith('.stl'));
+const first = corpusFiles()[0];
 const minis = mix.length > 0 ? mix : [{ file: first, share: 1 }];
 const resolutions = sizes.length > 0 ? sizes : [1024];
 mkdirSync(join('out', 'stress'), { recursive: true });

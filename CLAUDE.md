@@ -13,6 +13,8 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `npm run e2e` — Playwright smoke tests (builds first)
 - `npm run lan` — builds and serves on the local network, for the device benchmark (issue #35)
 - `npm run bench` — pipeline benchmark on a generated 2M-triangle mesh
+- `npm run corpus` — builds, converts every mini in the local `corpus/` in real Chrome and writes figures and comparison sheets to `out/corpus/` (add `-- --no-bake` for a quick run)
+- `npm run baseline:update` — records new figures in `src/regression/baseline.json` after an intended pipeline change
 - `npm run format` — Prettier
 
 ## Layout
@@ -27,9 +29,9 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `src/pipeline/run.ts` — runs the steps in order with timings and memory figures. New steps are added there.
 - `src/worker/` — Web Worker around the pipeline: `protocol.ts` (messages), `handle.ts` (testable logic), `convert.worker.ts` (glue), `client.ts` (page side). The page never runs pipeline steps itself.
 - `src/viewer.ts` — three.js scene. `src/main.ts` — UI wiring and the `window.__mt` test hook (`state`, `loadDemo()`, `loadGenerated(n)`, `showLevel(i)`, `setCamera(azimuth, elevation, zoom)`, `setWireframe(on)`, `setLook(changes)`, `exportGlb(level, compact)`, `loadGlb(buffer)`, `startStress(count, forcedLod?)`, `stopStress()`, `setUp(axis)`, `poolForStress(share)`, `clearStressPool()`; live figures on `state.perf`).
-- `scripts/compare-lods.mjs` — converts every STL in the local `corpus/` in real Chrome and writes comparison images and a results table to the git-ignored `out/lods/`.
+- `src/regression/` — the regression net (issue #46). `shapes.ts` generates stand-ins for minis (no sin or cos, so every machine gets the same bits), `measure.ts` lists the cases and converts them, `compare.ts` holds the tolerances, and `baseline.test.ts` fails in `npm run check` and CI when triangles, error or file sizes per level move away from `baseline.json`. An intended change: `npm run baseline:update`, commit the file, explain the change in the PR. Times are not in the baseline.
+- `scripts/corpus.mjs` (`npm run corpus`) — the same figures plus times for every STL in the local `corpus/`, baked by default, in real Chrome: `results.json`, `results.md` (tables, corpus coverage, what changed since the last run) and one comparison sheet per mini in the git-ignored `out/corpus/`. Folders under `corpus/` name the kind of mini. `scripts/lib/corpus-files.mjs` lists the corpus for every script.
 - `scripts/compare-look.mjs` — before/after images of the look for every corpus mini, into `out/look/`.
-- `scripts/export-sizes.mjs` — exports every level of every corpus mini, re-opens each compressed file and prints the size table.
 - `scripts/compare-bake.mjs` — spike: sculpt vs per-vertex look vs baked maps, into `out/bake/`.
 - `scripts/measure-baked.mjs` — a full table of baked minis at given texture sizes; `KTX=0` in the environment adds compressed textures.
 - `scripts/measure-stress.mjs` — measures the 100/400-mini stress scene in real Chrome, with and without the frame-rate cap.

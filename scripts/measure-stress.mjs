@@ -5,9 +5,10 @@
 //   no arguments            the first STL in corpus/ fills the whole table
 //   small.stl:0.8 big.stl:0.2   a mixed table, 80 % small and 20 % big minis
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4175;
 const CASES = [
@@ -16,7 +17,7 @@ const CASES = [
   { label: '100 minis, all close-up level', count: 100, lod: 0 },
   { label: '100 minis, all table level', count: 100, lod: 1 },
 ];
-const first = readdirSync('corpus').find((name) => name.toLowerCase().endsWith('.stl'));
+const first = corpusFiles()[0];
 const mix = process.argv.slice(2).map((arg) => {
   const [file, share] = arg.split(':');
   return { file, share: Number(share ?? 1) };

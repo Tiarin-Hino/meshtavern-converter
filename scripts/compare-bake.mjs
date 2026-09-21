@@ -4,9 +4,10 @@
 // Usage: npm run build && node scripts/compare-bake.mjs [resolution=2048] [file.stl ...]
 // Nothing from corpus/ or out/ is ever committed.
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4179;
 const OUT = join('out', 'bake');
@@ -18,9 +19,7 @@ const VIEWS = [
 ];
 
 const named = process.argv.slice(3);
-const files = named.length
-  ? named
-  : readdirSync('corpus').filter((file) => file.toLowerCase().endsWith('.stl'));
+const files = named.length ? named : corpusFiles();
 mkdirSync(OUT, { recursive: true });
 
 const server = spawn(

@@ -16,6 +16,7 @@ export default tseslint.config(
         window: 'readonly',
         performance: 'readonly',
         document: 'readonly',
+        URLSearchParams: 'readonly',
       },
     },
   },

@@ -32,6 +32,7 @@ Out: publishing (#47 leaves this phase and waits for the table); accounts, stora
 Order rationale _(proposal)_: first the net that catches regressions, then the structural change everything else builds on, then correctness on real-world files, then the interface.
 
 1. **Regression corpus and tracked numbers (#46).** One script converts every local corpus file and writes triangles, error, texture size and times per level, plus the comparison sheets. A committed baseline for _generated_ meshes runs in CI and fails on unexplained changes. The local corpus grows to 20–30 minis of different kinds: humanoid, large creature, quadruped, flying or on a stand, mounted, swarm, terrain piece, with and without base, Y-up and Z-up.
+   - Status: the script (`npm run corpus`) and the CI baseline (`src/regression/`) exist. The baseline watches triangles, error and file sizes of six generated meshes; times are recorded for the local corpus only, because CI runners say nothing about speed. Growing the corpus is the PM's part and stays open; the script reports which kinds are still missing.
 2. **Baked, compressed minis as the normal path (#42, with #38).**
    - Unwrap, bake and texture compression run by default, in the worker, as timed steps with progress; the page never freezes for more than 100 ms _(proposal)_.
    - Texture size from the size policy; KTX2 with Zstandard; the compressed texture is the only one kept.
