@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { generateBumpySheet } from '../pipeline/generate';
 import { meshBuffers } from '../pipeline/mesh';
-import { STEPS } from '../pipeline/run';
+import { BAKE_STEPS, STEPS } from '../pipeline/run';
 import { encodeBinaryStl } from '../pipeline/stl';
 import { handleRequest } from './handle';
-import type { WorkerResponse } from './protocol';
+import type { ConvertOptions, WorkerResponse } from './protocol';
 
-async function collect(stl: ArrayBuffer, id = 7) {
+/** Without baking unless a test asks for it: the unwrapper takes seconds to load and warm up. */
+async function collect(stl: ArrayBuffer, id = 7, options: ConvertOptions = { bake: 0 }) {
   const posted: { response: WorkerResponse; transfer?: Transferable[] }[] = [];
-  await handleRequest({ type: 'convert', id, stl }, (response, transfer) =>
+  await handleRequest({ type: 'convert', id, stl, options }, (response, transfer) =>
     posted.push({ response, transfer }),
   );
   return posted;
@@ -50,9 +51,24 @@ describe('handleRequest', () => {
     }
   });
 
-  it('converts an empty STL without failing', async () => {
-    expect((await collect(new ArrayBuffer(84))).at(-1)!.response.type).toBe('done');
-  });
+  it('bakes when the request has no options, and transfers the compressed texture only', async () => {
+    const stl = encodeBinaryStl(generateBumpySheet(20));
+    const posted: { response: WorkerResponse; transfer?: Transferable[] }[] = [];
+    await handleRequest({ type: 'convert', id: 1, stl }, (response, transfer) =>
+      posted.push({ response, transfer }),
+    );
+    const last = posted.at(-1)!;
+    if (last.response.type !== 'done') throw new Error('expected done');
+    const { baked, stats } = last.response.result;
+    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS, ...BAKE_STEPS]);
+    expect(baked?.detail).toBeNull();
+    expect(last.transfer).toContain(baked!.ktx2!.buffer);
+    expect(last.transfer).toContain(baked!.mesh.uvs!.buffer);
+  }, 120_000);
+
+  it('converts an empty STL without failing, baking included', async () => {
+    expect((await collect(new ArrayBuffer(84), 7, {})).at(-1)!.response.type).toBe('done');
+  }, 120_000);
 
   it('reports a failure as an error message instead of throwing', async () => {
     const posted = await collect(undefined as unknown as ArrayBuffer);

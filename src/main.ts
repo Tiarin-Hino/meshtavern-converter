@@ -4,13 +4,13 @@ import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
-import type { Baked, ConversionStats, Progress } from './pipeline/run';
+import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
 import { encodeBinaryStl } from './pipeline/stl';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
-import { encodeDetail, transcodeDetail } from './compressed-texture';
+import { transcodeDetail } from './compressed-texture';
 import { parsePageOptions } from './options';
-import { Viewer, type Perf } from './viewer';
-import { Converter } from './worker/client';
+import { Viewer, type BakedMini, type Perf } from './viewer';
+import { ConversionCancelled, Converter } from './worker/client';
 
 interface AppState {
   ready: boolean;
@@ -21,10 +21,15 @@ interface AppState {
   progressLog: Progress[];
   stats: ConversionStats | null;
   error: string | null;
-  /** Main-thread health while the worker was converting: frames drawn and the longest gap between two frames. */
+  /** The last conversion was stopped by the user. Not an error. */
+  cancelled: boolean;
+  /**
+   * Main-thread health from the start of a conversion until the mini is on screen: frames
+   * drawn and the longest gap between two frames.
+   */
   framesWhileConverting: number;
   longestFrameGapMs: number;
-  /** Main-thread time to build normals and hand the mesh to the GPU. */
+  /** Main-thread time to hand the first mesh to the GPU. */
   showMeshMs: number | null;
   /** Which version is on screen: 0 = full detail, 1… = LODs from highest to lowest. */
   shownLevel: number;
@@ -35,7 +40,7 @@ interface AppState {
   look: Look;
   /** Set after a GLB was opened: what the file contained. */
   imported: { triangles: number; sizeMm: [number, number, number] } | null;
-  /** Spike, issue #10: figures of the baked table level, when `?bake=<size>` is in the address. */
+  /** Figures of the baked table level. Null when the mini has the per-vertex look: see `stats.bakeSkipped`. */
   baked: {
     charts: number;
     utilisation: number;
@@ -44,7 +49,7 @@ interface AppState {
     fallback: number;
     bvhBuildMs: number;
     bvhBytes: number;
-    /** Only with `?ktx=1`: size of the KTX2 file and the time it took to encode. */
+    /** Size of the KTX2 file and the time it took to encode. Null with `?ktx=off`. */
     ktx2Bytes: number | null;
     ktx2EncodeMs: number | null;
     resolution: number;
@@ -68,6 +73,10 @@ declare global {
       setLook: (changes: Partial<Look>) => void;
       /** Shows the table level with baked maps (true) or with per-vertex data (false). */
       showBaked: (on: boolean) => void;
+      /** Stops the running conversion. */
+      cancel: () => void;
+      /** The converted mini's detail texture as a KTX2 file, or null when it has none. */
+      detailKtx2: () => Uint8Array | null;
       /** Runs the device benchmark and resolves with its Markdown result. */
       runBenchmark: (size: BenchmarkSize) => Promise<string>;
       /** Encodes a level (1 = close, 2 = table, 3 = far) with the current look. */
@@ -92,6 +101,7 @@ declare global {
 const canvas = document.querySelector<HTMLCanvasElement>('#viewport')!;
 const status = document.querySelector<HTMLElement>('#status')!;
 const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
+const cancelButton = document.querySelector<HTMLButtonElement>('#cancel')!;
 const statsList = document.querySelector<HTMLElement>('#stats')!;
 const fileInput = document.querySelector<HTMLInputElement>('#file')!;
 const levelButtons = document.querySelector<HTMLElement>('#levels')!;
@@ -110,6 +120,7 @@ const state: AppState = {
   progressLog: [],
   stats: null,
   error: null,
+  cancelled: false,
   framesWhileConverting: 0,
   longestFrameGapMs: 0,
   showMeshMs: null,
@@ -121,13 +132,17 @@ const state: AppState = {
   baked: null,
   showingBaked: false,
 };
-let baked: Baked | null = null;
-/** Spike switch: `?bake=2048` unwraps the table level and bakes a detail texture of that size; `?bake=auto` lets the size policy choose. */
+/** The baked table level of the converted mini; null when it has the per-vertex look. */
+let baked: BakedMini | null = null;
+/**
+ * The mini's detail texture as a KTX2 file: what a table would store and send to other
+ * players. The raw texture never reaches the page.
+ */
+let detailKtx2: Uint8Array | null = null;
+/** Development only: `?bake=` and `?ktx=` change or switch off what is otherwise the normal path. */
 const pageOptions = parsePageOptions(location.search);
-const bakeResolution = pageOptions.bake;
-/** Spike switch: `?ktx=<0..3>` (UASTC effort) also encodes the detail texture to KTX2 and draws from the compressed version. */
-const compressDetail = pageOptions.ktx !== null;
-const compressQuality = pageOptions.ktx ?? 1;
+/** Index into `levels` of the level that is baked. */
+const TABLE_LEVEL = BAKED_LEVEL + 1;
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
@@ -152,6 +167,17 @@ function showStats(stats: ConversionStats): void {
     ['Buffers', megabytes(stats.peakBufferBytes)],
     ['Heap', stats.peakHeapBytes === null ? 'not exposed' : megabytes(stats.peakHeapBytes)],
     ['Longest stall', `${state.longestFrameGapMs.toFixed(0)} ms`],
+    [
+      'Table level',
+      state.baked
+        ? `baked, ${state.baked.resolution} px` +
+          (state.baked.ktx2Bytes === null
+            ? ', uncompressed'
+            : `, ${Math.round(state.baked.ktx2Bytes / 1024)} KB KTX2`)
+        : stats.bakeSkipped
+          ? describeSkipped(stats.bakeSkipped)
+          : 'per-vertex look (baking switched off)',
+    ],
   ];
   statsList.replaceChildren(
     ...rows.map(([term, value]) => {
@@ -167,21 +193,14 @@ function showStats(stats: ConversionStats): void {
   statsList.hidden = false;
 }
 
-function showBaked(on: boolean): void {
-  if (!baked || !state.stats) return;
-  if (!on) return showLevel(2);
-  viewer.showBaked(baked.mesh, baked.maps, state.stats.sizeMm);
-  state.shownLevel = 2;
-  state.showingBaked = true;
-  state.stressCount = 0;
-}
-
-function showLevel(level: number, reframe = false): void {
+/** The table level is drawn from its baked maps when it has them, unless `preferBaked` is off. */
+function showLevel(level: number, reframe = false, preferBaked = true): void {
   const mesh = levels[level];
   if (!mesh || !state.stats) return;
-  state.showingBaked = false;
+  state.showingBaked = level === TABLE_LEVEL && baked !== null && preferBaked;
   state.stressCount = 0;
-  viewer.showMesh(mesh, state.stats.sizeMm, reframe);
+  if (state.showingBaked) viewer.showBaked(baked!, state.stats.sizeMm, reframe);
+  else viewer.showMesh(mesh, state.stats.sizeMm, reframe);
   state.shownLevel = level;
   for (const [index, button] of [...levelButtons.children].entries()) {
     button.setAttribute('aria-pressed', String(index === level));
@@ -242,11 +261,10 @@ async function setUp(up: UpAxis): Promise<void> {
   await convert(await lastSource.read(), lastSource.name, up);
 }
 
-const stressPool: { lods: IndexedMesh[]; share: number; baked: Baked | null }[] = [];
+const stressPool: { lods: IndexedMesh[]; share: number; baked: BakedMini | null }[] = [];
 
 /**
- * `textureBudgetMb`: with baked minis available (`?bake=` in the address), how much GPU
- * memory their textures may take; minis beyond it use the per-vertex look. 0 switches
+ * `textureBudgetMb`: how much GPU memory the textures of baked minis may take; minis beyond it use the per-vertex look. 0 switches
  * baked minis off, Infinity (the default) bakes them all.
  */
 function startStress(
@@ -318,15 +336,30 @@ function watchFrames(): () => void {
   return () => (running = false);
 }
 
+/** Why a mini that should have been baked has the per-vertex look, in words for the stats list. */
+function describeSkipped(skipped: NonNullable<ConversionStats['bakeSkipped']>): string {
+  return skipped.reason === 'device'
+    ? `per-vertex look: this device holds textures up to ${skipped.maxTextureSize} px, the mini needs ${skipped.resolution} px`
+    : `per-vertex look: ${skipped.step} failed (${skipped.message})`;
+}
+
 async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise<void> {
   if (state.busy) return;
-  Object.assign(state, { busy: true, fileName, stats: null, error: null, progressLog: [] });
+  Object.assign(state, {
+    busy: true,
+    fileName,
+    stats: null,
+    error: null,
+    cancelled: false,
+    progressLog: [],
+  });
   statsList.hidden = true;
   levelButtons.hidden = true;
   stressButtons.hidden = true;
   lookPanel.hidden = true;
   exportPanel.hidden = true;
   progressBar.hidden = false;
+  cancelButton.hidden = false;
   const stopWatching = watchFrames();
   try {
     const result = await converter.convert(
@@ -339,58 +372,79 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
           progress.stepPercent === undefined ? '' : ` (${progress.stepPercent}% of this step)`;
         status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%${within}`;
       },
-      up,
-      bakeResolution,
+      {
+        up,
+        bake: pageOptions.bake,
+        compress: pageOptions.ktx,
+        maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
+      },
     );
-    stopWatching();
-    baked = result.baked ?? null;
-    state.baked = baked && {
-      charts: baked.charts,
-      utilisation: baked.utilisation,
-      vertices: baked.mesh.positions.length / 3,
-      coverage: baked.maps.coverage,
-      fallback: baked.maps.fallback,
-      bvhBuildMs: baked.maps.bvhBuildMs,
-      bvhBytes: baked.maps.bvhBytes,
-      ktx2Bytes: null,
-      ktx2EncodeMs: null,
-      resolution: baked.maps.resolution,
-      tableAreaMm2: baked.tableAreaMm2,
-    };
-    if (baked && state.baked && compressDetail) {
-      const { ktx2, encodeMs } = await encodeDetail(
-        baked.maps.detail,
-        baked.maps.resolution,
-        compressQuality,
-      );
-      viewer.setCompressedDetail(baked.maps, await transcodeDetail(ktx2, viewer.webglRenderer));
-      state.baked.ktx2Bytes = ktx2.byteLength;
-      state.baked.ktx2EncodeMs = encodeMs;
+    // From here on the mini exists; cancelling would only stop it from being shown.
+    cancelButton.hidden = true;
+    const stats = result.stats;
+    baked = null;
+    detailKtx2 = null;
+    state.baked = null;
+    if (result.baked) {
+      const { mesh, maps, ktx2, detail, charts, utilisation, tableAreaMm2 } = result.baked;
+      try {
+        // Transcoding to the GPU's block format happens in three.js's own workers.
+        const texture = ktx2 ? await transcodeDetail(ktx2, viewer.webglRenderer) : detail!;
+        baked = { mesh, resolution: maps.resolution, texture };
+        detailKtx2 = ktx2;
+        state.baked = {
+          charts,
+          utilisation,
+          vertices: mesh.positions.length / 3,
+          coverage: maps.coverage,
+          fallback: maps.fallback,
+          bvhBuildMs: maps.bvhBuildMs,
+          bvhBytes: maps.bvhBytes,
+          ktx2Bytes: ktx2?.byteLength ?? null,
+          ktx2EncodeMs: stats.timings.find((timing) => timing.step === 'compress')?.ms ?? null,
+          resolution: maps.resolution,
+          tableAreaMm2,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        stats.bakeSkipped = { reason: 'failed', step: 'transcode', message };
+      }
     }
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
-    state.stats = result.stats;
-    showLevelButtons(result.stats);
+    state.stats = stats;
+    showLevelButtons(stats);
     stressButtons.hidden = false;
     lookPanel.hidden = false;
     exportPanel.hidden = false;
     state.imported = null;
-    upSelect.value = result.stats.up;
+    upSelect.value = stats.up;
     upLabel.hidden = false;
+    // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
-    showLevel(0, true);
+    showLevel(TABLE_LEVEL, true);
     state.showMeshMs = performance.now() - start;
-    status.textContent = `${fileName} (${result.stats.format} STL, ${result.stats.sourceTriangles.toLocaleString()} triangles)`;
-    showStats(result.stats);
+    // Two frames, so that uploading the mini to the GPU counts towards the longest stall.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    stopWatching();
+    status.textContent = `${fileName} (${stats.format} STL, ${stats.sourceTriangles.toLocaleString()} triangles)`;
+    showStats(stats);
   } catch (error) {
-    state.error = error instanceof Error ? error.message : String(error);
-    status.textContent = `${fileName} could not be converted: ${state.error}`;
+    if (error instanceof ConversionCancelled) {
+      state.cancelled = true;
+      status.textContent = `${fileName}: cancelled.`;
+    } else {
+      state.error = error instanceof Error ? error.message : String(error);
+      status.textContent = `${fileName} could not be converted: ${state.error}`;
+    }
   } finally {
     stopWatching();
     progressBar.hidden = true;
+    cancelButton.hidden = true;
     state.progress = null;
     state.busy = false;
   }
 }
+cancelButton.addEventListener('click', () => converter.cancel());
 
 /** A 25 mm base with a 32 mm pyramid on it: enough to check scale, orientation and rendering. */
 function demoStl(): ArrayBuffer {
@@ -465,7 +519,7 @@ fileInput.addEventListener('change', () => {
 for (const button of stressButtons.querySelectorAll<HTMLButtonElement>('button')) {
   button.addEventListener('click', () => {
     const count = Number(button.dataset.count);
-    if (count === 0) return showLevel(0, true);
+    if (count === 0) return showLevel(TABLE_LEVEL, true);
     startStress(count, button.dataset.lod === undefined ? null : Number(button.dataset.lod));
   });
 }
@@ -501,7 +555,9 @@ window.__mt = {
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
   setLook,
-  showBaked,
+  showBaked: (on) => showLevel(TABLE_LEVEL, false, on),
+  cancel: () => converter.cancel(),
+  detailKtx2: () => detailKtx2,
   runBenchmark: benchmark,
   exportGlb,
   loadGlb,
@@ -512,7 +568,7 @@ window.__mt = {
   clearStressPool: () => {
     stressPool.length = 0;
   },
-  stopStress: () => showLevel(0, true),
+  stopStress: () => showLevel(TABLE_LEVEL, true),
 };
 const benchResult = document.querySelector<HTMLTextAreaElement>('#bench-result')!;
 const benchCopy = document.querySelector<HTMLButtonElement>('#bench-copy')!;

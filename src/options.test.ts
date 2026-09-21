@@ -1,21 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { parsePageOptions } from './options';
+import { DETAIL_EFFORT } from './pipeline/compress';
 
 describe('parsePageOptions', () => {
-  it('reads nothing from an empty address', () => {
-    expect(parsePageOptions('')).toEqual({ bake: 0, ktx: null, problems: [] });
+  it('bakes at the policy size and compresses when the address says nothing', () => {
+    expect(parsePageOptions('')).toEqual({ bake: 'auto', ktx: DETAIL_EFFORT, problems: [] });
   });
 
-  it('reads the baking and compression options', () => {
-    expect(parsePageOptions('?bake=auto&ktx=0')).toEqual({ bake: 'auto', ktx: 0, problems: [] });
-    expect(parsePageOptions('?bake=1024')).toMatchObject({ bake: 1024, ktx: null });
-    expect(parsePageOptions('?bake=512&ktx')).toMatchObject({ bake: 512, ktx: 1 });
+  it('reads the development options for baking and compression', () => {
+    expect(parsePageOptions('?bake=auto&ktx=2')).toEqual({ bake: 'auto', ktx: 2, problems: [] });
+    expect(parsePageOptions('?bake=1024')).toMatchObject({ bake: 1024, ktx: DETAIL_EFFORT });
+    expect(parsePageOptions('?bake=512&ktx')).toMatchObject({ bake: 512, ktx: DETAIL_EFFORT });
+    expect(parsePageOptions('?bake=off')).toEqual({ bake: 0, ktx: DETAIL_EFFORT, problems: [] });
+    expect(parsePageOptions('?ktx=off')).toEqual({ bake: 'auto', ktx: null, problems: [] });
   });
 
   it('rejects a mistyped separator instead of baking at a nonsense size', () => {
-    const options = parsePageOptions('?bake=auto%ktx=0');
-    expect(options.bake).toBe(0);
-    expect(options.ktx).toBeNull();
+    const options = parsePageOptions('?bake=512%ktx=0');
+    expect(options.bake).toBe('auto');
+    expect(options.ktx).toBe(DETAIL_EFFORT);
     expect(options.problems.join(' ')).toContain('stray "%"');
     expect(options.problems.join(' ')).toContain('bake=');
   });

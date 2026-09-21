@@ -1,11 +1,14 @@
+import { DETAIL_EFFORT, DETAIL_EFFORTS } from './pipeline/compress';
+
 /**
- * Options from the page address. Anything that is not understood is reported, never
+ * Options from the page address, for development only: without any, a mini is baked at the
+ * size the policy picks and its texture is compressed. Anything that is not understood is reported, never
  * guessed at: a mistyped option must not silently change what gets measured.
  */
 export interface PageOptions {
-  /** Texture size for baked minis, 'auto' for the size policy, 0 for no baking. */
+  /** `?bake=<size>` fixes the texture size of baked minis, `?bake=off` gives 0: no baking. Default 'auto', the size policy. */
   bake: number | 'auto';
-  /** UASTC effort 0–3 for compressed detail textures, or null for uncompressed. */
+  /** `?ktx=0..3` sets the UASTC effort, `?ktx=off` gives null: the texture stays uncompressed. */
   ktx: number | null;
   /** One message per option that was ignored. */
   problems: string[];
@@ -18,20 +21,21 @@ export function parsePageOptions(search: string): PageOptions {
   const parameters = new URLSearchParams(search);
   const problems: string[] = [];
 
-  let bake: PageOptions['bake'] = 0;
+  let bake: PageOptions['bake'] = 'auto';
   const bakeValue = parameters.get('bake');
-  if (bakeValue === 'auto') bake = 'auto';
+  if (bakeValue === 'off') bake = 0;
   else if (bakeValue !== null && BAKE_SIZES.includes(Number(bakeValue))) bake = Number(bakeValue);
-  else if (bakeValue !== null) {
-    problems.push(`bake=${bakeValue} ignored: use auto, ${BAKE_SIZES.join(', ')}`);
+  else if (bakeValue !== null && bakeValue !== 'auto') {
+    problems.push(`bake=${bakeValue} ignored: use auto, off, ${BAKE_SIZES.join(', ')}`);
   }
 
-  let ktx: PageOptions['ktx'] = null;
+  let ktx: PageOptions['ktx'] = DETAIL_EFFORT;
   const ktxValue = parameters.get('ktx');
-  if (ktxValue !== null) {
-    const effort = ktxValue === '' ? 1 : Number(ktxValue);
-    if ([0, 1, 2, 3].includes(effort)) ktx = effort;
-    else problems.push(`ktx=${ktxValue} ignored: use 0, 1, 2 or 3`);
+  if (ktxValue === 'off') ktx = null;
+  else if (ktxValue !== null) {
+    const effort = ktxValue === '' ? DETAIL_EFFORT : Number(ktxValue);
+    if ((DETAIL_EFFORTS as readonly number[]).includes(effort)) ktx = effort;
+    else problems.push(`ktx=${ktxValue} ignored: use off, ${DETAIL_EFFORTS.join(', ')}`);
   }
 
   for (const key of parameters.keys()) {
