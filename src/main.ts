@@ -141,6 +141,8 @@ let baked: BakedMini | null = null;
 let detailKtx2: Uint8Array | null = null;
 /** Development only: `?bake=` and `?ktx=` change or switch off what is otherwise the normal path. */
 const pageOptions = parsePageOptions(location.search);
+/** How long a finished conversion waits for the mini's first frames before it stops measuring stalls. */
+const FRAME_WAIT_MS = 500;
 /** Index into `levels` of the level that is baked. */
 const TABLE_LEVEL = BAKED_LEVEL + 1;
 /** Full-detail mesh first, then the LODs. */
@@ -424,7 +426,11 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
     showLevel(TABLE_LEVEL, true);
     state.showMeshMs = performance.now() - start;
     // Two frames, so that uploading the mini to the GPU counts towards the longest stall.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // A hidden tab gets no frames at all, and must not wait for them: hence the timer.
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+      setTimeout(resolve, FRAME_WAIT_MS);
+    });
     stopWatching();
     status.textContent = `${fileName} (${stats.format} STL, ${stats.sourceTriangles.toLocaleString()} triangles)`;
     showStats(stats);
