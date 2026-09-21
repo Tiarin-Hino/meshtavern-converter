@@ -45,9 +45,7 @@ try {
       args: ['--disable-gpu-vsync', '--disable-frame-rate-limit'],
     });
     const page = await browser.newPage({ viewport: { width: 1920, height: 1000 } });
-    await page.goto(
-      `http://localhost:${PORT}/?bake=${resolution}${process.env.KTX ? `&ktx=${process.env.KTX}` : ''}`,
-    );
+    await page.goto(`http://localhost:${PORT}/?bake=${resolution}&ktx=${process.env.KTX ?? 'off'}`);
     await page.waitForFunction(() => window.__mt?.state.ready === true);
     for (const mini of minis) {
       await page.evaluate(() => (window.__mt.state.stats = null));

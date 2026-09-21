@@ -1,5 +1,6 @@
 import { bake, type BakedMaps } from './bake';
 import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
+import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, weldVertices } from './mesh';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
@@ -9,9 +10,10 @@ import { unwrap } from './unwrap';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
 
 export const STEPS = ['read', 'weld', 'orient', 'simplify', 'shade', 'levels'] as const;
-/** Extra steps when baked detail maps are requested (spike, issue #10). */
-export const BAKE_STEPS = ['unwrap', 'bake'] as const;
-export type StepName = (typeof STEPS)[number] | (typeof BAKE_STEPS)[number];
+/** The steps that turn the table level into a baked mini. They run unless baking is switched off. */
+export const BAKE_STEPS = ['unwrap', 'bake', 'compress'] as const;
+export type BakeStepName = (typeof BAKE_STEPS)[number];
+export type StepName = (typeof STEPS)[number] | BakeStepName;
 
 /** Index into `ConversionResult.lods` of the level that gets baked maps: the table level. */
 export const BAKED_LEVEL = 1;
@@ -55,12 +57,27 @@ export interface ConversionStats {
   peakBufferBytes: number;
   /** Largest JS heap size seen between steps. Null where the browser does not expose it. */
   peakHeapBytes: number | null;
+  /** Set when baking was wanted but the mini keeps the per-vertex look instead, and why. */
+  bakeSkipped: BakeSkipped | null;
 }
+
+export type BakeSkipped =
+  /** The texture the size policy chose is larger than the device can hold. */
+  | { reason: 'device'; resolution: number; maxTextureSize: number }
+  /** 'transcode' is the page's part: turning the KTX2 file into a GPU texture. */
+  | { reason: 'failed'; step: BakeStepName | 'transcode'; message: string };
+
+/** Figures of a bake, without the texture itself. */
+export type BakeFigures = Omit<BakedMaps, 'detail'>;
 
 export interface Baked {
   /** The table level with texture coordinates; more vertices than the level itself, because UV islands split them. */
   mesh: IndexedMesh;
-  maps: BakedMaps;
+  maps: BakeFigures;
+  /** The detail texture as a KTX2 file (UASTC + Zstandard): the only copy that is kept. */
+  ktx2: Uint8Array | null;
+  /** Development only (compression switched off): the raw RGBA texture. Null otherwise. */
+  detail: Uint8Array | null;
   /** Surface area of the table level, which decides the texture size when that is left to the policy. */
   tableAreaMm2: number;
   charts: number;
@@ -86,19 +103,35 @@ function heapBytes(): number | null {
 const meshBytes = (mesh: IndexedMesh): number =>
   mesh.positions.byteLength + mesh.indices.byteLength;
 
+export interface PipelineOptions {
+  onProgress?: (progress: Progress) => void;
+  /** Overrides up-axis detection, for when the guess is wrong. */
+  forcedUp?: UpAxis | null;
+  /**
+   * Texture size for baked detail maps on the table level: 'auto' (the default) picks one
+   * from the mini's surface area (see bake-policy.ts). A size in texels, or 0 to skip
+   * baking, is for development.
+   */
+  bake?: number | 'auto';
+  /** UASTC effort for the KTX2 file. Null keeps the raw texture instead: development only. */
+  compress?: number | null;
+  /** Largest texture the device can hold, when known. A mini that needs more keeps the per-vertex look. */
+  maxTextureSize?: number;
+}
+
 /** Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node. */
 export async function runPipeline(
   stl: ArrayBuffer,
-  onProgress: (progress: Progress) => void = () => {},
-  /** Overrides up-axis detection, for when the guess is wrong. */
-  forcedUp: UpAxis | null = null,
-  /**
-   * Texture size for baked detail maps on the table level: a size in texels, 'auto' to
-   * pick one from the mini's surface area (see bake-policy.ts), or 0 to skip baking.
-   */
-  bakeRequest: number | 'auto' = 0,
+  {
+    onProgress = () => {},
+    forcedUp = null,
+    bake: bakeRequest = 'auto',
+    compress = DETAIL_EFFORT,
+    maxTextureSize,
+  }: PipelineOptions = {},
 ): Promise<ConversionResult> {
-  const stepCount = STEPS.length + (bakeRequest !== 0 ? BAKE_STEPS.length : 0);
+  const bakeSteps = BAKE_STEPS.filter((step) => step !== 'compress' || compress !== null);
+  const stepCount = STEPS.length + (bakeRequest !== 0 ? bakeSteps.length : 0);
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
 
@@ -106,15 +139,22 @@ export async function runPipeline(
   let peakBufferBytes = 0;
   let peakHeapBytes = heapBytes();
 
-  const run = <T>(step: StepName, work: () => T, liveBytes: (result: T) => number): T => {
+  /** Announces a step; the function it returns records the step's time and memory when called. */
+  const begin = (step: StepName): (<T>(result: T, liveBytes: number) => T) => {
     onProgress({ step, percent: Math.round((timings.length / stepCount) * 100) });
     const start = performance.now();
+    return (result, liveBytes) => {
+      timings.push({ step, ms: performance.now() - start });
+      peakBufferBytes = Math.max(peakBufferBytes, liveBytes);
+      const heap = heapBytes();
+      if (heap !== null) peakHeapBytes = Math.max(peakHeapBytes ?? 0, heap);
+      return result;
+    };
+  };
+  const run = <T>(step: StepName, work: () => T, liveBytes: (result: T) => number): T => {
+    const end = begin(step);
     const result = work();
-    timings.push({ step, ms: performance.now() - start });
-    peakBufferBytes = Math.max(peakBufferBytes, liveBytes(result));
-    const heap = heapBytes();
-    if (heap !== null) peakHeapBytes = Math.max(peakHeapBytes ?? 0, heap);
-    return result;
+    return end(result, liveBytes(result));
   };
 
   const format = detectStlFormat(stl);
@@ -163,30 +203,57 @@ export async function runPipeline(
   );
 
   let baked: Baked | undefined;
+  let bakeSkipped: BakeSkipped | null = null;
   if (bakeRequest !== 0) {
-    const tableAreaMm2 = surfaceAreaMm2(lods[BAKED_LEVEL]!.mesh);
-    const bakeResolution = bakeRequest === 'auto' ? detailResolutionFor(tableAreaMm2) : bakeRequest;
-    // xatlas is asynchronous to load, so this step is timed by hand.
-    onProgress({ step: 'unwrap', percent: Math.round((timings.length / stepCount) * 100) });
-    const start = performance.now();
-    const overall = Math.round((timings.length / stepCount) * 100);
-    const unwrapped = await unwrap(lods[BAKED_LEVEL]!.mesh, bakeResolution, (stepPercent) =>
-      onProgress({ step: 'unwrap', percent: overall, stepPercent }),
-    );
-    timings.push({ step: 'unwrap', ms: performance.now() - start });
-    const maps = run(
-      'bake',
-      () => bake(unwrapped.mesh, placed.mesh, bakeResolution),
-      // The detail texture (4 bytes a texel), the rasteriser's mask (1) and the search tree.
-      (m) => meshBytes(placed.mesh) + m.resolution ** 2 * 5 + m.bvhBytes,
-    );
-    baked = {
-      tableAreaMm2,
-      mesh: unwrapped.mesh,
-      maps,
-      charts: unwrapped.charts,
-      utilisation: unwrapped.utilisation,
-    };
+    const table = lods[BAKED_LEVEL]!.mesh;
+    const tableAreaMm2 = surfaceAreaMm2(table);
+    const resolution = bakeRequest === 'auto' ? detailResolutionFor(tableAreaMm2) : bakeRequest;
+    if (maxTextureSize !== undefined && resolution > maxTextureSize) {
+      bakeSkipped = { reason: 'device', resolution, maxTextureSize };
+    } else {
+      // A mini with the per-vertex look is better than no mini: a failing step is not an error.
+      let step: BakeStepName = 'unwrap';
+      try {
+        const overall = Math.round((timings.length / stepCount) * 100);
+        const unwrapEnd = begin('unwrap');
+        const unwrapped = unwrapEnd(
+          await unwrap(table, resolution, (stepPercent) =>
+            onProgress({ step: 'unwrap', percent: overall, stepPercent }),
+          ),
+          meshBytes(placed.mesh) + meshBytes(table) * 3,
+        );
+        step = 'bake';
+        const { detail, ...maps } = run(
+          'bake',
+          () => bake(unwrapped.mesh, placed.mesh, resolution),
+          // The detail texture (4 bytes a texel), the rasteriser's mask (1) and the search tree.
+          (m) => meshBytes(placed.mesh) + m.resolution ** 2 * 5 + m.bvhBytes,
+        );
+        let ktx2: Uint8Array | null = null;
+        if (compress !== null) {
+          step = 'compress';
+          const compressEnd = begin('compress');
+          ktx2 = compressEnd(
+            await compressDetail(detail, resolution, compress),
+            // The texture, the encoder's copy of it and its output buffer with mipmaps.
+            meshBytes(placed.mesh) + resolution ** 2 * 14,
+          );
+        }
+        baked = {
+          tableAreaMm2,
+          mesh: unwrapped.mesh,
+          maps,
+          ktx2,
+          // Once compressed, the raw texture is dropped here and never leaves the pipeline.
+          detail: ktx2 ? null : detail,
+          charts: unwrapped.charts,
+          utilisation: unwrapped.utilisation,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        bakeSkipped = { reason: 'failed', step, message };
+      }
+    }
   }
 
   return {
@@ -213,6 +280,7 @@ export async function runPipeline(
       totalMs: timings.reduce((sum, timing) => sum + timing.ms, 0),
       peakBufferBytes,
       peakHeapBytes,
+      bakeSkipped,
     },
   };
 }

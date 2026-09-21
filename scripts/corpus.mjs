@@ -30,7 +30,7 @@ const args = process.argv.slice(2);
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const bake = !args.includes('--no-bake');
 const extra = new URLSearchParams(flag('--options') ?? '');
-if (bake && !extra.has('bake')) extra.set('bake', 'auto');
+if (!bake) extra.set('bake', 'off');
 const address = `http://localhost:${PORT}/?${extra}`;
 const OUT = join('out', flag('--out') ?? 'corpus');
 
@@ -46,6 +46,8 @@ const server = spawn(
 await new Promise((resolve) => setTimeout(resolve, 2500));
 
 const round = (value, digits = 0) => Number(value.toFixed(digits));
+/** The longest the page may stand still during a conversion, in ms (Phase 1 spec, story 2). */
+const MAX_STALL_MS = 100;
 const minis = {};
 let machine;
 const browser = await chromium.launch({ channel: 'chrome', headless: false });
@@ -116,6 +118,7 @@ try {
       sizeMm: stats.sizeMm.map((mm) => round(mm, 2)),
       up: stats.up,
       upMethod: stats.upMethod,
+      bakeSkipped: stats.bakeSkipped ?? null,
       levels: stats.lods.map((lod, i) => ({
         name: lod.name,
         decidedBy: lod.decidedBy,
@@ -134,6 +137,8 @@ try {
         coverage: round(baked.coverage, 4),
         fallback: round(baked.fallback, 4),
         ktx2Bytes: baked.ktx2Bytes,
+        /** The same texture, uncompressed, as it would be without KTX2: 4 bytes a texel. */
+        rawBytes: baked.resolution ** 2 * 4,
       },
       // Everything that depends on the machine sits under `times` and is left out of comparisons.
       times: {
@@ -161,8 +166,9 @@ try {
       for (const column of columns) {
         await page.evaluate(
           ([c, v]) => {
-            if (c.baked) window.__mt.showBaked(true);
-            else window.__mt.showLevel(c.level);
+            // The table level shows its baked maps unless told otherwise.
+            window.__mt.showLevel(c.level);
+            if (c.level === 2) window.__mt.showBaked(c.baked === true);
             window.__mt.setCamera(v.azimuth, v.elevation, v.zoom);
           },
           [column, view],
@@ -262,6 +268,19 @@ ${
 }
 
 ## Minis
+
+${(() => {
+  const skipped = converted.filter(([, m]) => m.bakeSkipped);
+  const stalled = converted.filter(([, m]) => m.times.longestFrameGapMs > MAX_STALL_MS);
+  return [
+    skipped.length === 0
+      ? 'Every mini that should be baked is baked.'
+      : `Not baked, per-vertex look instead: ${skipped.map(([key, m]) => `${key} (${m.bakeSkipped.reason === 'device' ? 'texture too large for the device' : `${m.bakeSkipped.step} failed: ${m.bakeSkipped.message}`})`).join('; ')}.`,
+    stalled.length === 0
+      ? `No page stall over the ${MAX_STALL_MS} ms limit.`
+      : `**Page stalls over the ${MAX_STALL_MS} ms limit:** ${stalled.map(([key, m]) => `${key} (${m.times.longestFrameGapMs} ms)`).join(', ')}.`,
+  ].join(' ');
+})()}
 
 ${table(
   [

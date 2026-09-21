@@ -63,7 +63,7 @@ export type Figures = Record<string, CaseFigures>;
 export async function measureCase(testCase: RegressionCase): Promise<CaseFigures> {
   await glbEncoderReady();
   const stl = encodeBinaryStl(testCase.soup());
-  const { lods, baked, stats } = await runPipeline(stl, undefined, null, testCase.bake);
+  const { lods, baked, stats } = await runPipeline(stl, { bake: testCase.bake });
   const glb = (level: number, compact: boolean): number =>
     encodeGlb(lods[level]!.mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;
   return {

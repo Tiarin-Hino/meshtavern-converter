@@ -41,7 +41,7 @@ try {
       args: uncapped ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : [],
     });
     const page = await browser.newPage({ viewport: { width: 1920, height: 1000 } });
-    await page.goto(`http://localhost:${PORT}/`);
+    await page.goto(`http://localhost:${PORT}/?bake=off`);
     await page.waitForFunction(() => window.__mt?.state.ready === true);
 
     for (const mini of minis) {

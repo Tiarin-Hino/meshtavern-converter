@@ -1,14 +1,23 @@
 import type { UpAxis } from '../pipeline/orient';
 import type { ConversionResult, Progress } from '../pipeline/run';
 
+/** What the page may ask for. Everything is optional: the defaults give a baked, compressed mini. */
+export interface ConvertOptions {
+  up?: UpAxis;
+  /** Development only: a fixed texture size for the baked detail maps, or 0 for none. Default: the size policy. */
+  bake?: number | 'auto';
+  /** Development only: UASTC effort, or null to keep the raw texture. Default: see compress.ts. */
+  compress?: number | null;
+  /** Largest texture the device can hold; a mini that needs more keeps the per-vertex look. */
+  maxTextureSize?: number;
+}
+
 /** Messages between the page and the conversion worker. Every job carries an id so replies can be matched. */
 export type WorkerRequest = {
   type: 'convert';
   id: number;
   stl: ArrayBuffer;
-  up?: UpAxis;
-  /** Texture size for baked detail maps, or 'auto' for the size policy; 0 or absent means none. */
-  bakeResolution?: number | 'auto';
+  options?: ConvertOptions;
 };
 
 export type WorkerResponse =

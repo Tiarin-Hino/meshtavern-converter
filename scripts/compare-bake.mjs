@@ -32,9 +32,7 @@ await new Promise((resolve) => setTimeout(resolve, 2500));
 const browser = await chromium.launch({ channel: 'chrome', headless: false });
 try {
   const page = await browser.newPage({ viewport: { width: 760, height: 900 } });
-  await page.goto(
-    `http://localhost:${PORT}/?bake=${resolution}${process.env.KTX ? `&ktx=${process.env.KTX}` : ''}`,
-  );
+  await page.goto(`http://localhost:${PORT}/?bake=${resolution}&ktx=${process.env.KTX ?? 'off'}`);
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 
   for (const file of files) {
