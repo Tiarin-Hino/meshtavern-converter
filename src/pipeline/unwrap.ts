@@ -84,10 +84,12 @@ export async function unwrap(
       indices: source.indices,
     });
     if (error !== 0) throw new Error(`Unwrap failed: ${xatlas.addMeshErrorString(error)}`);
-    atlas.generate(
-      chartOptions,
-      { resolution, padding: ISLAND_PADDING, bilinear: true, blockAlign: true },
-    );
+    atlas.generate(chartOptions, {
+      resolution,
+      padding: ISLAND_PADDING,
+      bilinear: true,
+      blockAlign: true,
+    });
 
     const out = atlas.getMesh(0);
     const count = out.vertexCount;

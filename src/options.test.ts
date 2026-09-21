@@ -28,4 +28,15 @@ describe('parsePageOptions', () => {
     expect(parsePageOptions('?bake=1024&ktx=9').problems).toHaveLength(1);
     expect(parsePageOptions('?bakee=auto').problems).toEqual(['unknown option "bakee" ignored']);
   });
+  it('reads the unwrap variants of the spike (#34) and rejects others', () => {
+    expect(parsePageOptions('?unwrap=whole').unwrap).toEqual({ cut: 0 });
+    expect(parsePageOptions('?unwrap=cut8&workers=4').unwrap).toEqual({ cut: 8, workers: 4 });
+    expect(parsePageOptions('?unwrap=multi8').unwrap).toEqual({ cut: 8, together: true });
+    expect(parsePageOptions('?unwrap=cut8&chart=%7B%22maxCost%22%3A4%7D').unwrap).toEqual({
+      cut: 8,
+      chart: { maxCost: 4 },
+    });
+    expect(parsePageOptions('?unwrap=fast').problems).toHaveLength(1);
+    expect(parsePageOptions('').unwrap).toBeUndefined();
+  });
 });

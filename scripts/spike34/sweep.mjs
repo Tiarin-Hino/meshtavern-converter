@@ -2,7 +2,8 @@
 // process, one core: parts run one after the other, and the time several workers would need
 // is projected as slowest part + packing. Real workers are measured in Chrome (measure.mjs).
 // Usage: node scripts/spike34/sweep.mjs <mini filter> <variant,variant,...> [resolution]
-// Variants: base | parts<N> | cut<N> | <name>=<json chart options> | parts<N>+<json>
+// Variants: base | parts<N> | cut<N> | multi<N> | <name>=<json chart options> | cut<N>+<json>
+// multi<N>: the slabs of cut<N> as N meshes in one atlas: one thread, no second packing.
 import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'vite';
@@ -21,9 +22,8 @@ const { unwrap, unwrapperReady, MAX_CHART_COST } =
   await vite.ssrLoadModule('/src/pipeline/unwrap.ts');
 const { connectedPieces, groupPieces, splitByGroup, cutIntoSlabs } =
   await vite.ssrLoadModule('/src/pipeline/parts.ts');
-const { findIslands, packParts, sharedTexelsPerUnit } = await vite.ssrLoadModule(
-  '/src/pipeline/unwrap-parts.ts',
-);
+const { findIslands, packParts, sharedTexelsPerUnit, unwrapPartsTogether } =
+  await vite.ssrLoadModule('/src/pipeline/unwrap-parts.ts');
 const { surfaceAreaMm2 } = await vite.ssrLoadModule('/src/pipeline/bake-policy.ts');
 const { seamLengthMm } = await vite.ssrLoadModule('/src/pipeline/seams.ts');
 await unwrapperReady();
@@ -50,7 +50,7 @@ for (const name of names) {
   for (const variant of variantList.split(';')) {
     const [kind, json] = variant.includes('=') ? variant.split('=') : variant.split('+');
     const options = { maxCost: MAX_CHART_COST, ...(json ? JSON.parse(json) : {}) };
-    const split = /^(parts|cut)(\d+)$/.exec(kind);
+    const split = /^(parts|cut|multi)(\d+)$/.exec(kind);
     const row = { mini: name, variant, resolution };
     const start = performance.now();
     let result;
@@ -66,22 +66,27 @@ for (const name of names) {
       } else grouping = cutIntoSlabs(mesh, count);
       const parts = splitByGroup(mesh, grouping.groupOfTriangle, grouping.groupSizes.length);
       row.splitMs = round(performance.now() - start);
-      const scale = sharedTexelsPerUnit(surfaceAreaMm2(mesh), resolution);
-      const islands = [];
-      for (const part of parts) islands.push(await findIslands(part.mesh, options, scale));
-      result = await packParts(mesh, parts, islands, resolution);
-      row.partTriangles = grouping.groupSizes;
-      row.partMs = islands.map((i) => round(i.ms));
-      row.packMs = round(result.packMs);
-      row.serialMs = round(performance.now() - start);
-      // What several workers would need: the split, the slowest part, the packing.
-      row.ms = round(row.splitMs + Math.max(...row.partMs) + row.packMs);
-      row.partWasmMb = islands.map((i) => round(i.wasmBytes / 2 ** 20));
-      row.packWasmMb = round(result.packWasmBytes / 2 ** 20);
-      row.chartTypes = islands.reduce(
-        (sum, i) => sum.map((n, k) => n + i.chartTypes[k]),
-        [0, 0, 0, 0, 0],
-      );
+      if (split[1] === 'multi') {
+        result = await unwrapPartsTogether(mesh, parts, resolution, options);
+        row.ms = round(performance.now() - start);
+      } else {
+        const scale = sharedTexelsPerUnit(surfaceAreaMm2(mesh), resolution);
+        const islands = [];
+        for (const part of parts) islands.push(await findIslands(part.mesh, options, scale));
+        result = await packParts(mesh, parts, islands, resolution);
+        row.partTriangles = grouping.groupSizes;
+        row.partMs = islands.map((i) => round(i.ms));
+        row.packMs = round(result.packMs);
+        row.serialMs = round(performance.now() - start);
+        // What several workers would need: the split, the slowest part, the packing.
+        row.ms = round(row.splitMs + Math.max(...row.partMs) + row.packMs);
+        row.partWasmMb = islands.map((i) => round(i.wasmBytes / 2 ** 20));
+        row.packWasmMb = round(result.packWasmBytes / 2 ** 20);
+        row.chartTypes = islands.reduce(
+          (sum, i) => sum.map((n, k) => n + i.chartTypes[k]),
+          [0, 0, 0, 0, 0],
+        );
+      }
     }
     row.charts = result.charts;
     row.utilisation = round(result.utilisation, 4);

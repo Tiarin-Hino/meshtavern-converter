@@ -5,7 +5,13 @@ import { weldVertices, type IndexedMesh } from './mesh';
 import { connectedPieces, cutIntoSlabs, groupPieces, splitByGroup } from './parts';
 import { seamLengthMm } from './seams';
 import { unwrap, MAX_CHART_COST } from './unwrap';
-import { findIslands, packParts, sharedTexelsPerUnit } from './unwrap-parts';
+import {
+  findIslands,
+  packParts,
+  sharedTexelsPerUnit,
+  unwrapInParts,
+  findIslandsHere,
+} from './unwrap-parts';
 
 /** Two sheets side by side that share no vertex: 8 and 18 triangles. */
 function twoSheets(): IndexedMesh {
@@ -112,6 +118,21 @@ describe('the unwrap in parts', () => {
     const packed = await packParts(source, parts, islands, RESOLUTION);
     expect(packed.charts).toBe(whole.charts);
     expect(seamLengthMm(packed.mesh)).toBeCloseTo(seamLengthMm(whole.mesh), 3);
+  });
+
+  it('unwraps slabs as meshes of one atlas into the same islands as slab by slab', async () => {
+    const together = await unwrapInParts(
+      source,
+      RESOLUTION,
+      { cut: 3, together: true },
+      findIslandsHere,
+    );
+    const apart = await unwrapInParts(source, RESOLUTION, { cut: 3 }, findIslandsHere);
+    expect(together.mesh.indices.length).toBe(source.indices.length);
+    expect(together.charts).toBe(apart.charts);
+    expect(together.figures.seamMm).toBeCloseTo(apart.figures.seamMm, 3);
+    expect(surfaceAreaMm2(together.mesh)).toBeCloseTo(surfaceAreaMm2(source), 1);
+    expect(together.figures.ownWasmBytes).toBeGreaterThan(0);
   });
 
   it('packs the islands of several parts into one texture without losing a triangle', async () => {

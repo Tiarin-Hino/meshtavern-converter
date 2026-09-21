@@ -107,9 +107,10 @@ try {
         coverage: round(baked.coverage, 4),
         vertices: baked.vertices,
         seamMm: round(figures.seamMm ?? 0),
-        workers: figures.variant
-          ? Math.min(figures.variant.workers ?? figures.variant.cut, figures.variant.cut)
-          : 0,
+        workers:
+          figures.variant && !figures.variant.together
+            ? Math.min(figures.variant.workers ?? figures.variant.cut, figures.variant.cut)
+            : 0,
         splitMs: figures.splitMs == null ? null : round(figures.splitMs),
         islandsMs: figures.islandsMs == null ? null : round(figures.islandsMs),
         partMs: figures.partMs?.map((ms) => round(ms)) ?? null,
@@ -117,6 +118,7 @@ try {
         partWasmMb: figures.partWasmBytes?.map(mb) ?? null,
         packWasmMb: figures.packWasmBytes == null ? null : mb(figures.packWasmBytes),
         chartTypes: figures.chartTypes ?? null,
+        ownWasmMb: figures.ownWasmBytes == null ? null : mb(figures.ownWasmBytes),
         ktx2Bytes: baked.ktx2Bytes,
         longestFrameGapMs: round(longestFrameGapMs),
       };
@@ -176,7 +178,7 @@ try {
     'Slowest slab',
     'Packing',
     'Memory per worker',
-    'Memory, all workers + packing',
+    'Memory, all unwrappers',
     'Longest stall',
   ];
   const lines = results.map((r) =>
@@ -194,7 +196,7 @@ try {
       r.packMs == null ? '' : `${(r.packMs / 1000).toFixed(1)} s`,
       r.partWasmMb ? `${Math.max(...r.partWasmMb)} MB` : '',
       // A worker's memory only grows, and one worker may take several slabs: count workers, not slabs.
-      r.partWasmMb ? `${r.workers * Math.max(...r.partWasmMb) + r.packWasmMb} MB` : '',
+      `${(r.partWasmMb ? r.workers * Math.max(...r.partWasmMb) : 0) + (r.ownWasmMb ?? r.packWasmMb ?? 0)} MB`,
       `${r.longestFrameGapMs} ms`,
     ].join(' | '),
   );

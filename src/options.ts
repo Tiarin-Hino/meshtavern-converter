@@ -14,7 +14,8 @@ export interface PageOptions {
   /**
    * Spike #34: `?unwrap=cut8` cuts the table level into 8 slabs and finds their islands in
    * workers (`&workers=4` for fewer workers than slabs); `?unwrap=whole` keeps the normal
-   * unwrap and only adds the spike's figures. `&chart={"maxCost":4}` sets xatlas chart options.
+   * unwrap and only adds the spike's figures; `?unwrap=multi8` unwraps the 8 slabs as meshes of
+   * one atlas, without workers. `&chart={"maxCost":4}` sets xatlas chart options.
    */
   unwrap?: UnwrapVariant;
   /** One message per option that was ignored. */
@@ -47,9 +48,10 @@ export function parsePageOptions(search: string): PageOptions {
 
   let unwrap: UnwrapVariant | undefined;
   const unwrapValue = parameters.get('unwrap');
-  const cut = /^cut(\d+)$/.exec(unwrapValue ?? '');
+  const cut = /^(cut|multi)(\d+)$/.exec(unwrapValue ?? '');
   if (unwrapValue === 'whole' || cut) {
-    unwrap = { cut: cut ? Number(cut[1]) : 0 };
+    unwrap = { cut: cut ? Number(cut[2]) : 0 };
+    if (cut?.[1] === 'multi') unwrap.together = true;
     const workers = Number(parameters.get('workers'));
     if (workers >= 1) unwrap.workers = workers;
     try {
@@ -59,7 +61,7 @@ export function parsePageOptions(search: string): PageOptions {
       problems.push('chart ignored: not JSON');
     }
   } else if (unwrapValue !== null) {
-    problems.push(`unwrap=${unwrapValue} ignored: use whole or cut<number>`);
+    problems.push(`unwrap=${unwrapValue} ignored: use whole, cut<number> or multi<number>`);
   }
 
   for (const key of parameters.keys()) {

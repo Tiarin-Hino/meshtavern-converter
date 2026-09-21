@@ -10,7 +10,8 @@ let islandPool: IslandFinder | undefined;
 
 scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const variant = event.data.options?.unwrapVariant;
-  if (variant && variant.cut > 0) islandPool ??= startIslandPool(variant.workers ?? variant.cut);
+  if (variant && variant.cut > 0 && !variant.together)
+    islandPool ??= startIslandPool(variant.workers ?? variant.cut);
   void handleRequest(
     event.data,
     (response, transfer = []) => scope.postMessage(response, transfer),

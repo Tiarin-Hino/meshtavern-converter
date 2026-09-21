@@ -167,6 +167,8 @@ export interface UnwrapVariant {
   chart?: ChartOptions;
   /** Workers to find islands in. Fewer than slabs is fine: slabs queue up. */
   workers?: number;
+  /** All slabs as meshes of one atlas, on this thread: no workers, no second packing. */
+  together?: boolean;
 }
 
 /** Finds the islands of several meshes, in whatever order and on whatever threads it likes. */
@@ -197,6 +199,18 @@ export interface UnwrapFigures {
   packMs?: number;
   packWasmBytes?: number;
   chartTypes?: number[];
+  /** WebAssembly memory of the conversion worker's own unwrapper after the unwrap. */
+  ownWasmBytes: number;
+}
+
+/** The unwrapper's memory only grows, so its size after a run is that run's peak. */
+async function ownWasmBytes(): Promise<number> {
+  const atlas = (await unwrapperReady()).createAtlas();
+  try {
+    return wasmBytesOf(atlas);
+  } finally {
+    atlas.destroy();
+  }
 }
 
 export async function unwrapInParts(
@@ -209,12 +223,18 @@ export async function unwrapInParts(
   const options = { maxCost: MAX_CHART_COST, ...variant.chart };
   if (variant.cut < 1) {
     const whole = await unwrap(source, resolution, onProgress, options);
-    return { ...whole, figures: { variant, seamMm: seamLengthMm(whole.mesh) } };
+    const figures = { variant, seamMm: seamLengthMm(whole.mesh) };
+    return { ...whole, figures: { ...figures, ownWasmBytes: await ownWasmBytes() } };
   }
   const start = performance.now();
   const { groupOfTriangle, groupSizes } = cutIntoSlabs(source, variant.cut);
   const parts = splitByGroup(source, groupOfTriangle, groupSizes.length);
   const splitMs = performance.now() - start;
+  if (variant.together) {
+    const together = await unwrapPartsTogether(source, parts, resolution, options, onProgress);
+    const figures = { variant, seamMm: seamLengthMm(together.mesh), splitMs };
+    return { ...together, figures: { ...figures, ownWasmBytes: await ownWasmBytes() } };
+  }
   const islands = await finder(
     parts.map((part) => part.mesh),
     options,
@@ -238,6 +258,78 @@ export async function unwrapInParts(
         (sum, part) => sum.map((count, type) => count + part.chartTypes[type]!),
         [0, 0, 0, 0, 0],
       ),
+      ownWasmBytes: await ownWasmBytes(),
     },
   };
+}
+
+/**
+ * The plainest variant: every part goes into one atlas as a mesh of its own, and xatlas
+ * finds islands per mesh and packs them all in one go. One thread, no second packing.
+ */
+export async function unwrapPartsTogether(
+  source: IndexedMesh,
+  parts: readonly MeshPart[],
+  resolution: number,
+  options: ChartOptions,
+  onProgress: (percent: number) => void = () => {},
+): Promise<Unwrapped> {
+  const xatlas = await unwrapperReady();
+  const atlas = xatlas.createAtlas();
+  try {
+    let reported = -1;
+    atlas.setProgressCallback((category, progress) => {
+      if (category === 1 && progress >= reported + 2) onProgress((reported = progress));
+      return true;
+    });
+    for (const part of parts) {
+      const error = atlas.addMesh({
+        positions: part.mesh.positions,
+        normals: part.mesh.normals,
+        indices: part.mesh.indices,
+        meshCountHint: parts.length,
+      });
+      if (error !== 0) throw new Error(`Unwrap failed: ${xatlas.addMeshErrorString(error)}`);
+    }
+    atlas.generate(options, {
+      resolution,
+      padding: ISLAND_PADDING,
+      bilinear: true,
+      blockAlign: true,
+    });
+    const sourceVertex: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+    parts.forEach((part, p) => {
+      const out = atlas.getMesh(p);
+      const offset = sourceVertex.length;
+      for (const vertex of out.vertices) {
+        sourceVertex.push(part.sourceVertex[vertex.xref]!);
+        uvs.push(vertex.uv[0] / atlas.width, vertex.uv[1] / atlas.height);
+      }
+      for (const index of out.indices) indices.push(offset + index);
+    });
+    const carry = (values: Float32Array | undefined, width: number): Float32Array | undefined => {
+      if (!values) return undefined;
+      const carried = new Float32Array(sourceVertex.length * width);
+      sourceVertex.forEach((from, to) => {
+        for (let k = 0; k < width; k++) carried[to * width + k] = values[from * width + k]!;
+      });
+      return carried;
+    };
+    return {
+      mesh: {
+        positions: carry(source.positions, 3)!,
+        indices: Uint32Array.from(indices),
+        normals: carry(source.normals, 3),
+        cavity: carry(source.cavity, 1),
+        occlusion: carry(source.occlusion, 1),
+        uvs: Float32Array.from(uvs),
+      },
+      charts: atlas.chartCount,
+      utilisation: atlas.getUtilization(0),
+    };
+  } finally {
+    atlas.destroy();
+  }
 }
