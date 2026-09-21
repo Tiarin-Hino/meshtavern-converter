@@ -26,7 +26,7 @@ const MINIS = [
   'SoftDagger_32mm',
 ];
 const VARIANTS =
-  'today=unwrap=whole;cut8 one worker=unwrap=cut8&workers=1;cut8 eight workers=unwrap=cut8';
+  'today=unwrap=whole;cut8, one worker=unwrap=cut8&workers=1;cut8, eight workers=unwrap=cut8;8 slabs, one atlas=unwrap=multi8;16 slabs, one atlas=unwrap=multi16';
 const VIEWS = [
   { name: 'whole', azimuth: 25, elevation: 12, zoom: 1 },
   { name: 'close-up', azimuth: 25, elevation: 8, zoom: 2.6 },
