@@ -1,16 +1,16 @@
-import type { XAtlasModule } from 'xatlas-wasm';
+import type { ChartOptions, XAtlasModule } from 'xatlas-wasm';
 import { generateBumpySheet } from './generate';
 import { weldVertices, type IndexedMesh } from './mesh';
 
 /** Texels left empty around every UV island, so neighbouring islands do not bleed into each other. */
-const ISLAND_PADDING = 3;
+export const ISLAND_PADDING = 3;
 
 /**
  * How much distortion an island may accumulate before xatlas starts a new one (its default
  * is 2). Measured on a 60k-triangle detailed sculpt: 8 makes finding the islands about 40 %
  * faster and gives slightly fewer of them; going higher changes nothing.
  */
-const MAX_CHART_COST = 8;
+export const MAX_CHART_COST = 8;
 
 export interface Unwrapped {
   /**
@@ -62,6 +62,8 @@ export async function unwrap(
   resolution: number,
   /** Called with 0..100 as the unwrap advances. Finding the islands is nearly all of the time. */
   onProgress: (percent: number) => void = () => {},
+  /** Spike #34 only: other settings for finding the islands. */
+  chartOptions: ChartOptions = { maxCost: MAX_CHART_COST },
 ): Promise<Unwrapped> {
   const xatlas = await unwrapperReady();
   const atlas = xatlas.createAtlas();
@@ -83,7 +85,7 @@ export async function unwrap(
     });
     if (error !== 0) throw new Error(`Unwrap failed: ${xatlas.addMeshErrorString(error)}`);
     atlas.generate(
-      { maxCost: MAX_CHART_COST },
+      chartOptions,
       { resolution, padding: ISLAND_PADDING, bilinear: true, blockAlign: true },
     );
 
