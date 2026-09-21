@@ -25,7 +25,10 @@ for (const path of corpusFiles().filter((file) => file.includes(filter))) {
   const name = key.replaceAll('/', '__');
   for (const field of ['positions', 'normals', 'indices']) {
     const array = table[field];
-    writeFileSync(join(OUT, `${name}.${field}`), Buffer.from(array.buffer, array.byteOffset, array.byteLength));
+    writeFileSync(
+      join(OUT, `${name}.${field}`),
+      new Uint8Array(array.buffer, array.byteOffset, array.byteLength),
+    );
   }
   const { sizes } = connectedPieces(table);
   const triangles = table.indices.length / 3;

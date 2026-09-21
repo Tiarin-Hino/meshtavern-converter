@@ -2,9 +2,11 @@
 // worker), then one packing pass places the islands of all parts in one texture.
 // Nothing here is used by the normal path.
 import type { ChartOptions, XAtlas } from 'xatlas-wasm';
+import { surfaceAreaMm2 } from './bake-policy';
 import type { IndexedMesh } from './mesh';
-import type { MeshPart } from './parts';
-import { ISLAND_PADDING, unwrapperReady, type Unwrapped } from './unwrap';
+import { cutIntoSlabs, splitByGroup, type MeshPart } from './parts';
+import { seamLengthMm } from './seams';
+import { ISLAND_PADDING, MAX_CHART_COST, unwrap, unwrapperReady, type Unwrapped } from './unwrap';
 
 /** Share of the texture xatlas aims to fill when it picks the scale itself. */
 const EXPECTED_UTILISATION = 0.75;
@@ -155,4 +157,87 @@ export async function packParts(
   } finally {
     atlas.destroy();
   }
+}
+
+/** Development option of the spike: how the table level is unwrapped instead of the normal way. */
+export interface UnwrapVariant {
+  /** Number of slabs a mesh is cut into; 0 keeps the normal unwrap (with `chart`, if given). */
+  cut: number;
+  /** Other settings for finding the islands; the normal ones where left out. */
+  chart?: ChartOptions;
+  /** Workers to find islands in. Fewer than slabs is fine: slabs queue up. */
+  workers?: number;
+}
+
+/** Finds the islands of several meshes, in whatever order and on whatever threads it likes. */
+export type IslandFinder = (
+  meshes: IndexedMesh[],
+  options: ChartOptions,
+  texelsPerUnit: number,
+  onProgress: (percent: number) => void,
+) => Promise<PartIslands[]>;
+
+/** One after the other on this thread: what Node and the tests use. */
+export const findIslandsHere: IslandFinder = async (meshes, options, texelsPerUnit) => {
+  const islands: PartIslands[] = [];
+  for (const mesh of meshes) islands.push(await findIslands(mesh, options, texelsPerUnit));
+  return islands;
+};
+
+/** What the spike wants to know about an unwrap, whichever way it ran. */
+export interface UnwrapFigures {
+  variant: UnwrapVariant;
+  seamMm: number;
+  splitMs?: number;
+  /** Per slab: time inside its worker and that worker's WebAssembly memory. */
+  partMs?: number[];
+  partWasmBytes?: number[];
+  /** From handing out the slabs until the last one is back: includes queueing and copying. */
+  islandsMs?: number;
+  packMs?: number;
+  packWasmBytes?: number;
+  chartTypes?: number[];
+}
+
+export async function unwrapInParts(
+  source: IndexedMesh,
+  resolution: number,
+  variant: UnwrapVariant,
+  finder: IslandFinder,
+  onProgress: (percent: number) => void = () => {},
+): Promise<Unwrapped & { figures: UnwrapFigures }> {
+  const options = { maxCost: MAX_CHART_COST, ...variant.chart };
+  if (variant.cut < 1) {
+    const whole = await unwrap(source, resolution, onProgress, options);
+    return { ...whole, figures: { variant, seamMm: seamLengthMm(whole.mesh) } };
+  }
+  const start = performance.now();
+  const { groupOfTriangle, groupSizes } = cutIntoSlabs(source, variant.cut);
+  const parts = splitByGroup(source, groupOfTriangle, groupSizes.length);
+  const splitMs = performance.now() - start;
+  const islands = await finder(
+    parts.map((part) => part.mesh),
+    options,
+    sharedTexelsPerUnit(surfaceAreaMm2(source), resolution),
+    onProgress,
+  );
+  const islandsMs = performance.now() - start - splitMs;
+  const packed = await packParts(source, parts, islands, resolution);
+  return {
+    ...packed,
+    figures: {
+      variant,
+      seamMm: seamLengthMm(packed.mesh),
+      splitMs,
+      partMs: islands.map((part) => part.ms),
+      partWasmBytes: islands.map((part) => part.wasmBytes),
+      islandsMs,
+      packMs: packed.packMs,
+      packWasmBytes: packed.packWasmBytes,
+      chartTypes: islands.reduce(
+        (sum, part) => sum.map((count, type) => count + part.chartTypes[type]!),
+        [0, 0, 0, 0, 0],
+      ),
+    },
+  };
 }

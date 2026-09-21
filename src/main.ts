@@ -378,6 +378,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
         up,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
+        unwrapVariant: pageOptions.unwrap,
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
       },
     );

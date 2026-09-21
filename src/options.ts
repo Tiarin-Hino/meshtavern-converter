@@ -1,4 +1,5 @@
 import { DETAIL_EFFORT, DETAIL_EFFORTS } from './pipeline/compress';
+import type { UnwrapVariant } from './pipeline/unwrap-parts';
 
 /**
  * Options from the page address, for development only: without any, a mini is baked at the
@@ -10,12 +11,18 @@ export interface PageOptions {
   bake: number | 'auto';
   /** `?ktx=0..3` sets the UASTC effort, `?ktx=off` gives null: the texture stays uncompressed. */
   ktx: number | null;
+  /**
+   * Spike #34: `?unwrap=cut8` cuts the table level into 8 slabs and finds their islands in
+   * workers (`&workers=4` for fewer workers than slabs); `?unwrap=whole` keeps the normal
+   * unwrap and only adds the spike's figures. `&chart={"maxCost":4}` sets xatlas chart options.
+   */
+  unwrap?: UnwrapVariant;
   /** One message per option that was ignored. */
   problems: string[];
 }
 
 const BAKE_SIZES = [256, 512, 1024, 2048, 4096];
-const KNOWN = ['bake', 'ktx', 'settle'];
+const KNOWN = ['bake', 'ktx', 'settle', 'unwrap', 'workers', 'chart'];
 
 export function parsePageOptions(search: string): PageOptions {
   const parameters = new URLSearchParams(search);
@@ -38,6 +45,23 @@ export function parsePageOptions(search: string): PageOptions {
     else problems.push(`ktx=${ktxValue} ignored: use off, ${DETAIL_EFFORTS.join(', ')}`);
   }
 
+  let unwrap: UnwrapVariant | undefined;
+  const unwrapValue = parameters.get('unwrap');
+  const cut = /^cut(\d+)$/.exec(unwrapValue ?? '');
+  if (unwrapValue === 'whole' || cut) {
+    unwrap = { cut: cut ? Number(cut[1]) : 0 };
+    const workers = Number(parameters.get('workers'));
+    if (workers >= 1) unwrap.workers = workers;
+    try {
+      const chart = parameters.get('chart');
+      if (chart) unwrap.chart = JSON.parse(chart) as UnwrapVariant['chart'];
+    } catch {
+      problems.push('chart ignored: not JSON');
+    }
+  } else if (unwrapValue !== null) {
+    problems.push(`unwrap=${unwrapValue} ignored: use whole or cut<number>`);
+  }
+
   for (const key of parameters.keys()) {
     if (!KNOWN.includes(key)) problems.push(`unknown option "${key}" ignored`);
   }
@@ -45,5 +69,5 @@ export function parsePageOptions(search: string): PageOptions {
   if (/%(?![0-9a-f]{2})/i.test(search)) {
     problems.push('the address contains a stray "%": options are separated by "&"');
   }
-  return { bake, ktx, problems };
+  return { bake, ktx, problems, ...(unwrap ? { unwrap } : {}) };
 }

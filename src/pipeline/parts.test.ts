@@ -67,7 +67,8 @@ describe('cutIntoSlabs', () => {
   it('cuts one piece into slabs of equal size along its longest side', () => {
     const sheet = weldVertices(generateBumpySheet(8, 40)).mesh;
     // Stretch x, so that the cut has to run across x.
-    for (let i = 0; i < sheet.positions.length; i += 3) sheet.positions[i] = sheet.positions[i]! * 3;
+    for (let i = 0; i < sheet.positions.length; i += 3)
+      sheet.positions[i] = sheet.positions[i]! * 3;
     const { groupOfTriangle, groupSizes } = cutIntoSlabs(sheet, 4);
     expect(groupSizes).toEqual([32, 32, 32, 32]);
     const highestX = [0, 0, 0, 0];
