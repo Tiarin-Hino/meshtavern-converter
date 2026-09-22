@@ -51,6 +51,49 @@ Order rationale _(proposal)_: first the net that catches regressions, then the s
    - **Then the change itself,** as its own issue, only if the spike finds a variant that meets the target below. Same rules as every step: in the worker, timed, with progress, cancellable, per-vertex look when it fails; the regression baseline is updated on purpose.
    - Target _(proposal)_: on the development PC every corpus mini except the largest file unwraps in 15 s or less, and no mini looks worse on its comparison sheet (PM's call). Texture coordinates also carry painting later, so visibly more seams count as worse.
    - If no variant gets there, the spike's recommendation says what to do instead: for example accept the time for large minis and show the per-vertex mini at once while the baked one finishes _(proposal, a product decision for the PM)_.
+   - Status: spike done (#34, 2026-09-22); figures and sheets under "Story 9: what the spike found" below. A variant meets the target with room to spare: the table level cut into 8 slabs and handed to xatlas as 8 meshes of one atlas. The change itself is drafted as #57 and waits for the PM's look at the comparison sheets.
+
+## Story 9: what the spike found (#34, 2026-09-22)
+
+Development PC: RTX 3060, i7-11700F (16 threads), 64 GB, Chrome 153, window in front, a fresh page per conversion. The reference laptop is not measured. The run's "today" column matches the PM's corpus run of 2026-09-21 (85.6 s against 84.1 s for the slowest mini), and the steps no variant touches (weld, simplify, shade) stayed within 0.2 s across the variants for seven minis and within 1 s for the other two, so the machine held still. An earlier run of the same session did not pass that check (up to twice as slow) and is used for the chart options only, as a ratio within each mini.
+
+**Why the unwrap is slow.** xatlas's time grows roughly with the square of the mesh it is given: half the mesh takes about a quarter of the time. Cut into 8 slabs and unwrapped one after the other on one core, the slowest mini drops from 86 s to 6 s. Parallel work was never the lever; smaller pieces are.
+
+**Connected parts (a, as written).** 27 of the 30 corpus table levels are one connected piece, the swarms included (they stand on one base). In the other three the largest piece holds 94–96 % of the triangles. Splitting by connected parts gains nothing on any corpus mini, so the spike cut the mesh instead: slabs of equal triangle count across the longest side of the mini. Every cut becomes a seam.
+
+**Variants measured**, all on the six slowest minis and three ordinary ones:
+
+- **cut8, one worker / eight workers** (variant a with slabs): islands found per slab in nested workers, then one packing pass over all islands (`addUvMesh` + `packCharts`).
+- **(b) chart options:** `maxCost` 2, 4, 16 (today 8), `normalDeviationWeight` 1, `straightnessWeight` 0, `normalSeamWeight` 0, `maxChartArea` 25 and 100 mm², `maxIterations` 2, on four minis in Node. None is faster than today beyond noise; `straightnessWeight` 0 and `maxIterations` 2 are 1.4–2.5 times slower. The best, `normalDeviationWeight` 1, then ran on all nine in Chrome: between 11 % faster and 7 % slower on the six large minis, up to 2 % fewer islands. **No lever here.**
+- **(c) cut8 + `normalDeviationWeight` 1:** same time as cut8 alone within noise.
+- **8 slabs, one atlas / 16 slabs, one atlas** (found during the spike): the slabs go into one xatlas atlas as separate meshes; xatlas finds islands per mesh and packs once. One thread, no workers, no second packing pass.
+
+Unwrap time in seconds, real Chrome:
+
+| Mini                   | Texture | Today | cut8, 1 worker | cut8, 8 workers | **8 slabs, one atlas** | 16 slabs, one atlas | Whole conversion, today → 8 slabs | Islands, today → 8 slabs | Seam length, 8 / 16 slabs | Texture used: today / cut8 / 8 slabs |
+| ---------------------- | ------- | ----- | -------------- | --------------- | ---------------------- | ------------------- | --------------------------------- | ------------------------ | ------------------------- | ------------------------------------ |
+| SquidlingSwarm_32mm    | 2048 px | 85.6  | 6.2            | 4.6             | **4.7**                | 3.2                 | 109.9 → 28.1                      | 8295 → 8808              | +5 % / +11 %              | 78 / 75 / 78 %                       |
+| HillGiant_32mm_FDM     | 2048 px | 49.5  | 5.6            | 4.6             | **4.0**                | 3.1                 | 74.3 → 28.1                       | 6457 → 7100              | +8 % / +17 %              | 80 / 77 / 79 %                       |
+| 32mm_SirRichardMounted | 2048 px | 46.4  | 5.4            | 4.4             | **3.9**                | 3.0                 | 70.4 → 26.6                       | 5706 → 6211              | +6 % / +15 %              | 77 / 74 / 77 %                       |
+| AbigailMounted_32mm    | 2048 px | 46.1  | 5.8            | 4.7             | **4.2**                | 3.3                 | 76.1 → 33.0                       | 5905 → 6424              | +6 % / +14 %              | 76 / 73 / 76 %                       |
+| T-001                  | 2048 px | 43.0  | 5.5            | 4.5             | **4.1**                | 3.2                 | 62.0 → 22.6                       | 6055 → 6561              | +7 % / +11 %              | 77 / 74 / 77 %                       |
+| TormentedGiant_32mm    | 2048 px | 42.3  | 5.7            | 4.5             | **4.1**                | 3.3                 | 76.9 → 39.7                       | 5307 → 5737              | +5 % / +9 %               | 76 / 73 / 76 %                       |
+| MINI-012               | 1024 px | 12.3  | 3.9            | 3.3             | **3.0**                | 2.4                 | 19.2 → 9.4                        | 2610 → 3280              | +12 % / +35 %             | 83 / 80 / 82 %                       |
+| FellWarrior_32mm       | 1024 px | 11.2  | 3.2            | 3.2             | **2.3**                | 2.0                 | 19.6 → 10.8                       | 3626 → 4011              | +8 % / +19 %              | 82 / 79 / 81 %                       |
+| SoftDagger_32mm        | 1024 px | 7.5   | 3.3            | 3.2             | **2.4**                | 2.0                 | 15.5 → 10.3                       | 2277 → 2607              | +9 % / +21 %              | 78 / 76 / 78 %                       |
+
+- **Seam length** is the summed length of all island borders on the mini, in mm: a number for "more seams". Today's minis already carry 5–31 m of seams in 2,300–8,300 islands; 8 slabs add 5–12 %.
+- **Memory** of the unwrapper (WebAssembly memory, which only grows; the JavaScript side of a worker is not measurable from the page): today 19–34 MB; 8 slabs in one atlas 16–28 MB, less than today; workers 16 MB each plus 16 MB for packing, 144 MB with eight.
+- **Workers buy little:** 1.8 s of a cut8 unwrap is the second packing pass, and each worker's unwrapper has to load and warm up. Eight workers are 0.1 s faster to 0.9 s slower than one atlas on one thread, at five times the memory. The second packing pass also loses about 3 points of texture use; one atlas does not.
+- **Longest page stall:** 18–61 ms in every variant.
+- **The whole corpus, 8 slabs in one atlas** (Node, one core, the table levels of all 30 minis at the texture size the policy gives them; Node's times match Chrome's for today's unwrap): 0.7–9.2 s, median 3.5 s, the largest file 5.3 s. Slowest: `32mm_CaveWallLong` 9.2 s and `32mm_GiantBat` 8.3 s (slabs of equal triangle count are not slabs of equal work); all others 5.3 s or less. Islands −3 % to +31 %, texture use within 1 point of today (one mini +3).
+- **Comparison sheets:** `out/spike34/chrome2/<mini>.png` on the development PC, one column per variant, three views of the baked table level. No difference visible to the agent at these views; the call is the PM's.
+
+**Recommendation: build "8 slabs, one atlas"** (#57). It meets the target on every corpus mini, the largest file included, is the simplest of the variants (no workers, no second packing, about 60 lines), uses less memory than today and keeps the texture use. With it a large mini converts in 23–40 s instead of 62–110 s and an ordinary one in about 10 s instead of 15–20 s. 16 slabs save one more second at twice the seam cost: not worth it. Workers and chart options: drop.
+
+What this leaves as the longest steps of a large mini: the bake (11–17 s at 2048 px) and the texture encoding (6 s). Not measured here: the reference laptop; whether the cuts show once minis are painted (a cut that follows the shape instead of a straight slab is the idea to keep for then).
+
+To run it again: `npm run build && node scripts/spike34/measure.mjs` (Chrome, sheets), `node scripts/spike34/dump-tables.mjs` then `node scripts/spike34/sweep.mjs <mini> "base;multi8"` (Node). In the page: `?unwrap=multi8`, `?unwrap=cut8&workers=4`, `?unwrap=whole&chart={…}`.
 
 ## Exit criteria
 
@@ -67,7 +110,7 @@ No server, no storage, no accounts, no analytics. Files are read in the browser 
 
 - **Messy files are open-ended.** Time-box #43 per kind of mess; what cannot be repaired cheaply becomes a clear refusal.
 - **Base and support detection are heuristics** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
-- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. #34 (story 9) is the answer; it may not find one, and then the 15 s target holds for ordinary minis only.
+- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. Until #57 is built the old times hold; the reference laptop is still to be measured.
 - **Two young dependencies** (`xatlas-wasm`, `ktx2-encoder`) sit in the critical path until #33 and #38 are done.
 - **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus.
 
