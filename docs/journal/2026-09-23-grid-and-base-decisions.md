@@ -13,7 +13,7 @@ Two changes to the plan before the scale work starts. Story 4 (#44) no longer as
 
 ## Why
 
-The PM decided on 2026-09-23 that **one grid square is 32 mm in mini space**. Tiny, Small and Medium creatures take one square; Large 2×2, Huge 3×3, Gargantuan 4×4. A base may be smaller than its footprint: a 50 mm base is a normal Large mini and sits centred in its 2×2 squares. This ties the size of a mini to what matters at the table, the number of squares it takes, rather than to a list of base diameters. The old list (25, 32, 40, 50, 75, 100 mm) had no clear meaning at the table, and 40 mm matched no creature size at all.
+The PM decided on 2026-09-23 that **one grid square is 32 mm in mini space**. Tiny, Small and Medium creatures take one square, Medium filling it and Small and Tiny standing centred in it; Large 2×2, Huge 3×3, Gargantuan 4×4. A base may be smaller than its footprint: a 50 mm base is a normal Large mini and sits centred in its 2×2 squares. This ties the size of a mini to what matters at the table, the number of squares it takes, rather than to a list of base diameters. The old list (25, 32, 40, 50, 75, 100 mm) had no clear meaning at the table, and 40 mm matched no creature size at all.
 
 The separate base came from the PM's own collection: professional minis are rarely printed on a plain base. The figure has feet, a peg or a tab, the base has a recess or a hole, and joining them in another program is exactly the kind of step the converter exists to remove.
 
@@ -27,7 +27,7 @@ The spec's story 4 is rewritten and story 10 added; the issues #44 and #70 carry
 
 ## Still open
 
-- Whether Tiny creatures share the 1×1 square with Small and Medium is a proposal; the PM named Small and Medium.
+- Which of Tiny, Small and Medium a small base suggests is a proposal (under 26 mm Small, otherwise Medium, Tiny only by choice); the review of PR 71 first read Tiny as undecided, and the PM confirmed all three on 2026-09-23.
 - The exact heuristic for recesses, slots and pegs is for the implementation of #70 to find; the corpus pairs will show how often it is right.
 - The 32 mm grid is a decision the table (Phase 2) inherits; it belongs in an ADR or the vision when the table is specced.
 
