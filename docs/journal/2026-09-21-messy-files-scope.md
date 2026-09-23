@@ -43,7 +43,7 @@ None; this was a scope change. The memory figures a "too large" estimate can bui
 
 - #43 itself: not built at the time of writing.
 - #54, removing supports, after the release.
-- The narrowed risk line did not survive: a later merge of `main` into the branch of #56 brought back the old wording "Base and support detection are heuristics", and the spec still carries it. It needs fixing in a docs PR.
+- The narrowed risk line did not survive: a later merge of `main` into the branch of #56 brought back the old wording "Base and support detection are heuristics", and the spec carried it. **Fixed 2026-09-23 (#63):** the risk line reads "Base detection is a heuristic" again.
 
 ## Story angle
 
