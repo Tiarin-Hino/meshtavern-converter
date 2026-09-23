@@ -30,8 +30,12 @@ Planning commands (specs, decisions, research, status) were not copied. Planning
 
 - **A command needed the bug form's fields.** The original `/fix-bug` says to create a bug issue "following the bug form". **Fix:** the command lists the form's fields (steps, expected, actual, browser/OS/GPU) inline instead of reading the YAML, for a fast CLI issue creation.
 
+- **`/fix-bug` skipped the `ready-for-agent` gate.** Astra's review of this PR noticed that the command went from finding or creating an issue straight to fixing it, against the rule in `CLAUDE.md`. **Cause:** the original in the product repo had the same gap. **Fix:** a gate step in both copies; a freshly created issue waits for the PM's label too.
+- **A wrong claim in this entry.** Its first version said the repo has no issue forms. It does; the agent misread a directory listing. Astra caught it, and the Claude fix job corrected the entry.
+
 ## Still open
 
+- The Claude fix job could not apply the gate itself: writes to `.claude/skills/` are blocked for it, so fixes to commands need a human-started session.
 - The copies can drift from the originals. When one changes, the other should follow in a companion PR.
 
 ## Story angle
