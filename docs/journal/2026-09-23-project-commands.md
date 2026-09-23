@@ -41,3 +41,5 @@ Planning commands (specs, decisions, research, status) were not copied. Planning
 ## Story angle
 
 Small, but telling: an AI agent's instructions are files in a repo, and they only work in the repo they sit in.
+
+Later: see 2026-09-23-handover-commands.md. A sixth command, `/continue-pr <PR>`, joined the five.
