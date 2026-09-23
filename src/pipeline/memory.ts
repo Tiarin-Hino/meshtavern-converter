@@ -17,11 +17,16 @@ export const ASCII_BYTES_PER_TRIANGLE = 150;
 /**
  * Memory a conversion needs per source triangle, on top of the file itself: the triangle
  * soup, welding, the placed mesh with normals, the simplifier's copy, the levels and the
- * bake. Measured as the peak memory of the tab in Chrome (see the journal entry of #43).
+ * bake. Fitted to the peak memory of the page's process in Chrome while it converts
+ * (`scripts/measure-memory.mjs`): 440–460 bytes per triangle with the file included, so
+ * 50 for a binary file plus this. The estimate stays above every measured peak.
  */
 export const BYTES_PER_TRIANGLE = 400;
-/** Memory the page needs whatever the file: three.js, the WebAssembly modules, a 4K texture being baked. */
-export const FIXED_BYTES = 400 * 1024 ** 2;
+/**
+ * Memory the page needs whatever the file: three.js, the WebAssembly modules, the texture
+ * being baked. Measured: 333 MB for a 3,200-triangle file.
+ */
+export const FIXED_BYTES = 360 * 1024 ** 2;
 
 /** Share of the device's memory a conversion may use: the system and other tabs need the rest. */
 export const DEVICE_SHARE = 0.5;
