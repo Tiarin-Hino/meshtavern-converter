@@ -139,6 +139,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
+          # Keep the workflow token out of git config. Otherwise it wins over the Claude App token
+          # when Claude pushes, and a push made with the workflow token starts no workflows:
+          # neither the next review nor CI (seen on converter #63 and private #13).
+          persist-credentials: false
 
       - name: Check the branch is still the reviewed commit
         id: fresh
