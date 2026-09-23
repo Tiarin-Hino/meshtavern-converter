@@ -7,13 +7,6 @@ import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './o
 import { shade } from './shade';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
-import {
-  findIslandsHere,
-  unwrapInParts,
-  type IslandFinder,
-  type UnwrapFigures,
-  type UnwrapVariant,
-} from './unwrap-parts';
 import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
 
 export const STEPS = ['read', 'weld', 'orient', 'simplify', 'shade', 'levels'] as const;
@@ -66,8 +59,6 @@ export interface ConversionStats {
   peakHeapBytes: number | null;
   /** Set when baking was wanted but the mini keeps the per-vertex look instead, and why. */
   bakeSkipped: BakeSkipped | null;
-  /** Spike #34: only when an unwrap variant was asked for. */
-  unwrapFigures?: UnwrapFigures;
 }
 
 export type BakeSkipped =
@@ -126,9 +117,6 @@ export interface PipelineOptions {
   compress?: number | null;
   /** Largest texture the device can hold, when known. A mini that needs more keeps the per-vertex look. */
   maxTextureSize?: number;
-  /** Spike #34, development only: another way to unwrap, and who finds the islands. */
-  unwrapVariant?: UnwrapVariant;
-  findIslands?: IslandFinder;
 }
 
 /** Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node. */
@@ -140,8 +128,6 @@ export async function runPipeline(
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
     maxTextureSize,
-    unwrapVariant,
-    findIslands = findIslandsHere,
   }: PipelineOptions = {},
 ): Promise<ConversionResult> {
   const bakeSteps = BAKE_STEPS.filter((step) => step !== 'compress' || compress !== null);
@@ -218,7 +204,6 @@ export async function runPipeline(
 
   let baked: Baked | undefined;
   let bakeSkipped: BakeSkipped | null = null;
-  let unwrapFigures: UnwrapFigures | undefined;
   if (bakeRequest !== 0) {
     const table = lods[BAKED_LEVEL]!.mesh;
     const tableAreaMm2 = surfaceAreaMm2(table);
@@ -233,12 +218,8 @@ export async function runPipeline(
         const unwrapEnd = begin('unwrap');
         const unwrapProgress = (stepPercent: number): void =>
           onProgress({ step: 'unwrap', percent: overall, stepPercent });
-        const variantResult = unwrapVariant
-          ? await unwrapInParts(table, resolution, unwrapVariant, findIslands, unwrapProgress)
-          : null;
-        unwrapFigures = variantResult?.figures;
         const unwrapped = unwrapEnd(
-          variantResult ?? (await unwrap(table, resolution, unwrapProgress)),
+          await unwrap(table, resolution, unwrapProgress),
           meshBytes(placed.mesh) + meshBytes(table) * 3,
         );
         step = 'bake';
@@ -300,7 +281,6 @@ export async function runPipeline(
       peakBufferBytes,
       peakHeapBytes,
       bakeSkipped,
-      ...(unwrapFigures ? { unwrapFigures } : {}),
     },
   };
 }

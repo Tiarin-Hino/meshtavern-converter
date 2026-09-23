@@ -76,10 +76,10 @@
     ],
     "baked": {
       "resolution": 512,
-      "vertices": 29557,
-      "charts": 1593,
-      "utilisation": 0.829618,
-      "coverage": 0.443756,
+      "vertices": 30721,
+      "charts": 1895,
+      "utilisation": 0.837189,
+      "coverage": 0.442955,
       "fallback": 0
     }
   },
