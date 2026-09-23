@@ -499,7 +499,12 @@ async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> 
   const mesh = levels[level];
   if (!mesh || level === 0 || !state.fileName) throw new Error('No converted level to export');
   if (compact) await glbEncoderReady();
-  return encodeGlb(mesh, { name: state.fileName.replace(/.stl$/i, ''), look: state.look, compact });
+  return encodeGlb(mesh, {
+    name: state.fileName.replace(/.stl$/i, ''),
+    look: state.look,
+    compact,
+    sizing: state.stats?.sizing,
+  });
 }
 
 async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
