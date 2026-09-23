@@ -59,8 +59,47 @@ export function computeVertexNormals({ positions, indices }: IndexedMesh): Float
 
 export interface WeldResult {
   mesh: IndexedMesh;
-  /** Triangles dropped because two or more corners welded into the same vertex. */
+  /** Triangles dropped because two or more corners welded into the same vertex, or because they have no area. */
   degenerateTriangles: number;
+  /** Triangles dropped because an earlier one has the same three vertices, in whatever order. */
+  duplicateTriangles: number;
+}
+
+/**
+ * Twice the area below which a triangle counts as flat, in mm². Real triangles of a
+ * 0.01 mm print detail are a million times larger; this only catches corners that lie
+ * on one line.
+ */
+export const FLAT_TRIANGLE_MM2 = 1e-10;
+
+export interface ValidSoup {
+  soup: Float32Array;
+  /** Triangles dropped because a coordinate is not a number or infinite. */
+  invalidTriangles: number;
+}
+
+/** Drops triangles with a coordinate that is NaN or infinite. Returns the input itself when all are valid. */
+export function dropInvalidTriangles(soup: Float32Array): ValidSoup {
+  let invalid = 0;
+  for (let t = 0; t < soup.length; t += 9) {
+    for (let i = t; i < t + 9; i++) {
+      if (!Number.isFinite(soup[i]!)) {
+        invalid++;
+        break;
+      }
+    }
+  }
+  if (invalid === 0) return { soup, invalidTriangles: 0 };
+  const valid = new Float32Array(soup.length - invalid * 9);
+  let written = 0;
+  for (let t = 0; t < soup.length; t += 9) {
+    const triangle = soup.subarray(t, t + 9);
+    if (triangle.every(Number.isFinite)) {
+      valid.set(triangle, written);
+      written += 9;
+    }
+  }
+  return { soup: valid, invalidTriangles: invalid };
 }
 
 /**
@@ -78,6 +117,10 @@ const EMPTY = -1;
  * the output keeps the coordinates of the first vertex seen in each cell. Two vertices
  * closer than the tolerance but on either side of a cell boundary are not merged,
  * which is acceptable for de-duplication.
+ *
+ * Triangles that end up without area, and repeats of a triangle already kept, are
+ * dropped: they add nothing to the surface and upset the simplifier and the unwrapper.
+ * The soup must hold finite numbers only (see `dropInvalidTriangles`).
  */
 export function weldVertices(soup: Float32Array, tolerance = WELD_TOLERANCE_MM): WeldResult {
   if (soup.length % 9 !== 0) throw new Error('Expected 9 numbers per triangle');
@@ -130,12 +173,55 @@ export function weldVertices(soup: Float32Array, tolerance = WELD_TOLERANCE_MM):
   }
 
   const indices = new Uint32Array(cornerCount);
+  const area2 = (a: number, b: number, c: number): number => {
+    const ux = positions[b * 3]! - positions[a * 3]!;
+    const uy = positions[b * 3 + 1]! - positions[a * 3 + 1]!;
+    const uz = positions[b * 3 + 2]! - positions[a * 3 + 2]!;
+    const vx = positions[c * 3]! - positions[a * 3]!;
+    const vy = positions[c * 3 + 1]! - positions[a * 3 + 1]!;
+    const vz = positions[c * 3 + 2]! - positions[a * 3 + 2]!;
+    return Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  };
+  // Triangles kept so far, by their sorted corners; the per-corner table is reused.
+  const triangleSlots = table.fill(EMPTY);
   let written = 0;
+  let degenerate = 0;
+  let duplicates = 0;
   for (let corner = 0; corner < cornerCount; corner += 3) {
     const a = remap[corner]!;
     const b = remap[corner + 1]!;
     const c = remap[corner + 2]!;
-    if (a === b || b === c || a === c) continue;
+    if (a === b || b === c || a === c || area2(a, b, c) < FLAT_TRIANGLE_MM2) {
+      degenerate++;
+      continue;
+    }
+    const low = Math.min(a, b, c);
+    const high = Math.max(a, b, c);
+    const middle = a + b + c - low - high;
+    let slot =
+      (Math.imul(low, 73856093) ^ Math.imul(middle, 19349663) ^ Math.imul(high, 83492791)) & mask;
+    let duplicate = false;
+    for (;;) {
+      const kept = triangleSlots[slot]!;
+      if (kept === EMPTY) {
+        triangleSlots[slot] = written;
+        break;
+      }
+      const [p, q, r] = [indices[kept]!, indices[kept + 1]!, indices[kept + 2]!];
+      if (
+        Math.min(p, q, r) === low &&
+        Math.max(p, q, r) === high &&
+        p + q + r - Math.min(p, q, r) - Math.max(p, q, r) === middle
+      ) {
+        duplicate = true;
+        break;
+      }
+      slot = (slot + 1) & mask;
+    }
+    if (duplicate) {
+      duplicates++;
+      continue;
+    }
     indices[written++] = a;
     indices[written++] = b;
     indices[written++] = c;
@@ -143,6 +229,7 @@ export function weldVertices(soup: Float32Array, tolerance = WELD_TOLERANCE_MM):
 
   return {
     mesh: { positions: positions.slice(0, vertexCount * 3), indices: indices.slice(0, written) },
-    degenerateTriangles: (cornerCount - written) / 3,
+    degenerateTriangles: degenerate,
+    duplicateTriangles: duplicates,
   };
 }
