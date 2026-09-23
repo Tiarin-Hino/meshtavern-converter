@@ -120,4 +120,43 @@ describe('runPipeline', () => {
     // The levels are made from the mesh in mm: their error budgets are in mm.
     expect(lods[0]!.mesh.positions.some((value) => value > 12)).toBe(true);
   }, 60_000);
+
+  it('adds a plain base under a figure without one when asked', async () => {
+    const stl = encodeBinaryStl(generateFigure(false));
+    const bare = await runPipeline(stl, { bake: 0 });
+    const { sizing, stats, mesh } = await runPipeline(stl, {
+      bake: 0,
+      sizing: { plainBase: true },
+    });
+    expect(bare.sizing).toMatchObject({ base: null, plainBase: null, size: 'small' });
+    expect(sizing).toMatchObject({
+      base: null,
+      plainBase: { diameterMm: 25, heightMm: 3 },
+      size: 'small',
+      baseDiameterMm: 25,
+    });
+    expect(stats.triangles).toBeGreaterThan(bare.stats.triangles);
+    expect(stats.sizeMm[1]).toBeCloseTo(bare.stats.sizeMm[1] + 3, 4);
+    expect(stats.sizeMm[0]).toBeCloseTo(25, 4);
+    // Stands on y = 0, on the base.
+    let minY = Infinity;
+    for (let i = 1; i < mesh.positions.length; i += 3) minY = Math.min(minY, mesh.positions[i]!);
+    expect(minY).toBe(0);
+  }, 60_000);
+
+  it('makes the plain base follow the chosen size', async () => {
+    const { sizing } = await runPipeline(encodeBinaryStl(generateFigure(false)), {
+      bake: 0,
+      sizing: { plainBase: true, size: 'large' },
+    });
+    expect(sizing).toMatchObject({ plainBase: { diameterMm: 50 }, baseDiameterMm: 50 });
+  }, 60_000);
+
+  it('adds no plain base to a mini that has one', async () => {
+    const { sizing } = await runPipeline(encodeBinaryStl(generateFigure(true)), {
+      bake: 0,
+      sizing: { plainBase: true },
+    });
+    expect(sizing).toMatchObject({ plainBase: null, base: { shape: 'round' } });
+  }, 60_000);
 });

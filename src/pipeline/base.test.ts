@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { generateFigure, generateSwarm } from '../regression/shapes';
-import { convexHullArea, measureBase } from './base';
+import {
+  convexHullArea,
+  generatePlainBase,
+  measureBase,
+  PLAIN_BASE_HEIGHT_MM,
+  standOnBase,
+} from './base';
 import { weldVertices, type IndexedMesh } from './mesh';
 import { detectUpAxis, orientAndPlace } from './orient';
 
@@ -100,3 +106,59 @@ describe('orientAndPlace with a base', () => {
     expect(result.base).toBeNull();
   });
 });
+
+describe('generatePlainBase', () => {
+  it.each([25, 32, 50, 100])('makes a closed %d mm disc standing on y = 0', (diameter) => {
+    const base = generatePlainBase(diameter);
+    const measured = measureBase(base);
+    expect(measured).toMatchObject({ shape: 'round', centre: [0, 0] });
+    expect(Math.abs(measured!.diameterMm - diameter)).toBeLessThan(0.1);
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 1; i < base.positions.length; i += 3) {
+      minY = Math.min(minY, base.positions[i]!);
+      maxY = Math.max(maxY, base.positions[i]!);
+    }
+    expect([minY, maxY]).toEqual([0, PLAIN_BASE_HEIGHT_MM]);
+    // Faces outwards: a positive volume of about π r² h.
+    const volume = signedVolume(base);
+    expect(volume / (Math.PI * (diameter / 2) ** 2 * PLAIN_BASE_HEIGHT_MM)).toBeCloseTo(1, 1);
+  });
+
+  it('keeps the rim segments near 1 mm', () => {
+    const base = generatePlainBase(100);
+    // 4 × cells² + 8 × cells triangles with cells = ⌈π × 100 / 4⌉ = 79.
+    expect(base.indices.length / 3).toBe(4 * 79 * 79 + 8 * 79);
+  });
+});
+
+describe('standOnBase', () => {
+  it('lifts the mini by the height and appends the base', () => {
+    const mini = {
+      positions: new Float32Array([0, 0, 0, 1, 5, 0, 0, 5, 1]),
+      indices: new Uint32Array([0, 1, 2]),
+    };
+    const base = {
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+      indices: new Uint32Array([0, 2, 1]),
+    };
+    const stood = standOnBase(mini, base, 3);
+    expect(Array.from(stood.positions.slice(0, 9))).toEqual([0, 3, 0, 1, 8, 0, 0, 8, 1]);
+    expect(Array.from(stood.indices)).toEqual([0, 1, 2, 3, 5, 4]);
+  });
+});
+
+/** Positive for outward-facing triangles. */
+function signedVolume({ positions: p, indices }: IndexedMesh): number {
+  let volume = 0;
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t]! * 3;
+    const b = indices[t + 1]! * 3;
+    const c = indices[t + 2]! * 3;
+    volume +=
+      p[a]! * (p[b + 1]! * p[c + 2]! - p[b + 2]! * p[c + 1]!) -
+      p[a + 1]! * (p[b]! * p[c + 2]! - p[b + 2]! * p[c]!) +
+      p[a + 2]! * (p[b]! * p[c + 1]! - p[b + 1]! * p[c]!);
+  }
+  return volume / 6;
+}

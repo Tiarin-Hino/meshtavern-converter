@@ -1,4 +1,4 @@
-import type { MeasuredBase } from './base';
+import { generatePlainBase, PLAIN_BASE_HEIGHT_MM, standOnBase, type MeasuredBase } from './base';
 import type { IndexedMesh } from './mesh';
 import { guessUnits, UNIT_FACTORS } from './units';
 
@@ -153,9 +153,9 @@ export interface SizedMini {
 }
 
 /**
- * The size step: turns file units into mm, suggests or takes the creature size and works
- * out the warnings. Only the options scale anything; with none, a mm file keeps its
- * measured size. The input is left untouched.
+ * The size step: turns file units into mm, suggests or takes the creature size, adds a
+ * plain base when asked and there is none, and works out the warnings. Only the options
+ * scale anything; with none, a mm file keeps its measured size. The input is left untouched.
  */
 export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {}): SizedMini {
   const units = options.units ?? guessUnits(placed.sizeMm[1]);
@@ -166,7 +166,20 @@ export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {})
   const measuredMm = baseMm ?? figureMm;
   const size = options.size ?? suggestSize(measuredMm);
 
-  const mesh = scale === 1 ? placed.mesh : scaled(placed.mesh, scale);
+  let mesh = scale === 1 ? placed.mesh : scaled(placed.mesh, scale);
+  const sizeMm: [number, number, number] = [
+    placed.sizeMm[0] * scale,
+    placed.sizeMm[1] * scale,
+    placed.sizeMm[2] * scale,
+  ];
+  let plainBase: Sizing['plainBase'] = null;
+  if (options.plainBase && !placed.base) {
+    plainBase = { diameterMm: SIZES[size].plainBaseMm, heightMm: PLAIN_BASE_HEIGHT_MM };
+    mesh = standOnBase(mesh, generatePlainBase(plainBase.diameterMm), plainBase.heightMm);
+    sizeMm[0] = Math.max(sizeMm[0], plainBase.diameterMm);
+    sizeMm[1] += plainBase.heightMm;
+    sizeMm[2] = Math.max(sizeMm[2], plainBase.diameterMm);
+  }
   const base: BaseMeasurement | null = placed.base && {
     shape: placed.base.shape,
     diameterMm: placed.base.diameterMm * scale,
@@ -176,17 +189,17 @@ export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {})
 
   return {
     mesh,
-    sizeMm: [placed.sizeMm[0] * scale, placed.sizeMm[1] * scale, placed.sizeMm[2] * scale],
+    sizeMm,
     sizing: {
       units,
       unitsMethod: options.units ? 'manual' : 'guessed',
       scale,
       base,
-      plainBase: null,
+      plainBase,
       size,
       sizeMethod: options.size ? 'manual' : 'suggested',
       footprintSquares: SIZES[size].squares,
-      baseDiameterMm: baseMm ?? SIZES[size].plainBaseMm,
+      baseDiameterMm: baseMm ?? plainBase?.diameterMm ?? SIZES[size].plainBaseMm,
       suggestedFrom: placed.base ? 'base' : 'figure',
       warnings: sizingWarnings(size, baseMm, measuredMm),
     },
