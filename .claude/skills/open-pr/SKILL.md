@@ -1,0 +1,22 @@
+---
+name: open-pr
+description: Turn the current branch into a pull request the PM can review without reading code - criteria ticked with evidence, limits stated. Use when work on a branch is finished and needs a PR, or when asked to open, prepare or update a PR.
+argument-hint: [issue number]
+---
+
+# Open a PR for the current branch
+
+1. **Pre-flight.** Not on `main`. Working tree clean or changes committed (Conventional Commits). Branch is up to date with its base. `npm run check` and `npm run e2e` pass; if they do not, fix that first or say so in the PR, never hide it.
+   The branch has its journal entry in `docs/journal/` (or extends an earlier one), unless the change is a dependency bump, a typo or formatting. If it is missing, write it now from the branch's commits, the issue and what happened in the session. Its "Numbers" and "Still open" must agree with the PR description.
+2. **Scan the diff** (`git diff <base>...HEAD`) for things that must not ship: STL files, converted output or renders of real minis, secrets, `.env` files, user data, names of third-party minis, creators or shops, leftover debug code, network calls with user data. This repo is public: nothing about business, pricing, licensing deals or partners.
+3. **Fill `.github/pull_request_template.md`:**
+   - `Closes #N` on the first line. For a stacked PR, target the parent branch and say so at the top.
+   - **What changed**: three to six plain-language sentences. What a user or the PM will notice, then the technical gist.
+   - **Acceptance criteria**: copied from the issue. Tick only what is proven, and put the evidence next to each tick (test name, measured number with its device, screenshot).
+   - **Needs a human look**: every visual or taste judgement, with before/after screenshots.
+   - **Limits**: what was not verified, not measured, or deliberately left out, with follow-up issue numbers.
+   - **Journal**: the path of the entry, or why there is none.
+   - Tick the checklist honestly; an unticked box with a reason beats a false tick.
+4. **Push the branch and create the PR** with `gh pr create`. Never push to `main`, never force-push, never merge.
+5. **Watch CI and the reviews** (`gh pr checks`). Fix failures that belong to this change; report ones that do not.
+6. Give the PM the PR link and a two-line summary of what to look at first.
