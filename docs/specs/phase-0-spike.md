@@ -291,7 +291,7 @@ Taken by the PM with the "Benchmark this device" panel, served over the local ne
 
 What this settles: **baked minis at release are viable** on an integrated GPU and on a flagship phone. The target scene of 100 minis runs at the display rate with room to spare, compressed textures work on a mobile GPU (three.js transcodes the same file to a format the Mali supports), and a ten-second conversion including textures is acceptable for a one-off. Baking halves the laptop's headroom (200 instead of 400 table-level minis at 60 fps), and a phone collapses once textures pass about 1 GB, which is what the texture budget with its per-vertex fallback is for.
 
-Still owed: a large detailed mini with a 2K texture on the laptop (unwrap time above all); a session long enough to show thermal throttling. Dropped by the PM on 2026-09-20: the Steam Deck and a mid-range phone. The laptop and the Pixel 9 cover the low end, the development PC the middle and the high end.
+The large detailed mini with a 2K texture that was still owed here was measured in Phase 1: on the laptop, HillGiant_32mm_FDM took 54.4 s to convert before the faster unwrap (#57) and 20.1 s after it (Phase 1 spec, story 8). A session long enough to show thermal throttling was never measured; #35 closed without it, because it was not one of that issue's criteria. Dropped by the PM on 2026-09-20: the Steam Deck and a mid-range phone. The laptop and the Pixel 9 cover the low end, the development PC the middle and the high end.
 
 ## Reference hardware
 
