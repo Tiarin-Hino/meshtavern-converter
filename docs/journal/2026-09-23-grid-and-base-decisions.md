@@ -4,7 +4,7 @@ date: 2026-09-23
 phase: 1
 issues: [44, 70]
 prs: [71]
-topics: [scale, base, spec]
+topics: [planning]
 ---
 
 ## What we did
