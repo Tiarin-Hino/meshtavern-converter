@@ -118,8 +118,9 @@ test('draws the 32 mm grid and stands stress minis one footprint apart', async (
     contentType: 'image/png',
   });
 
-  // A 50 mm sheet without a base is suggested Large: 2×2 squares, 64 mm apart.
+  // A mini chosen Large takes 2×2 squares: 64 mm apart.
   await page.evaluate(() => window.__mt.loadGenerated(40));
+  await page.evaluate(() => window.__mt.setSizing({ size: 'large' }));
   expect(await page.evaluate(() => window.__mt.state.stats!.sizing.footprintSquares)).toBe(2);
   await page.evaluate(() => window.__mt.startStress(16));
   // The figures refresh twice a second; the first read may still be the last scene's.
@@ -198,21 +199,21 @@ test('suggests a creature size and lets the user change units, size, scale and b
 });
 
 test('adds a plain base to a mini without one', async ({ page }) => {
-  // A 50 mm sheet has no base: sized by the figure, Large.
+  // A 50 mm sheet has no base: Medium, whatever its width.
   await page.evaluate(() => window.__mt.loadGenerated(20));
   expect(await page.evaluate(() => window.__mt.state.stats!.sizing)).toMatchObject({
     base: null,
     plainBase: null,
-    size: 'large',
-    suggestedFrom: 'figure',
+    size: 'medium',
+    suggestedFrom: 'default',
   });
   const before = await page.evaluate(() => window.__mt.state.stats!.triangles);
   await page.locator('#plain-base').check();
   await page.waitForFunction(() => !window.__mt.state.busy);
   const stats = await page.evaluate(() => window.__mt.state.stats!);
-  expect(stats.sizing).toMatchObject({ plainBase: { diameterMm: 50 }, baseDiameterMm: 50 });
+  expect(stats.sizing).toMatchObject({ plainBase: { diameterMm: 32 }, baseDiameterMm: 32 });
   expect(stats.triangles).toBeGreaterThan(before);
-  await expect(page.locator('#stats')).toContainText('plain base 50.0 mm (added)');
+  await expect(page.locator('#stats')).toContainText('plain base 32.0 mm (added)');
 });
 
 test('applies the primed-and-washed look and lets the user adjust it', async ({
@@ -262,9 +263,9 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
   // What the table needs to place the mini travels in the file.
   expect(result.extras).toEqual({
     gridSquareMm: 32,
-    size: 'large',
-    footprintSquares: 2,
-    baseDiameterMm: 50,
+    size: 'medium',
+    footprintSquares: 1,
+    baseDiameterMm: 32,
     units: 'mm',
     scale: 1,
   });

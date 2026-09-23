@@ -17,7 +17,7 @@ export const GRID_SQUARE_MM = 32;
 /** A base up to this share larger than its footprint still fits it, so a 33 mm base is 1×1. _(proposal)_ */
 export const FOOTPRINT_TOLERANCE = 0.05;
 
-/** Within one square, a base (or figure) narrower than this suggests Small, a wider one Medium. _(proposal)_ */
+/** Within one square, a base narrower than this suggests Small, a wider one Medium. _(proposal)_ */
 export const SMALL_BELOW_MM = 26;
 
 export type CreatureSize = 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'gargantuan';
@@ -34,6 +34,13 @@ export const SIZES: Record<CreatureSize, { squares: FootprintSquares; plainBaseM
 };
 
 export const CREATURE_SIZES = Object.keys(SIZES) as CreatureSize[];
+
+/**
+ * The size suggested for a mini without a base. Its own width says little: a spread weapon
+ * or wings make it too large, a mini lying on its side (#72) anything. PM decision on PR #74,
+ * 2026-09-23: suggest Medium and let the user pick.
+ */
+export const NO_BASE_SIZE: CreatureSize = 'medium';
 
 export type Units = 'mm' | 'in' | 'm';
 
@@ -67,8 +74,8 @@ export interface Sizing {
   footprintSquares: FootprintSquares;
   /** The base the table should draw or expect: measured, or the plain one, in mm. */
   baseDiameterMm: number;
-  /** What the suggestion was made from: the measured base, or the figure's own extents. */
-  suggestedFrom: 'base' | 'figure';
+  /** What the suggestion was made from: the measured base, or `NO_BASE_SIZE` for a mini without one. */
+  suggestedFrom: 'base' | 'default';
   warnings: SizingWarning[];
 }
 
@@ -82,8 +89,7 @@ const fits = (mm: number, squares: number): boolean =>
   mm <= squares * GRID_SQUARE_MM * (1 + FOOTPRINT_TOLERANCE);
 
 /**
- * The creature size whose footprint is the smallest that `mm` (a base diameter, or the
- * figure's wider side when it has no base) fits into. Tiny is never suggested, only chosen.
+ * The creature size whose footprint is the smallest that `mm`, a base diameter, fits into. Tiny is never suggested, only chosen.
  * Anything larger than four squares is Gargantuan; `sizingWarnings` says so.
  */
 export function suggestSize(mm: number): CreatureSize {
@@ -172,7 +178,7 @@ export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {})
 
   const baseMm = placed.base ? placed.base.diameterMm * scale : null;
   const measuredMm = measuredInFile * scale;
-  const size = options.size ?? suggestSize(measuredMm);
+  const size = options.size ?? (baseMm === null ? NO_BASE_SIZE : suggestSize(baseMm));
 
   let mesh = scale === 1 ? placed.mesh : scaled(placed.mesh, scale);
   const sizeMm: [number, number, number] = [
@@ -211,7 +217,7 @@ export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {})
       sizeMethod: options.size ? 'manual' : 'suggested',
       footprintSquares: SIZES[size].squares,
       baseDiameterMm: baseMm ?? plainBase?.diameterMm ?? SIZES[size].plainBaseMm,
-      suggestedFrom: placed.base ? 'base' : 'figure',
+      suggestedFrom: placed.base ? 'base' : 'default',
       warnings: sizingWarnings(size, baseMm, measuredMm),
     },
   };

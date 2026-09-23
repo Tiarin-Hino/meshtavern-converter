@@ -251,7 +251,7 @@ function describeSize(sizing: Sizing): string {
   }
   if (sizing.plainBase)
     return `${size}, plain base ${sizing.plainBase.diameterMm.toFixed(1)} mm (added)`;
-  return `${size}, no base (sized by the figure)`;
+  return `${size}, no base`;
 }
 
 /** "mm (guessed)", with the scale when the mini was scaled to a base diameter. */

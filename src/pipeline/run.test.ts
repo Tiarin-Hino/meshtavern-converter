@@ -128,16 +128,16 @@ describe('runPipeline', () => {
       bake: 0,
       sizing: { plainBase: true },
     });
-    expect(bare.sizing).toMatchObject({ base: null, plainBase: null, size: 'small' });
+    expect(bare.sizing).toMatchObject({ base: null, plainBase: null, size: 'medium' });
     expect(sizing).toMatchObject({
       base: null,
-      plainBase: { diameterMm: 25, heightMm: 3 },
-      size: 'small',
-      baseDiameterMm: 25,
+      plainBase: { diameterMm: 32, heightMm: 3 },
+      size: 'medium',
+      baseDiameterMm: 32,
     });
     expect(stats.triangles).toBeGreaterThan(bare.stats.triangles);
     expect(stats.sizeMm[1]).toBeCloseTo(bare.stats.sizeMm[1] + 3, 4);
-    expect(stats.sizeMm[0]).toBeCloseTo(25, 4);
+    expect(stats.sizeMm[0]).toBeCloseTo(32, 4);
     // Stands on y = 0, on the base.
     let minY = Infinity;
     for (let i = 1; i < mesh.positions.length; i += 3) minY = Math.min(minY, mesh.positions[i]!);

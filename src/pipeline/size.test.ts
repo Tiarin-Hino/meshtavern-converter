@@ -118,15 +118,23 @@ describe('sizeMini', () => {
     expect(sizing.base).not.toHaveProperty('centre');
   });
 
-  it('suggests from the figure when there is no base, and expects the plain base of the size', () => {
-    const { sizing } = sizeMini(placedMini([60, 30, 45], null));
-    expect(sizing).toMatchObject({
-      size: 'large',
-      suggestedFrom: 'figure',
-      base: null,
-      baseDiameterMm: 50,
-      warnings: [],
-    });
+  it('suggests Medium for a mini without a base, whatever its width, and expects a 32 mm base', () => {
+    for (const width of [15, 60, 120]) {
+      const { sizing } = sizeMini(placedMini([width, 30, 45], null));
+      expect(sizing).toMatchObject({
+        size: 'medium',
+        suggestedFrom: 'default',
+        base: null,
+        baseDiameterMm: 32,
+        warnings: [],
+      });
+    }
+  });
+
+  it('still warns when a mini without a base is too large for any size', () => {
+    const { sizing } = sizeMini(placedMini([250, 300, 200], null));
+    expect(sizing.size).toBe('medium');
+    expect(sizing.warnings).toEqual([{ kind: 'larger-than-gargantuan', baseMm: 250 }]);
   });
 
   it('scales a file in metres to mm, base and all', () => {

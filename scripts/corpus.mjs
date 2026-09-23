@@ -272,7 +272,7 @@ function sizeReport() {
   const measured = (m) =>
     m.sizing.base
       ? `base ${m.sizing.base.diameterMm} mm ${m.sizing.base.shape}`
-      : `no base, figure ${Math.max(m.sizeMm[0], m.sizeMm[2])} mm`;
+      : `no base (figure ${Math.max(m.sizeMm[0], m.sizeMm[2])} mm across)`;
   const listed = converted.filter(([key]) => index[key]?.size);
   const matches = listed.filter(([key, m]) => m.sizing.size === index[key].size);
   const mismatches = listed.filter(([key, m]) => m.sizing.size !== index[key].size);

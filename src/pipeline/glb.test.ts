@@ -110,7 +110,7 @@ describe('encodeGlb, with the sizing', () => {
     sizeMethod: 'manual',
     footprintSquares: 2,
     baseDiameterMm: 50,
-    suggestedFrom: 'figure',
+    suggestedFrom: 'default',
     warnings: [],
   };
 

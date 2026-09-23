@@ -11,9 +11,9 @@
     "upMethod": "tallest",
     "sizing": {
       "units": "mm",
-      "size": "large",
+      "size": "medium",
       "base": null,
-      "baseDiameterMm": 50
+      "baseDiameterMm": 32
     },
     "levels": [
       {
@@ -157,9 +157,9 @@
     "upMethod": "tallest",
     "sizing": {
       "units": "mm",
-      "size": "small",
+      "size": "medium",
       "base": null,
-      "baseDiameterMm": 25
+      "baseDiameterMm": 32
     },
     "levels": [
       {
@@ -249,9 +249,9 @@
     "upMethod": "tallest",
     "sizing": {
       "units": "mm",
-      "size": "large",
+      "size": "medium",
       "base": null,
-      "baseDiameterMm": 50
+      "baseDiameterMm": 32
     },
     "levels": [
       {
