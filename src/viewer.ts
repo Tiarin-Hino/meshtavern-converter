@@ -14,11 +14,10 @@ import {
 import { compressedTextureBytes, ownCopy } from './compressed-texture';
 import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
+import { GRID_SQUARE_MM } from './pipeline/size';
 
-/** One inch: the usual tabletop grid square. */
-const GRID_SQUARE_MM = 25.4;
-/** Stress-scene minis stand on every second square. */
-const STRESS_SPACING_MM = GRID_SQUARE_MM * 2;
+/** Squares the grid shows along each side. */
+const GRID_SQUARES = 40;
 /**
  * Camera distance (mm) from which each LOD is used, highest detail first. Provisional:
  * tuned by eye on a 1080p screen, to be fixed in the Phase 0 write-up.
@@ -53,6 +52,8 @@ export interface Perf {
   triangles: number;
   drawCalls: number;
   minis: number;
+  /** Distance between neighbouring stress-scene minis: their footprint on the grid. 0 without a stress scene. */
+  stressSpacingMm: number;
   /** How many minis currently show each LOD, highest detail first. */
   minisPerLod: number[];
   /** Minis drawn with a baked detail texture, and the GPU memory those textures take (with mipmaps). */
@@ -73,6 +74,7 @@ export class Viewer {
   private readonly grid: THREE.GridHelper;
   private mesh: THREE.Mesh | null = null;
   private stress: THREE.LOD[] = [];
+  private stressSpacingMm = 0;
   private imported: THREE.Group | null = null;
   /** Every baked material on screen: each owns a texture that has to be released. */
   private bakedMaterials: THREE.MeshStandardMaterial[] = [];
@@ -102,7 +104,12 @@ export class Viewer {
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
     key.position.set(60, 120, 80);
     this.scene.add(key);
-    this.grid = new THREE.GridHelper(GRID_SQUARE_MM * 40, 40, 0x4a4f5a, 0x2c3038);
+    this.grid = new THREE.GridHelper(
+      GRID_SQUARE_MM * GRID_SQUARES,
+      GRID_SQUARES,
+      0x4a4f5a,
+      0x2c3038,
+    );
     this.scene.add(this.grid);
 
     this.camera.position.set(60, 60, 90);
@@ -141,6 +148,9 @@ export class Viewer {
    * With `baked`, the table level (index 1) of a mini is drawn from its baked mesh and its
    * own copy of the detail texture, as long as `textureBudgetBytes` allows; minis beyond the
    * budget fall back to the per-vertex look. That is the policy for weak devices.
+   *
+   * Every mini stands in its own footprint of `footprintSquares` × `footprintSquares` grid
+   * squares, as on the table; a mix of sizes is spaced by the largest.
    */
   showStress(
     sets: IndexedMesh[][],
@@ -149,12 +159,17 @@ export class Viewer {
     setFor: (index: number) => number = () => 0,
     baked: (BakedMini | null)[] = [],
     textureBudgetBytes = Infinity,
+    footprintSquares = 1,
   ): void {
     this.clear();
+    const spacing = footprintSquares * GRID_SQUARE_MM;
+    this.stressSpacingMm = spacing;
     const bakedTemplates = baked.map((entry) => entry && createBakedGeometry(entry.mesh));
     const templateSets = sets.map((lods) => lods.map((lod) => this.toGeometry(lod)));
     const side = Math.ceil(Math.sqrt(count));
-    const offset = ((side - 1) * STRESS_SPACING_MM) / 2;
+    // Footprints start on grid lines, so a mini stands centred in its squares.
+    const cell = (column: number): number =>
+      (column - Math.floor(side / 2)) * spacing + spacing / 2;
 
     for (let i = 0; i < count; i++) {
       const mini = new THREE.LOD();
@@ -172,11 +187,7 @@ export class Viewer {
             : new THREE.Mesh(template.clone(), this.material);
         mini.addLevel(mesh, distance);
       });
-      mini.position.set(
-        (i % side) * STRESS_SPACING_MM - offset,
-        0,
-        Math.floor(i / side) * STRESS_SPACING_MM - offset,
-      );
+      mini.position.set(cell(i % side), 0, cell(Math.floor(i / side)));
       mini.rotation.y = (i * 2.399963) % (Math.PI * 2);
       this.scene.add(mini);
       this.stress.push(mini);
@@ -184,7 +195,7 @@ export class Viewer {
     templateSets.flat().forEach((template) => template.dispose());
     bakedTemplates.forEach((template) => template?.dispose());
 
-    const span = side * STRESS_SPACING_MM;
+    const span = side * spacing;
     this.controls.target.set(0, 0, 0);
     this.camera.position.set(span * 0.55, span * 0.5, span * 0.75);
     this.camera.near = 1;
@@ -233,6 +244,7 @@ export class Viewer {
       triangles: this.renderer.info.render.triangles,
       drawCalls: this.renderer.info.render.calls,
       minis: this.stress.length,
+      stressSpacingMm: this.stress.length > 0 ? this.stressSpacingMm : 0,
       bakedMinis: this.bakedMaterials.length,
       textureBytes: this.textureBytes,
       minisPerLod: LOD_DISTANCES_MM.map(

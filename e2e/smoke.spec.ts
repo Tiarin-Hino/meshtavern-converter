@@ -27,6 +27,7 @@ test('converts the demo mini in the worker and renders it', async ({ page }, tes
     'read',
     'weld',
     'orient',
+    'size',
     'simplify',
     'shade',
     'levels',
@@ -95,6 +96,34 @@ test('fills the table with 100 minis and reports rendering figures', async ({ pa
 
   await page.getByRole('button', { name: 'Single mini' }).click();
   expect(await page.evaluate(() => window.__mt.state.stressCount)).toBe(0);
+});
+
+test('draws the 32 mm grid and stands stress minis one footprint apart', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  // The demo pyramid stands on a 25 mm base: Small, one square.
+  await page.evaluate(() => window.__mt.loadDemo());
+  await page.evaluate(() => window.__mt.setCamera(34, 55, 0.3));
+  await page.waitForTimeout(500);
+  await testInfo.attach('grid-32mm-demo', {
+    body: await page.locator('#viewport').screenshot(),
+    contentType: 'image/png',
+  });
+  await page.evaluate(() => window.__mt.startStress(16));
+  await expect.poll(() => page.evaluate(() => window.__mt.state.perf?.stressSpacingMm)).toBe(32);
+  await page.waitForTimeout(500);
+  await testInfo.attach('grid-32mm-stress-small', {
+    body: await page.locator('#viewport').screenshot(),
+    contentType: 'image/png',
+  });
+
+  // A 50 mm sheet without a base is suggested Large: 2×2 squares, 64 mm apart.
+  await page.evaluate(() => window.__mt.loadGenerated(40));
+  expect(await page.evaluate(() => window.__mt.state.stats!.sizing.footprintSquares)).toBe(2);
+  await page.evaluate(() => window.__mt.startStress(16));
+  // The figures refresh twice a second; the first read may still be the last scene's.
+  await expect.poll(() => page.evaluate(() => window.__mt.state.perf?.stressSpacingMm)).toBe(64);
 });
 
 test('applies the primed-and-washed look and lets the user adjust it', async ({
@@ -174,6 +203,7 @@ test('bakes and compresses a mini without being asked to, and shows it that way'
     'read',
     'weld',
     'orient',
+    'size',
     'simplify',
     'shade',
     'levels',

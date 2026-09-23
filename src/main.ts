@@ -278,7 +278,12 @@ async function setUp(up: UpAxis): Promise<void> {
   await convert(await lastSource.read(), lastSource.name, up);
 }
 
-const stressPool: { lods: IndexedMesh[]; share: number; baked: BakedMini | null }[] = [];
+const stressPool: {
+  lods: IndexedMesh[];
+  share: number;
+  baked: BakedMini | null;
+  footprintSquares: number;
+}[] = [];
 
 /**
  * `textureBudgetMb`: how much GPU memory the textures of baked minis may take; minis beyond it use the per-vertex look. 0 switches
@@ -289,10 +294,11 @@ function startStress(
   forcedLod: number | null = null,
   textureBudgetMb = Infinity,
 ): void {
-  if (levels.length < 2) return;
+  if (levels.length < 2 || !state.stats) return;
   const budget = textureBudgetMb * 1024 * 1024;
   if (stressPool.length === 0) {
-    viewer.showStress([levels.slice(1)], count, forcedLod, () => 0, [baked], budget);
+    const squares = state.stats.sizing.footprintSquares;
+    viewer.showStress([levels.slice(1)], count, forcedLod, () => 0, [baked], budget, squares);
   } else {
     // Spread each pooled mini evenly over the table according to its share.
     const total = stressPool.reduce((sum, entry) => sum + entry.share, 0);
@@ -314,6 +320,7 @@ function startStress(
       setFor,
       stressPool.map((entry) => entry.baked),
       budget,
+      Math.max(...stressPool.map((entry) => entry.footprintSquares)),
     );
   }
   state.stressCount = count;
@@ -612,7 +619,10 @@ window.__mt = {
   loadGlb,
   startStress,
   poolForStress: (share) => {
-    if (levels.length > 1) stressPool.push({ lods: levels.slice(1), share, baked });
+    if (levels.length > 1 && state.stats) {
+      const { footprintSquares } = state.stats.sizing;
+      stressPool.push({ lods: levels.slice(1), share, baked, footprintSquares });
+    }
   },
   clearStressPool: () => {
     stressPool.length = 0;
