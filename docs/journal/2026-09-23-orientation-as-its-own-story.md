@@ -23,13 +23,14 @@ The Phase 1 exit criterion asks for an upright mini without manual help, but no 
 - **Tilt, not only quarter turns** _(proposal)_: after the direction is chosen, the mini is set down on its lowest points so that the resting plane is level within 2°. A mini already resting flat is not moved.
 - **Manual correction stays the guaranteed path**: free turning on the page, then "set down" again; the six-way select remains as the coarse step. Nothing is turned silently, the project's convention for every guess.
 - **The result carries the orientation as a rotation**, so #44 places the plain base under the upright figure, #70 matches feet to a recess, and the table can reproduce it.
-- **Pass mark**: all 30 corpus minis upright by detection alone. A corpus index records the expected up direction per mini and `npm run corpus` reports every mismatch. That index does not exist yet: today the script only walks the corpus folders. #44 proposes the same file for the expected creature size, so whichever story is built first introduces it; the generated shapes of the CI baseline get the same check.
+- **Pass mark**: all 30 corpus minis upright by detection alone. A corpus index records the expected up direction per mini and `npm run corpus` reports every mismatch. That index does not exist yet: today the script only walks the git-ignored corpus folders. The spec now names it once, in story 4: a committed `scripts/corpus-index.json`, keyed by the file's path under `corpus/`, holding the expected creature size for #44 and the expected up direction for #72; whichever story is built first creates it; the generated shapes of the CI baseline get the same check.
 - **Order**: #44 is built first on today's fallback with the interface left open; #72 follows; #70 after both. The page control lands in the plain form and is restyled with #41.
 
 ## Still open
 
 - Whether the three signs are enough for all seven fallen minis is exactly what the story has to find out; a learned model is the fallback only if they fail, as a follow-up.
 - Minis lying down on purpose (a corpse marker, a fallen tree) will be "corrected" wrongly; the manual path covers them, and the corpus has none yet.
+- Three numbers in the story are guesses, not measurements: the 2° levelling tolerance, the 15° manual step, and the 200 ms detection budget for the largest file. The base detector took 35–115 ms on five small minis (2026-09-20 entry); nobody has timed anything on the 281 MB dragon.
 
 ## Story angle
 
