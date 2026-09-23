@@ -7,6 +7,16 @@ import { checkFits, memoryBudgetBytes } from './pipeline/memory';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
 import { toProblem, type ProblemCode } from './pipeline/problems';
 import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
+import {
+  CREATURE_SIZES,
+  footprintMm,
+  sizeLabel,
+  type CreatureSize,
+  type Sizing,
+  type SizingOptions,
+  type Units,
+} from './pipeline/size';
+import { UNIT_FACTORS } from './pipeline/units';
 import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from './pipeline/stl';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { transcodeDetail } from './compressed-texture';
@@ -92,6 +102,11 @@ declare global {
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
+      /**
+       * Converts the last file again with changed sizing choices (units, size, scale to a
+       * base diameter, plain base), merged into the ones made so far. `undefined` drops a choice.
+       */
+      setSizing: (changes: Partial<SizingOptions>) => Promise<void>;
       startStress: (count: number, forcedLod?: number | null, textureBudgetMb?: number) => void;
       /**
        * Remembers the converted mini for mixed stress scenes. With a pool, `startStress`
@@ -115,6 +130,16 @@ const stressButtons = document.querySelector<HTMLElement>('#stress')!;
 const upSelect = document.querySelector<HTMLSelectElement>('#up')!;
 const upLabel = document.querySelector<HTMLElement>('#up-label')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
+const sizingPanel = document.querySelector<HTMLElement>('#sizing')!;
+const sizingInputs = {
+  units: document.querySelector<HTMLSelectElement>('#units')!,
+  size: document.querySelector<HTMLSelectElement>('#size')!,
+  scaleTo: document.querySelector<HTMLInputElement>('#scale-to')!,
+  scaleApply: document.querySelector<HTMLButtonElement>('#scale-apply')!,
+  plainBase: document.querySelector<HTMLInputElement>('#plain-base')!,
+  warning: document.querySelector<HTMLElement>('#sizing-warning')!,
+  scaleFit: document.querySelector<HTMLButtonElement>('#scale-fit')!,
+};
 
 const viewer = new Viewer(canvas);
 const converter = new Converter();
@@ -161,13 +186,17 @@ const TABLE_LEVEL = BAKED_LEVEL + 1;
 let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
 let lastSource: { name: string; read: () => Promise<ArrayBuffer> } | null = null;
+/** What the user chose for the last source; a new file starts without choices. */
+let choices: { up?: UpAxis; sizing: SizingOptions } = { sizing: {} };
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 
 function showStats(stats: ConversionStats): void {
   const rows: [string, string][] = [
     ['Up', `${stats.up} (${stats.upMethod})`],
-    ['Size', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
+    ['Size', describeSize(stats.sizing)],
+    ['Units', describeUnits(stats.sizing)],
+    ['Dimensions', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
     ['Triangles', stats.triangles.toLocaleString()],
     ['Vertices', stats.vertices.toLocaleString()],
     [
@@ -209,6 +238,85 @@ function showStats(stats: ConversionStats): void {
   );
   statsList.hidden = false;
 }
+
+const UNIT_NAMES: Record<Units, string> = { mm: 'mm', in: 'inches', m: 'metres' };
+
+/** "Medium (1×1) (suggested), base 32.0 mm round (measured)", for the figures. */
+function describeSize(sizing: Sizing): string {
+  const method = sizing.sizeMethod === 'manual' ? 'chosen' : 'suggested';
+  const size = `${sizeLabel(sizing.size)} (${method})`;
+  if (sizing.base) {
+    const shape = sizing.base.shape === 'round' ? 'round' : 'across, not round';
+    return `${size}, base ${sizing.base.diameterMm.toFixed(1)} mm ${shape} (measured)`;
+  }
+  if (sizing.plainBase)
+    return `${size}, plain base ${sizing.plainBase.diameterMm.toFixed(1)} mm (added)`;
+  return `${size}, no base (sized by the figure)`;
+}
+
+/** "mm (guessed)", with the scale when the mini was scaled to a base diameter. */
+function describeUnits(sizing: Sizing): string {
+  const method = sizing.unitsMethod === 'manual' ? 'chosen' : 'guessed';
+  const units = `${UNIT_NAMES[sizing.units]} (${method})`;
+  const extra = sizing.scale / UNIT_FACTORS[sizing.units];
+  return Math.abs(extra - 1) < 1e-6 ? units : `${units}, scaled ×${extra.toFixed(3)}`;
+}
+
+/** Sets the size form to what the conversion made of the mini, and shows any warning. */
+function showSizing(sizing: Sizing): void {
+  sizingInputs.units.value = sizing.units;
+  sizingInputs.size.value = sizing.size;
+  const target = choices.sizing.scaleToBaseMm;
+  sizingInputs.scaleTo.value = target === undefined ? '' : String(target);
+  sizingInputs.plainBase.checked = sizing.plainBase !== null;
+  // A mini that came with a base gets no second one.
+  sizingInputs.plainBase.disabled = sizing.base !== null;
+  const warning = sizing.warnings[0];
+  sizingInputs.warning.hidden = !warning;
+  sizingInputs.scaleFit.hidden = warning?.kind !== 'base-exceeds-footprint';
+  if (warning) {
+    sizingInputs.warning.querySelector('span')!.textContent =
+      warning.kind === 'base-exceeds-footprint'
+        ? `The base (${warning.baseMm.toFixed(1)} mm) is larger than ${sizeLabel(sizing.size)}, ${warning.footprintMm} mm.`
+        : `The mini measures ${warning.baseMm.toFixed(0)} mm across, more than Gargantuan: are the units right?`;
+  }
+  sizingPanel.hidden = false;
+}
+
+async function setSizing(changes: Partial<SizingOptions>): Promise<void> {
+  if (!lastSource || state.busy) return;
+  choices.sizing = { ...choices.sizing, ...changes };
+  await convert(await lastSource.read(), lastSource.name);
+}
+
+sizingInputs.size.replaceChildren(
+  ...CREATURE_SIZES.map((size) => {
+    const option = document.createElement('option');
+    option.value = size;
+    option.textContent = sizeLabel(size);
+    return option;
+  }),
+);
+// Units and a scale both decide the size in mm: choosing units drops a scale to a base diameter.
+sizingInputs.units.addEventListener('change', () => {
+  void setSizing({ units: sizingInputs.units.value as Units, scaleToBaseMm: undefined });
+});
+sizingInputs.size.addEventListener('change', () => {
+  void setSizing({ size: sizingInputs.size.value as CreatureSize });
+});
+sizingInputs.scaleApply.addEventListener('click', () => {
+  // An empty field goes back to the measured size.
+  if (sizingInputs.scaleTo.value === '') return void setSizing({ scaleToBaseMm: undefined });
+  const mm = sizingInputs.scaleTo.valueAsNumber;
+  if (mm > 0 && Number.isFinite(mm)) void setSizing({ scaleToBaseMm: mm });
+});
+sizingInputs.plainBase.addEventListener('change', () => {
+  void setSizing({ plainBase: sizingInputs.plainBase.checked });
+});
+sizingInputs.scaleFit.addEventListener('click', () => {
+  const size = state.stats?.sizing.size;
+  if (size) void setSizing({ size, scaleToBaseMm: footprintMm(size) });
+});
 
 /** The table level is drawn from its baked maps when it has them, unless `preferBaked` is off. */
 function showLevel(level: number, reframe = false, preferBaked = true): void {
@@ -274,8 +382,9 @@ for (const input of Object.values(lookInputs)) {
 setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
-  if (!lastSource) return;
-  await convert(await lastSource.read(), lastSource.name, up);
+  if (!lastSource || state.busy) return;
+  choices.up = up;
+  await convert(await lastSource.read(), lastSource.name);
 }
 
 const stressPool: {
@@ -367,7 +476,8 @@ function describeSkipped(skipped: NonNullable<ConversionStats['bakeSkipped']>): 
     : `per-vertex look: ${skipped.step} failed (${skipped.message})`;
 }
 
-async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise<void> {
+/** Converts with the choices made for the current source; see `choices`. */
+async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
   if (state.busy) return;
   Object.assign(state, {
     busy: true,
@@ -384,6 +494,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
   levelButtons.hidden = true;
   stressButtons.hidden = true;
   lookPanel.hidden = true;
+  sizingPanel.hidden = true;
   exportPanel.hidden = true;
   progressBar.hidden = false;
   cancelButton.hidden = false;
@@ -400,7 +511,8 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
         status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%${within}`;
       },
       {
-        up,
+        up: choices.up,
+        sizing: choices.sizing,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
@@ -447,6 +559,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
     state.imported = null;
     upSelect.value = stats.up;
     upLabel.hidden = false;
+    showSizing(stats.sizing);
     // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
     showLevel(TABLE_LEVEL, true);
@@ -508,7 +621,15 @@ async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> 
 }
 
 async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
-  for (const panel of [statsList, levelButtons, stressButtons, lookPanel, upLabel, exportPanel]) {
+  for (const panel of [
+    statsList,
+    levelButtons,
+    stressButtons,
+    lookPanel,
+    upLabel,
+    sizingPanel,
+    exportPanel,
+  ]) {
     panel.hidden = true;
   }
   try {
@@ -568,6 +689,7 @@ async function loadFile(file: File | undefined): Promise<void> {
     return showProblem(file.name, error);
   }
   lastSource = { name: file.name, read: () => file.arrayBuffer() };
+  choices = { sizing: {} };
   await convert(stl, file.name);
 }
 
@@ -603,15 +725,18 @@ window.__mt = {
   state,
   loadDemo: () => {
     lastSource = { name: 'demo.stl', read: async () => demoStl() };
+    choices = { sizing: {} };
     return convert(demoStl(), 'demo.stl');
   },
   loadGenerated: (quadsPerSide) => {
     const read = async (): Promise<ArrayBuffer> =>
       encodeBinaryStl(generateBumpySheet(quadsPerSide));
     lastSource = { name: `generated-${quadsPerSide}.stl`, read };
+    choices = { sizing: {} };
     return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
   },
   setUp,
+  setSizing,
   showLevel: (level) => showLevel(level),
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),

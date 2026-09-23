@@ -126,6 +126,95 @@ test('draws the 32 mm grid and stands stress minis one footprint apart', async (
   await expect.poll(() => page.evaluate(() => window.__mt.state.perf?.stressSpacingMm)).toBe(64);
 });
 
+test('suggests a creature size and lets the user change units, size, scale and base', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const sizing = () => page.evaluate(() => window.__mt.state.stats!.sizing);
+  const sizeMm = () => page.evaluate(() => window.__mt.state.stats!.sizeMm);
+  // A control converts the file again; the next step waits until that is done.
+  const settled = () => page.waitForFunction(() => !window.__mt.state.busy);
+
+  // The demo pyramid stands on a 25 mm square base: Small, one square.
+  await page.evaluate(() => window.__mt.loadDemo());
+  expect(await sizing()).toMatchObject({
+    units: 'mm',
+    unitsMethod: 'guessed',
+    size: 'small',
+    sizeMethod: 'suggested',
+    footprintSquares: 1,
+    baseDiameterMm: 25,
+    base: { shape: 'other' },
+  });
+  await expect(page.locator('#stats')).toContainText('Small (1×1) (suggested), base 25.0 mm');
+  await expect(page.locator('#stats')).toContainText('mm (guessed)');
+  await expect(page.locator('#size')).toHaveValue('small');
+  await expect(page.locator('#plain-base')).toBeDisabled();
+
+  await page.evaluate(() => window.__mt.setSizing({ size: 'medium' }));
+  expect(await sizing()).toMatchObject({ size: 'medium', sizeMethod: 'manual' });
+  await expect(page.locator('#stats')).toContainText('Medium (1×1) (chosen)');
+
+  // Scaling to a 32 mm base: 25 → 32 mm across, the height with it.
+  await page.evaluate(() => window.__mt.setSizing({ scaleToBaseMm: 32 }));
+  expect((await sizing()).scale).toBeCloseTo(1.28, 6);
+  const [width, height] = await sizeMm();
+  expect(width).toBeCloseTo(32, 4);
+  expect(height).toBeCloseTo(32 * 1.28, 4);
+  // The size choice was kept.
+  expect((await sizing()).size).toBe('medium');
+
+  // Choosing Tiny for a 32 mm base: a warning and the offer to scale; nothing rescaled.
+  await page.evaluate(() => window.__mt.setSizing({ scaleToBaseMm: undefined }));
+  await page.selectOption('#size', 'large');
+  await settled();
+  await expect(page.locator('#stats')).toContainText('Large (2×2) (chosen)');
+  await page.evaluate(() => window.__mt.setSizing({ size: 'tiny', scaleToBaseMm: 40 }));
+  expect((await sizing()).warnings).toEqual([
+    { kind: 'base-exceeds-footprint', baseMm: 40, footprintMm: 32 },
+  ]);
+  await expect(page.locator('#sizing-warning')).toBeVisible();
+  await testInfo.attach('sizing-warning', {
+    body: await page.locator('header').screenshot(),
+    contentType: 'image/png',
+  });
+  await page.getByRole('button', { name: 'Scale to fit' }).click();
+  await settled();
+  await expect(page.locator('#sizing-warning')).toBeHidden();
+  expect(await sizing()).toMatchObject({ size: 'tiny', baseDiameterMm: 32, warnings: [] });
+
+  // Units: the file read as inches is 25.4 times larger.
+  await page.selectOption('#units', 'in');
+  await settled();
+  await expect(page.locator('#stats')).toContainText('inches (chosen)');
+  expect((await sizeMm())[0]).toBeCloseTo(25 * 25.4, 2);
+  expect((await sizing()).warnings.map((warning) => warning.kind)).toContain(
+    'larger-than-gargantuan',
+  );
+
+  // A new file starts without the choices of the last one.
+  await page.evaluate(() => window.__mt.loadDemo());
+  expect(await sizing()).toMatchObject({ units: 'mm', size: 'small', scale: 1 });
+});
+
+test('adds a plain base to a mini without one', async ({ page }) => {
+  // A 50 mm sheet has no base: sized by the figure, Large.
+  await page.evaluate(() => window.__mt.loadGenerated(20));
+  expect(await page.evaluate(() => window.__mt.state.stats!.sizing)).toMatchObject({
+    base: null,
+    plainBase: null,
+    size: 'large',
+    suggestedFrom: 'figure',
+  });
+  const before = await page.evaluate(() => window.__mt.state.stats!.triangles);
+  await page.locator('#plain-base').check();
+  await page.waitForFunction(() => !window.__mt.state.busy);
+  const stats = await page.evaluate(() => window.__mt.state.stats!);
+  expect(stats.sizing).toMatchObject({ plainBase: { diameterMm: 50 }, baseDiameterMm: 50 });
+  expect(stats.triangles).toBeGreaterThan(before);
+  await expect(page.locator('#stats')).toContainText('plain base 50.0 mm (added)');
+});
+
 test('applies the primed-and-washed look and lets the user adjust it', async ({
   page,
 }, testInfo) => {
@@ -157,7 +246,10 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     const plain = await window.__mt.exportGlb(2, false);
     const compact = await window.__mt.exportGlb(2, true);
     await window.__mt.loadGlb(compact, 'round-trip.glb');
+    const jsonLength = new DataView(plain).getUint32(12, true);
+    const json = JSON.parse(new TextDecoder().decode(new Uint8Array(plain, 20, jsonLength)));
     return {
+      extras: json.extras.meshtavern,
       plainBytes: plain.byteLength,
       compactBytes: compact.byteLength,
       imported: window.__mt.state.imported,
@@ -167,6 +259,15 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
   });
 
   expect(result.error).toBeNull();
+  // What the table needs to place the mini travels in the file.
+  expect(result.extras).toEqual({
+    gridSquareMm: 32,
+    size: 'large',
+    footprintSquares: 2,
+    baseDiameterMm: 50,
+    units: 'mm',
+    scale: 1,
+  });
   expect(result.compactBytes).toBeLessThan(result.plainBytes / 2);
   expect(result.imported?.triangles).toBe(result.table.triangles);
   // glTF is in metres; after the round trip the sheet must be 50 mm wide again.
