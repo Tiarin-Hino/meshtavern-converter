@@ -30,7 +30,6 @@ Story 4 of the Phase 1 spec (#44): a mini has to take the right number of square
 - **The note's round-base test called a square round.** "The outline covers 85 % of the circle" is true of a square too, which covers all of it. **Fix:** compare areas both ways (a square has 127 % of the circle's area); the square-plinth test the note asked for now passes.
 - **Two answers in the note for a mini without a base:** the origin at the centre of the contact patch (§1) or of the bounding box (§3). We took §3: a figure on one foot forward would otherwise sit off its base.
 - **The e2e tests read stale figures.** The page's live figures refresh twice a second, and a conversion counts as busy until the mini's first frames are drawn. **Fix:** the tests poll, and wait for the page to settle after each control.
-
 - **The figure's width is a poor guide without a base.** The design pass let the figure's wider side stand in for a missing base. On the corpus it missed five of 17 such minis: a spread weapon or wings made them too large (a bat came out Gargantuan), a hound lying on its side (#72) too. **Fix:** the PM decided on the PR to suggest Medium without a base and let the user pick, to revisit after #72.
 - **The index named bought minis.** The spec keyed the committed corpus index by the corpus file path, which is the file name of a bought mini, and this repo names none. **Fix (PM):** the bought minis in the local corpus are renamed to `<kind>-NN`; a local, git-ignored map keeps the original names.
 
@@ -48,7 +47,7 @@ Development PC, `npm run corpus` with a headed Chrome started from the agent ses
 - **A second full run after the renames** changed no level, triangle or bake figure; only the file sizes by a few bytes (the shorter names are written into the GLB).
 - **The origin shift moves the far level** of three minis on a base by +2.5 %, +1.3 % and −1.2 % triangles, with the error still at the level's target. Measured in Node on the same machine, `main` against this branch, nothing else different. The generated shapes of the regression baseline did not move, because their bases are centred already.
 - **The base measurement costs** 0.8 s on the largest file (5.6 million triangles), 60–120 ms on ordinary minis (Node, development PC).
-- Unit tests 175 → 220; e2e 14 → 17 tests.
+- Unit tests 175 → 221; e2e 14 → 17 tests.
 
 ## Still open
 
