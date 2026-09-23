@@ -1,4 +1,5 @@
 import { meshBuffers } from '../pipeline/mesh';
+import { toProblem } from '../pipeline/problems';
 import { runPipeline } from '../pipeline/run';
 import type { Post, WorkerRequest } from './protocol';
 
@@ -21,7 +22,7 @@ export async function handleRequest(request: WorkerRequest, post: Post): Promise
     }
     post({ type: 'done', id: request.id, result }, transfer);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    post({ type: 'error', id: request.id, message });
+    const { code, detail } = toProblem(error);
+    post({ type: 'error', id: request.id, code, detail });
   }
 }

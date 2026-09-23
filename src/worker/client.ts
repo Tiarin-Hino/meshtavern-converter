@@ -1,3 +1,4 @@
+import { ConversionProblem, toProblem } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
 import type { ConvertOptions, WorkerRequest, WorkerResponse } from './protocol';
 
@@ -31,7 +32,10 @@ export class Converter {
     this.worker = this.start();
   }
 
-  /** The STL buffer is transferred to the worker and is unusable on the page afterwards. */
+  /**
+   * The STL buffer is transferred to the worker and is unusable on the page afterwards.
+   * A file that does not become a mini rejects with a `ConversionProblem`.
+   */
   convert(
     stl: ArrayBuffer,
     onProgress: (progress: Progress) => void,
@@ -53,15 +57,19 @@ export class Converter {
    */
   cancel(): void {
     if (this.jobs.size === 0) return;
-    this.worker.terminate();
     this.failAll(new ConversionCancelled());
-    this.worker = this.start();
+    this.restart();
   }
 
   private start(): WorkerLike {
     const worker = this.createWorker();
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.receive(event.data);
-    worker.onerror = (event) => this.failAll(new Error(event.message || 'Worker crashed'));
+    // An error nothing in the worker caught, such as running out of memory in some browsers.
+    worker.onerror = (event) => {
+      event.preventDefault?.();
+      this.failAll(toProblem(new Error(event.message || 'The worker stopped')));
+      this.restart();
+    };
     return worker;
   }
 
@@ -70,8 +78,19 @@ export class Converter {
     if (!job) return;
     if (response.type === 'progress') return job.onProgress(response.progress);
     this.jobs.delete(response.id);
-    if (response.type === 'done') job.resolve(response.result);
-    else job.reject(new Error(response.message));
+    if (response.type === 'done') return job.resolve(response.result);
+    job.reject(new ConversionProblem(response.code, response.detail));
+    // After running out of memory the worker's heap may be left full: start afresh, and
+    // end whatever else was waiting for the old worker.
+    if (response.code === 'out-of-memory') {
+      this.failAll(new ConversionProblem('out-of-memory', response.detail));
+      this.restart();
+    }
+  }
+
+  private restart(): void {
+    this.worker.terminate();
+    this.worker = this.start();
   }
 
   private failAll(error: Error): void {

@@ -2,12 +2,14 @@ import { bake, type BakedMaps } from './bake';
 import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
-import { computeVertexNormals, weldVertices } from './mesh';
+import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
+import { checkFits } from './memory';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { shade } from './shade';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
-import { detectStlFormat, readStlTriangles, type StlFormat } from './stl';
+import { ConversionProblem, isOutOfMemory } from './problems';
+import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
 export const STEPS = ['read', 'weld', 'orient', 'simplify', 'shade', 'levels'] as const;
 /** The steps that turn the table level into a baked mini. They run unless baking is switched off. */
@@ -45,7 +47,12 @@ export interface ConversionStats {
   sourceTriangles: number;
   triangles: number;
   vertices: number;
+  /** Dropped: corners welded together, or no area. */
   degenerateTriangles: number;
+  /** Dropped: the same three corners as a triangle kept before. */
+  duplicateTriangles: number;
+  /** Dropped: a coordinate that is not a number or infinite. */
+  invalidTriangles: number;
   sizeMm: [number, number, number];
   /** Which way was taken as up in the file, and how that was decided. */
   up: UpAxis;
@@ -117,9 +124,17 @@ export interface PipelineOptions {
   compress?: number | null;
   /** Largest texture the device can hold, when known. A mini that needs more keeps the per-vertex look. */
   maxTextureSize?: number;
+  /**
+   * Memory the conversion may use, from what the device reports (see memory.ts). A file
+   * whose estimate is larger is refused before anything is read. Unset: no check.
+   */
+  memoryBudgetBytes?: number;
 }
 
-/** Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node. */
+/**
+ * Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node.
+ * A file that cannot become a mini throws a `ConversionProblem` (see problems.ts).
+ */
 export async function runPipeline(
   stl: ArrayBuffer,
   {
@@ -128,8 +143,12 @@ export async function runPipeline(
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
     maxTextureSize,
+    memoryBudgetBytes,
   }: PipelineOptions = {},
 ): Promise<ConversionResult> {
+  const format = sniffStl(new Uint8Array(stl), stl.byteLength);
+  if (memoryBudgetBytes !== undefined) checkFits(stl.byteLength, format, memoryBudgetBytes);
+
   const bakeSteps = BAKE_STEPS.filter((step) => step !== 'compress' || compress !== null);
   const stepCount = STEPS.length + (bakeRequest !== 0 ? bakeSteps.length : 0);
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
@@ -157,11 +176,10 @@ export async function runPipeline(
     return end(result, liveBytes(result));
   };
 
-  const format = detectStlFormat(stl);
-  const soup = run(
+  const { soup, invalidTriangles } = run(
     'read',
-    () => readStlTriangles(stl),
-    (s) => stl.byteLength + s.byteLength,
+    () => dropInvalidTriangles(readStlTriangles(stl)),
+    (s) => stl.byteLength + s.soup.byteLength * 2,
   );
   // While welding, the soup, the hash table and the per-corner scratch arrays coexist:
   // roughly three more soup-sized allocations.
@@ -170,6 +188,12 @@ export async function runPipeline(
     () => weldVertices(soup),
     (w) => stl.byteLength + soup.byteLength * 4 + meshBytes(w.mesh),
   );
+  if (welded.mesh.indices.length === 0) {
+    throw new ConversionProblem(
+      'no-surface',
+      `${soup.length / 9 + invalidTriangles} triangles, none usable`,
+    );
+  }
   const placed = run(
     'orient',
     () => {
@@ -251,6 +275,8 @@ export async function runPipeline(
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        // Out of memory is not a baking problem: the worker must end it and start afresh.
+        if (isOutOfMemory(error)) throw new ConversionProblem('out-of-memory', message);
         bakeSkipped = { reason: 'failed', step, message };
       }
     }
@@ -262,10 +288,12 @@ export async function runPipeline(
     baked,
     stats: {
       format,
-      sourceTriangles: soup.length / 9,
+      sourceTriangles: soup.length / 9 + invalidTriangles,
       triangles: placed.mesh.indices.length / 3,
       vertices: placed.mesh.positions.length / 3,
       degenerateTriangles: welded.degenerateTriangles,
+      duplicateTriangles: welded.duplicateTriangles,
+      invalidTriangles,
       sizeMm: placed.sizeMm,
       up: placed.up,
       upMethod: forcedUp ? 'manual' : placed.detection.method,

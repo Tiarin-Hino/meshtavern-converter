@@ -66,11 +66,21 @@ describe('handleRequest', () => {
     expect(last.transfer).toContain(baked!.mesh.uvs!.buffer);
   }, 120_000);
 
-  it('converts an empty STL without failing, baking included', async () => {
-    expect((await collect(new ArrayBuffer(84), 7, {})).at(-1)!.response.type).toBe('done');
-  }, 120_000);
+  it('refuses an empty STL instead of baking a blank texture for it', async () => {
+    const posted = await collect(new ArrayBuffer(84), 7, {});
+    expect(posted.map((p) => p.response)).toEqual([{ type: 'error', id: 7, code: 'empty' }]);
+  });
 
-  it('reports a failure as an error message instead of throwing', async () => {
+  it('refuses a file too large for the memory it may use, before any step', async () => {
+    const posted = await collect(encodeBinaryStl(generateBumpySheet(4)), 7, {
+      bake: 0,
+      memoryBudgetBytes: 1024 ** 2,
+    });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.response).toMatchObject({ type: 'error', code: 'too-large' });
+  });
+
+  it('reports any other failure as an error instead of throwing', async () => {
     const posted = await collect(undefined as unknown as ArrayBuffer);
     expect(posted.at(-1)!.response).toMatchObject({ type: 'error', id: 7 });
   });

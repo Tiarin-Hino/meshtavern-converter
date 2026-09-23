@@ -1,4 +1,5 @@
 import type { UpAxis } from '../pipeline/orient';
+import type { ProblemCode } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
 
 /** What the page may ask for. Everything is optional: the defaults give a baked, compressed mini. */
@@ -10,6 +11,8 @@ export interface ConvertOptions {
   compress?: number | null;
   /** Largest texture the device can hold; a mini that needs more keeps the per-vertex look. */
   maxTextureSize?: number;
+  /** Memory the conversion may use; a file expected to need more is refused. See memory.ts. */
+  memoryBudgetBytes?: number;
 }
 
 /** Messages between the page and the conversion worker. Every job carries an id so replies can be matched. */
@@ -23,6 +26,7 @@ export type WorkerRequest = {
 export type WorkerResponse =
   | { type: 'progress'; id: number; progress: Progress }
   | { type: 'done'; id: number; result: ConversionResult }
-  | { type: 'error'; id: number; message: string };
+  /** A file that did not become a mini: why, for the user, and what happened, for developers. */
+  | { type: 'error'; id: number; code: ProblemCode; detail?: string };
 
 export type Post = (response: WorkerResponse, transfer?: Transferable[]) => void;

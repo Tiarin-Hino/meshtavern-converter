@@ -3,9 +3,11 @@ import { generateBumpySheet } from './pipeline/generate';
 import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
+import { checkFits, memoryBudgetBytes } from './pipeline/memory';
 import { UP_AXES, type UpAxis } from './pipeline/orient';
+import { toProblem, type ProblemCode } from './pipeline/problems';
 import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
-import { encodeBinaryStl } from './pipeline/stl';
+import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from './pipeline/stl';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { transcodeDetail } from './compressed-texture';
 import { parsePageOptions } from './options';
@@ -20,7 +22,11 @@ interface AppState {
   /** Every progress message of the last conversion, for tests. */
   progressLog: Progress[];
   stats: ConversionStats | null;
+  /** Why the last file did not become a mini, as the user reads it. */
   error: string | null;
+  /** The same as a code, and what happened technically, for tests and developers. */
+  errorCode: ProblemCode | null;
+  errorDetail: string | null;
   /** The last conversion was stopped by the user. Not an error. */
   cancelled: boolean;
   /**
@@ -112,6 +118,10 @@ const perfLine = document.querySelector<HTMLElement>('#perf')!;
 
 const viewer = new Viewer(canvas);
 const converter = new Converter();
+/** Memory a conversion may use on this device; only Chromium says how much the device has. */
+const memoryBudget = memoryBudgetBytes(
+  (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+);
 const state: AppState = {
   ready: false,
   busy: false,
@@ -120,6 +130,8 @@ const state: AppState = {
   progressLog: [],
   stats: null,
   error: null,
+  errorCode: null,
+  errorDetail: null,
   cancelled: false,
   framesWhileConverting: 0,
   longestFrameGapMs: 0,
@@ -158,7 +170,10 @@ function showStats(stats: ConversionStats): void {
     ['Size', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
     ['Triangles', stats.triangles.toLocaleString()],
     ['Vertices', stats.vertices.toLocaleString()],
-    ['Dropped', stats.degenerateTriangles.toLocaleString()],
+    [
+      'Dropped',
+      `${(stats.degenerateTriangles + stats.duplicateTriangles + stats.invalidTriangles).toLocaleString()} (flat ${stats.degenerateTriangles.toLocaleString()}, repeated ${stats.duplicateTriangles.toLocaleString()}, broken ${stats.invalidTriangles.toLocaleString()})`,
+    ],
     ...stats.lods.map((lod): [string, string] => [
       lod.name,
       `${lod.triangles.toLocaleString()} tris, ±${lod.errorMm.toFixed(3)} mm (${lod.decidedBy})`,
@@ -352,9 +367,12 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
     fileName,
     stats: null,
     error: null,
+    errorCode: null,
+    errorDetail: null,
     cancelled: false,
     progressLog: [],
   });
+  status.classList.remove('problem');
   statsList.hidden = true;
   levelButtons.hidden = true;
   stressButtons.hidden = true;
@@ -379,6 +397,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
+        memoryBudgetBytes: memoryBudget,
       },
     );
     // From here on the mini exists; cancelling would only stop it from being shown.
@@ -439,8 +458,7 @@ async function convert(stl: ArrayBuffer, fileName: string, up?: UpAxis): Promise
       state.cancelled = true;
       status.textContent = `${fileName}: cancelled.`;
     } else {
-      state.error = error instanceof Error ? error.message : String(error);
-      status.textContent = `${fileName} could not be converted: ${state.error}`;
+      showProblem(fileName, error);
     }
   } finally {
     stopWatching();
@@ -504,16 +522,41 @@ document.querySelector<HTMLButtonElement>('#download')!.addEventListener('click'
   });
 });
 
+/** Shows why a file did not become a mini, in words for the user; the technical detail goes to `state` and the console. */
+function showProblem(fileName: string, error: unknown): void {
+  const problem = toProblem(error);
+  Object.assign(state, {
+    error: problem.message,
+    errorCode: problem.code,
+    errorDetail: problem.detail ?? null,
+  });
+  status.textContent = `${fileName} could not be converted. ${problem.message}`;
+  status.classList.add('problem');
+  if (problem.detail) console.warn(`${fileName}: ${problem.code}: ${problem.detail}`);
+}
+
 async function loadFile(file: File | undefined): Promise<void> {
-  if (!file) return;
+  if (!file || state.busy) return;
+  status.classList.remove('problem');
   if (file.name.toLowerCase().endsWith('.glb')) return loadGlb(await file.arrayBuffer(), file.name);
   if (!file.name.toLowerCase().endsWith('.stl')) {
     status.textContent = `${file.name} is neither an STL nor a GLB file.`;
     return;
   }
   // The file is read locally and handed to a worker in this tab. It is never sent anywhere.
+  let stl: ArrayBuffer;
+  try {
+    // Look at the start and the size first: a file that is empty, not an STL or too large
+    // for this device is refused before all of it is read into memory.
+    const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
+    checkFits(file.size, sniffStl(head, file.size), memoryBudget);
+    stl = await file.arrayBuffer();
+  } catch (error) {
+    state.fileName = file.name;
+    return showProblem(file.name, error);
+  }
   lastSource = { name: file.name, read: () => file.arrayBuffer() };
-  await convert(await file.arrayBuffer(), file.name);
+  await convert(stl, file.name);
 }
 
 fileInput.addEventListener('change', () => {

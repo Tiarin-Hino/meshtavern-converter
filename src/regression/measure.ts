@@ -42,6 +42,8 @@ export interface CaseFigures extends Pick<
   | 'triangles'
   | 'vertices'
   | 'degenerateTriangles'
+  | 'duplicateTriangles'
+  | 'invalidTriangles'
   | 'sizeMm'
   | 'up'
   | 'upMethod'
@@ -71,6 +73,8 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
     triangles: stats.triangles,
     vertices: stats.vertices,
     degenerateTriangles: stats.degenerateTriangles,
+    duplicateTriangles: stats.duplicateTriangles,
+    invalidTriangles: stats.invalidTriangles,
     sizeMm: stats.sizeMm,
     up: stats.up,
     upMethod: stats.upMethod,
