@@ -1,10 +1,13 @@
 import type { UpAxis } from '../pipeline/orient';
 import type { ProblemCode } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
+import type { SizingOptions } from '../pipeline/size';
 
 /** What the page may ask for. Everything is optional: the defaults give a baked, compressed mini. */
 export interface ConvertOptions {
   up?: UpAxis;
+  /** Units, creature size, scale to a base diameter and a plain base; left out, they are guessed. */
+  sizing?: SizingOptions;
   /** Development only: a fixed texture size for the baked detail maps, or 0 for none. Default: the size policy. */
   bake?: number | 'auto';
   /** Development only: UASTC effort, or null to keep the raw texture. Default: see compress.ts. */

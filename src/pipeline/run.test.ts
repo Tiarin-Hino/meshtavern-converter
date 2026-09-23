@@ -3,6 +3,7 @@ import { KTX2_ZSTANDARD, readKtx2Header } from './compress';
 import { generateBumpySheet } from './generate';
 import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
 import { encodeBinaryStl } from './stl';
+import { generateFigure } from '../regression/shapes';
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {
@@ -89,4 +90,34 @@ describe('runPipeline', () => {
     expect(raw.baked?.detail?.length).toBe(BAKE * BAKE * 4);
     expect(raw.stats.timings.map((timing) => timing.step)).not.toContain('compress');
   }, 120_000);
+
+  it('sizes the mini between orient and simplify: units, base and the suggested size', async () => {
+    const { sizing, stats } = await runPipeline(encodeBinaryStl(generateFigure(true)), { bake: 0 });
+    expect(STEPS.indexOf('size')).toBe(STEPS.indexOf('orient') + 1);
+    expect(STEPS.indexOf('simplify')).toBe(STEPS.indexOf('size') + 1);
+    expect(sizing).toMatchObject({
+      units: 'mm',
+      unitsMethod: 'guessed',
+      scale: 1,
+      size: 'small',
+      sizeMethod: 'suggested',
+      footprintSquares: 1,
+      suggestedFrom: 'base',
+      plainBase: null,
+      warnings: [],
+    });
+    expect(sizing.base).toMatchObject({ shape: 'round' });
+    expect(sizing.baseDiameterMm).toBeCloseTo(25, 0);
+    expect(stats.sizing).toBe(sizing);
+  }, 60_000);
+
+  it('reads a file in inches as inches and brings it to mm', async () => {
+    const inches = generateFigure(true).map((value) => value / 25.4);
+    const { sizing, stats, lods } = await runPipeline(encodeBinaryStl(inches), { bake: 0 });
+    expect(sizing).toMatchObject({ units: 'in', scale: 25.4, size: 'small' });
+    expect(sizing.baseDiameterMm).toBeCloseTo(25, 0);
+    expect(stats.sizeMm[0]).toBeCloseTo(25, 0);
+    // The levels are made from the mesh in mm: their error budgets are in mm.
+    expect(lods[0]!.mesh.positions.some((value) => value > 12)).toBe(true);
+  }, 60_000);
 });

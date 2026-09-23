@@ -4,8 +4,10 @@ import {
   footprintMm,
   GRID_SQUARE_MM,
   sizeLabel,
+  sizeMini,
   sizingWarnings,
   suggestSize,
+  type PlacedInFileUnits,
 } from './size';
 
 describe('suggestSize', () => {
@@ -71,5 +73,82 @@ describe('sizeLabel', () => {
   it('shows the footprint in squares next to the name', () => {
     expect(sizeLabel('medium')).toBe('Medium (1×1)');
     expect(sizeLabel('gargantuan')).toBe('Gargantuan (4×4)');
+  });
+});
+
+/** A placed stand-in: two vertices spanning the size, with or without a measured base. */
+function placedMini(sizeMm: [number, number, number], baseMm: number | null): PlacedInFileUnits {
+  const [w, h, d] = sizeMm;
+  return {
+    mesh: {
+      positions: new Float32Array([-w / 2, 0, -d / 2, w / 2, h, d / 2]),
+      indices: new Uint32Array(0),
+    },
+    sizeMm,
+    base:
+      baseMm === null
+        ? null
+        : {
+            shape: 'round',
+            diameterMm: baseMm,
+            footprintMm: [baseMm, baseMm],
+            coverage: 0.9,
+            centre: [0, 0],
+          },
+  };
+}
+
+describe('sizeMini', () => {
+  it('keeps a mm mini as it is and suggests from its base', () => {
+    const placed = placedMini([30, 40, 30], 32);
+    const { mesh, sizeMm, sizing } = sizeMini(placed);
+    expect(mesh).toBe(placed.mesh);
+    expect(sizeMm).toEqual([30, 40, 30]);
+    expect(sizing).toMatchObject({
+      units: 'mm',
+      unitsMethod: 'guessed',
+      scale: 1,
+      size: 'medium',
+      sizeMethod: 'suggested',
+      footprintSquares: 1,
+      baseDiameterMm: 32,
+      suggestedFrom: 'base',
+      warnings: [],
+    });
+    expect(sizing.base).not.toHaveProperty('centre');
+  });
+
+  it('suggests from the figure when there is no base, and expects the plain base of the size', () => {
+    const { sizing } = sizeMini(placedMini([60, 30, 45], null));
+    expect(sizing).toMatchObject({
+      size: 'large',
+      suggestedFrom: 'figure',
+      base: null,
+      baseDiameterMm: 50,
+      warnings: [],
+    });
+  });
+
+  it('scales a file in metres to mm, base and all', () => {
+    const { mesh, sizeMm, sizing } = sizeMini(placedMini([0.025, 0.035, 0.025], 0.025));
+    expect(sizing).toMatchObject({ units: 'm', scale: 1000, size: 'small' });
+    expect(sizing.baseDiameterMm).toBeCloseTo(25, 4);
+    expect(sizeMm[1]).toBeCloseTo(35, 4);
+    expect(mesh.positions[4]).toBeCloseTo(35, 4);
+  });
+
+  it('takes the units and the size the user chose', () => {
+    const { sizing } = sizeMini(placedMini([30, 40, 30], 50), { units: 'mm', size: 'medium' });
+    expect(sizing).toMatchObject({ unitsMethod: 'manual', size: 'medium', sizeMethod: 'manual' });
+    expect(sizing.warnings).toEqual([
+      { kind: 'base-exceeds-footprint', baseMm: 50, footprintMm: 32 },
+    ]);
+  });
+
+  it('leaves its input untouched when it scales', () => {
+    const placed = placedMini([1, 1.5, 1], 1);
+    const before = Array.from(placed.mesh.positions);
+    sizeMini(placed);
+    expect(Array.from(placed.mesh.positions)).toEqual(before);
   });
 });

@@ -1,3 +1,7 @@
+import type { MeasuredBase } from './base';
+import type { IndexedMesh } from './mesh';
+import { guessUnits, UNIT_FACTORS } from './units';
+
 /**
  * Creature sizes and their footprint on the grid (issue #44).
  *
@@ -119,4 +123,79 @@ const SIZE_NAMES: Record<CreatureSize, string> = {
 export function sizeLabel(size: CreatureSize): string {
   const squares = SIZES[size].squares;
   return `${SIZE_NAMES[size]} (${squares}×${squares})`;
+}
+
+/** What the user chose about size; everything left out is guessed or suggested. */
+export interface SizingOptions {
+  /** Overrides the units guess. */
+  units?: Units;
+  /** Overrides the size suggestion. */
+  size?: CreatureSize;
+  /** Scale so the (measured or plain) base has this diameter in mm. */
+  scaleToBaseMm?: number;
+  /** Add a plain round base when none is found. Default false. */
+  plainBase?: boolean;
+}
+
+/** A mesh placed by `orientAndPlace`, in file units. */
+export interface PlacedInFileUnits {
+  mesh: IndexedMesh;
+  sizeMm: [number, number, number];
+  base: MeasuredBase | null;
+}
+
+export interface SizedMini {
+  /** The input mesh, or a new one when it was scaled. */
+  mesh: IndexedMesh;
+  /** Width, height and depth in scene mm. */
+  sizeMm: [number, number, number];
+  sizing: Sizing;
+}
+
+/**
+ * The size step: turns file units into mm, suggests or takes the creature size and works
+ * out the warnings. Only the options scale anything; with none, a mm file keeps its
+ * measured size. The input is left untouched.
+ */
+export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {}): SizedMini {
+  const units = options.units ?? guessUnits(placed.sizeMm[1]);
+  const scale = UNIT_FACTORS[units];
+
+  const baseMm = placed.base ? placed.base.diameterMm * scale : null;
+  const figureMm = Math.max(placed.sizeMm[0], placed.sizeMm[2]) * scale;
+  const measuredMm = baseMm ?? figureMm;
+  const size = options.size ?? suggestSize(measuredMm);
+
+  const mesh = scale === 1 ? placed.mesh : scaled(placed.mesh, scale);
+  const base: BaseMeasurement | null = placed.base && {
+    shape: placed.base.shape,
+    diameterMm: placed.base.diameterMm * scale,
+    footprintMm: [placed.base.footprintMm[0] * scale, placed.base.footprintMm[1] * scale],
+    coverage: placed.base.coverage,
+  };
+
+  return {
+    mesh,
+    sizeMm: [placed.sizeMm[0] * scale, placed.sizeMm[1] * scale, placed.sizeMm[2] * scale],
+    sizing: {
+      units,
+      unitsMethod: options.units ? 'manual' : 'guessed',
+      scale,
+      base,
+      plainBase: null,
+      size,
+      sizeMethod: options.size ? 'manual' : 'suggested',
+      footprintSquares: SIZES[size].squares,
+      baseDiameterMm: baseMm ?? SIZES[size].plainBaseMm,
+      suggestedFrom: placed.base ? 'base' : 'figure',
+      warnings: sizingWarnings(size, baseMm, measuredMm),
+    },
+  };
+}
+
+/** A copy of the mesh scaled about the origin, which keeps it on y = 0 and centred. */
+function scaled(mesh: IndexedMesh, factor: number): IndexedMesh {
+  const positions = new Float32Array(mesh.positions.length);
+  for (let i = 0; i < positions.length; i++) positions[i] = mesh.positions[i]! * factor;
+  return { ...mesh, positions };
 }
