@@ -44,3 +44,5 @@ Development PC, Chrome 153, the five minis of the local test set:
 ## Story angle
 
 A bug found only because a different kind of file showed up, and the one-line clue in the size read-out that explained it. Possible title: "Which way is up? Ask the base".
+
+Later: see 2026-09-23-orientation-as-its-own-story.md. The "tallest" fallback is replaced by a scored guess in story 11 (#72); the learned model stays a fallback.

@@ -48,3 +48,5 @@ The corpus then grew: the first run over 30 minis (2026-09-21, recorded on #42) 
 ## Story angle
 
 How to regression-test a mesh pipeline when you may not commit a single real test file. Title idea: "Six fake minis and a sqrt".
+
+Later: see 2026-09-23-orientation-as-its-own-story.md. Up-detection moved from #44 to its own story (#72, story 11); the boulder in the baseline changes on purpose when that story is built.
