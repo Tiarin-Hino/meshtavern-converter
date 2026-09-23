@@ -35,7 +35,7 @@ Most code here is written by an AI agent, and the PM does not read code. A revie
 
 ## Still open
 
-- The fix job does not run `npm run check` before it commits. CI runs on its push, so a broken fix shows as a red check.
+- The fix job does not run `npm run check` before it commits. The plan was that CI on its push would catch a broken fix; see the next point for why that does not happen yet.
 - **The loop does not close yet.** Its first real run was on #63, the PR that added this journal: Astra asked for two changes and the Claude fix job committed them on the branch (da7fa14), but that push started no workflow at all, neither the next Astra round nor CI. So the claim that a push from the Claude GitHub App starts new runs does not hold as set up; a human push restarts the checks. Needs its own issue.
 
 ## Story angle
