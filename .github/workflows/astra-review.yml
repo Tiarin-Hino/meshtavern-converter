@@ -27,13 +27,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0 # the merge commit then brings base and head; no second fetch, which would need credentials
           persist-credentials: false
-
-      - name: Fetch base and head of the PR
-        env:
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: git fetch --no-tags origin "$PR_BASE_REF" "+refs/pull/$PR_NUMBER/head"
 
       - name: Build the prompt
         env:
