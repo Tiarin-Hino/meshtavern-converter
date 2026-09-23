@@ -3,7 +3,7 @@ title: Claude reviews every PR, Astra only on request
 date: 2026-09-23
 phase: 1
 issues: []
-prs: [66]
+prs: [66, 67]
 topics: [workflow, tooling]
 ---
 
@@ -51,7 +51,7 @@ Review jobs time out after 20 minutes and cancel the review of an older push of 
 - First real run on the next PR after the merge: check the Claude JSON, the label, and that `astra-review` starts Astra.
 - `needs-human` is never cleared, and the fix job's `Bash(git:*)` stays wide. Both are unchanged from #60.
 
-**Later, 2026-09-23:** #PRC fixed both. A pass now removes `needs-human`, which used to stay on a PR after a human fixed it and the review passed. The fix job may now run only `git status`, `git diff`, `git log`, `git show`, `git add`, `git commit` and a plain `git push`, instead of any git command: `git -c …` options can run any shell command, and a push could go to any branch. Edits inside `.git` are denied too. One gap remains here: the job may also run `npm run check`, which runs scripts from `package.json`, a file the job can edit. Branch protection on `main` is what keeps such a push off `main`.
+**Later, 2026-09-23:** #67 fixed both. A pass now removes `needs-human`, which used to stay on a PR after a human fixed it and the review passed. The fix job may now run only `git status`, `git diff`, `git log`, `git show`, `git add`, `git commit` and a plain `git push`, instead of any git command: `git -c …` options can run any shell command, and a push could go to any branch. Edits inside `.git` are denied too. One gap remains here: the job may also run `npm run check`, which runs scripts from `package.json`, a file the job can edit. Branch protection on `main` is what keeps such a push off `main`.
 
 ## Story angle
 
