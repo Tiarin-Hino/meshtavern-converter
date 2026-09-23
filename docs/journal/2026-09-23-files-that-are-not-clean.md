@@ -4,7 +4,7 @@ date: 2026-09-23
 phase: 1
 issues: [43]
 prs: [68]
-topics: [stl-import, robustness, memory]
+topics: [stl-import, devices, testing]
 ---
 
 ## What we did
@@ -19,7 +19,7 @@ Story 3 of the [Phase 1 spec](../specs/phase-1-converter.md) (#43): whatever a s
 
 - **One vocabulary of refusals** (`src/pipeline/problems.ts`). Every failure becomes a `ConversionProblem` with a code (`empty`, `not-stl`, `truncated`, `no-surface`, `too-large`, `out-of-memory`, `unexpected`) and a fixed message for the user. The technical detail goes to the console and `state.errorDetail`, never into the sentence the user reads. Anything thrown that is not one of these becomes `unexpected`, or `out-of-memory` when the engine said it could not allocate.
 - **Reading.** `sniffStl` decides from the first 8 KB and the file size whether a file is binary STL, ASCII STL, or neither. A binary file whose size does not match its triangle count is only taken for a cut-off STL when its first triangles look like coordinates (finite, under a kilometre); random bytes and images almost never pass that. An ASCII file must end with `endsolid` after its last vertex, otherwise it was cut off.
-- **Cleaning** in the weld step: triangles with a NaN or infinite coordinate, triangles without area (corners welded together or on one line) and repeats of a triangle already kept (same three corners in any order) are dropped and counted. Non-manifold edges and loose parts needed no change: generated test meshes with boxes sharing an edge, fins, a lone triangle and six separate blobs convert and bake as they are.
+- **Cleaning** right after reading and in the weld step: triangles with a NaN or infinite coordinate (on reading), triangles without area (corners welded together or on one line) and repeats of a triangle already kept (same three corners in any order) are dropped and counted. Non-manifold edges and loose parts needed no change: generated test meshes with boxes sharing an edge, fins, a lone triangle and six separate blobs convert and bake as they are.
 - **Too large.** `memory.ts` estimates the peak memory from the file size alone: 360 MB fixed, plus 400 bytes per triangle, plus the file itself. A conversion may use half of what `navigator.deviceMemory` reports; browsers that do not report it (Firefox, Safari) are treated as a 4 GB device. The page checks this before it reads the whole file, so a file that would not fit is never loaded; the worker checks again for meshes that did not come from a file. If memory still runs out, a failed allocation is caught in the worker, and a worker that dies is caught on the page; both end in the same message, and a fresh worker takes over.
 
 ## Problems and how we solved them
