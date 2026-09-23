@@ -254,6 +254,16 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # claude-code-action@v1 installs Claude Code 2.1.278, which cannot run Opus 5.5: that
+      # needs 2.1.280 or newer ("does not support this model", converter PR #68). Install a
+      # version that can and hand it to the action. Drop this once the action ships one.
+      - name: Install Claude Code
+        id: claude-code
+        if: steps.fresh.outputs.same == 'true'
+        run: |
+          npm install --global @anthropic-ai/claude-code@2.1.280
+          echo "path=$(command -v claude)" >> "$GITHUB_OUTPUT"
+
       # No `github_token` input on purpose: Claude then pushes as the Claude GitHub App,
       # and only such a push starts the next review (pushes made with GITHUB_TOKEN start nothing).
       - name: Claude applies the findings
@@ -261,6 +271,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           track_progress: true
           allowed_bots: 'claude[bot]'
           # Only the git commands the fix needs: a wider `git` rule allows options that run any command
