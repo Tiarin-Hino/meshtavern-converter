@@ -33,7 +33,7 @@ async function pick(page: Page, name: string, buffer: Buffer): Promise<void> {
 
 test('refuses broken files with a message for the user, and the next file still converts', async ({
   page,
-}) => {
+}, testInfo) => {
   const sheet = Buffer.from(encodeBinaryStl(generateBumpySheet(20)));
   const png = Buffer.alloc(5000, 0x5a);
   png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
@@ -54,6 +54,11 @@ test('refuses broken files with a message for the user, and the next file still 
     expect(state, name).toMatchObject({ errorCode: code, stats: null, busy: false });
     await expect(page.locator('#status')).toContainText(PROBLEM_MESSAGES[code]);
     await expect(page.locator('#status')).toHaveClass(/problem/);
+    // Attached to the CI run, so a human can judge how the message reads on the page.
+    await testInfo.attach(`refused-${code}`, {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    });
   }
 
   await pick(page, 'sheet.stl', sheet);
