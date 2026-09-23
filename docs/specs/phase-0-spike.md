@@ -311,3 +311,22 @@ This machine has a discrete GPU and no integrated one (the 11700F has none), and
 A Steam Deck was on this list and was dropped by the PM on 2026-09-20 without being measured.
 
 Criteria 1 and 3 are only met when measured on the laptop. How to measure: `npm run lan` on the development PC, open the address it prints on the device (same network), open "Benchmark this device", run it, and paste the result into issue #35. Add `?bake=auto&ktx=0` to the address for the baked variant.
+
+## Journal
+
+How the phase went, entry by entry, in reading order (`docs/journal/`):
+
+1. [Set up the converter repo](../journal/2026-09-19-repo-setup.md)
+2. [Weld, index, orient and place meshes read from STL](../journal/2026-09-19-weld-orient-place.md)
+3. [Run the pipeline in a Web Worker](../journal/2026-09-19-pipeline-in-a-worker.md)
+4. [Build 50k, 15k and 4k detail levels with meshoptimizer](../journal/2026-09-20-lods-with-meshoptimizer.md)
+5. [Stress scene with distance-based detail levels](../journal/2026-09-20-stress-scene.md)
+6. [Detect the up axis from the base](../journal/2026-09-20-up-axis-from-the-base.md)
+7. [Detail levels driven by error in mm](../journal/2026-09-20-error-driven-detail-levels.md)
+8. [A primed-and-washed look from per-vertex occlusion and cavity](../journal/2026-09-20-primed-and-washed-look.md)
+9. [Export each detail level as a GLB](../journal/2026-09-20-glb-export.md)
+10. [Unwrap and baked detail maps, and a no-go the PM overruled](../journal/2026-09-20-unwrap-and-bake-spike.md)
+11. [Bake through a BVH, and a warmed-up unwrap](../journal/2026-09-20-bvh-bake-sampling.md)
+12. [One packed, compressed detail texture within a budget](../journal/2026-09-20-texture-memory.md)
+13. [A one-button device benchmark, and a typo that measured nothing](../journal/2026-09-20-device-benchmark.md)
+14. [Phase 0 in retrospect](../journal/2026-09-20-phase-0-retrospective.md)

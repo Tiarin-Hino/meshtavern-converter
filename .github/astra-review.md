@@ -18,6 +18,7 @@ When you flag complexity, say what the simpler version looks like.
 - The change follows the structure and conventions the repo already has (folders, naming, patterns, how similar things were done before). Read neighbouring code before judging.
 - When the PR changes an idea (a concept, a data shape, a name, a rule, a decision), everything that depends on that idea moved with it: other callers, tests, types, docs, specs, the layout notes in `CLAUDE.md`, and `src/regression/baseline.json` with the change explained in the PR. Search the repo for leftovers the PR did not touch. A half-applied idea is a blocking finding.
 - A change that contradicts `CLAUDE.md` (conventions, "the user's STL is never uploaded") or a decision in `docs/specs/` without updating the spec is a blocking finding.
+- The PR adds or extends an entry in `docs/journal/` (rules in `docs/journal/README.md`), unless it is only a dependency bump, a typo or formatting. A missing entry is a blocking finding. An entry whose numbers or conclusions disagree with the PR is a blocking finding; a thin entry is not.
 
 ## 3. General code control
 

@@ -2,7 +2,7 @@
 
 Browser tool that turns a 3D-print STL of a miniature into a reduced, game-ready mini (GLB). Everything runs client-side: the user's STL must never be uploaded anywhere. This repo is public; the MeshTavern VTT that consumes it is a separate private repo.
 
-Current phase: Phase 1, the converter at product quality: spec in `docs/specs/phase-1-converter.md`, epic #40. It is not published in this phase (PM decision, 2026-09-20). Phase 0, the spike, is done; its results and decisions are in `docs/specs/phase-0-spike.md`. Since #42 every mini is baked and its texture compressed without being asked to; the address options `?bake=` (`auto`, `off`, a size) and `?ktx=` (`0`–`3`, `off`) remain for development only.
+Current phase: Phase 1, the converter at product quality: spec in `docs/specs/phase-1-converter.md`, epic #40. It is not published in this phase (PM decision, 2026-09-20). Phase 0, the spike, is done; its results and decisions are in `docs/specs/phase-0-spike.md`. How we got there, step by step: `docs/journal/`. Since #42 every mini is baked and its texture compressed without being asked to; the address options `?bake=` (`auto`, `off`, a size) and `?ktx=` (`0`–`3`, `off`) remain for development only.
 
 ## Stack and commands
 
@@ -36,10 +36,11 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `scripts/measure-baked.mjs` — a full table of baked minis at given texture sizes, uncompressed unless `KTX=0` (an effort) is in the environment.
 - `scripts/measure-stress.mjs` — measures the 100/400-mini stress scene in real Chrome, with and without the frame-rate cap.
 - `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (Excalidraw JSON + PNG export).
+- `docs/journal/` — one entry per piece of work: what was done, why, problems and their fixes, dead ends, numbers. Format and rules in its `README.md`. Read the entries of the area you are about to change.
 
 ## Conventions
 
-- Scene is Y-up, 1 unit = 1 mm. Print STLs are Z-up millimetres; convert on load, never rescale silently. Minis stand on y = 0, centred on the origin. Base sizes are in mm (25, 32, 40, 50…).
+- Scene is Y-up, 1 unit = 1 mm. Print STLs are millimetres, usually Z-up but not always: the up axis is detected from the base on load (with a fallback guess and a manual override), never rescaled silently. Minis stand on y = 0, centred on the origin. Base sizes are in mm (25, 32, 40, 50…).
 - Triangle budgets, sizes and thresholds are named constants, not inline numbers.
 - The canvas has no accessibility tree. Expose state through `window.__mt` and assert on numbers; use screenshots only for "does it look right".
 - Never commit STL files of real minis (they are licensed). The test corpus lives outside the repo; see `CONTRIBUTING.md`.
@@ -57,4 +58,6 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - Acceptance criteria of the issue are met and listed in the PR.
 - `npm run check` and `npm run e2e` pass.
 - Pipeline changes have unit tests; visual changes have a screenshot in the PR (use the `verify-3d` skill).
-- Docs/specs updated when behaviour changed. A human reviews and merges.
+- Docs/specs updated when behaviour changed.
+- A journal entry in `docs/journal/`, written in the same PR (not for dependency bumps, typos, formatting). Keep notes while working: each problem and its cause, each approach dropped, each number with its device. The journal is the source for the release docs and blog posts.
+- A human reviews and merges.

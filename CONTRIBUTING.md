@@ -14,8 +14,9 @@ This project is built by a small team together with the Claude Code agent. Human
 
 1. Branch from `main`: `feat/<issue>-<short-name>`.
 2. Commit with Conventional Commits.
-3. Open a PR with `Closes #<issue>` and fill in the checklist.
-4. CI must be green. A human reviews and squash-merges. Nobody pushes to `main`.
+3. Add an entry to `docs/journal/` (see its `README.md`): what you did, why, what went wrong and how you solved it, with numbers.
+4. Open a PR with `Closes #<issue>` and fill in the checklist.
+5. CI must be green. A human reviews and squash-merges. Nobody pushes to `main`.
 
 ## Automatic reviews
 
