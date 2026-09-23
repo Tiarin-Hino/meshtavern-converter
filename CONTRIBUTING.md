@@ -17,12 +17,16 @@ This project is built by a small team together with the Claude Code agent. Human
 3. Open a PR with `Closes #<issue>` and fill in the checklist.
 4. CI must be green. A human reviews and squash-merges. Nobody pushes to `main`.
 
+## Automatic reviews
+
+On PRs from branches of this repo (not forks, not drafts), two models review the change: Claude looks for bugs, and GPT Astra checks that the solution is as simple as the problem and fits the rest of the codebase (instructions in `.github/astra-review.md`). If Astra finds nothing blocking, the PR gets `ready-for-human-review`. If it does, the PR gets `astra-changes-requested`, Claude fixes the findings on the branch and the next push is reviewed again; after three rounds the PR gets `needs-human`. The labels are advice: a human still reviews and merges.
+
 ## Reviewing an agent PR
 
 1. Read the acceptance criteria in the issue, then the PR description.
 2. Open the Playwright report artifact on the CI run and look at the screenshots.
 3. For visual or interaction changes, check out the branch and try it (`npm run dev`).
-4. Request changes in plain language; mention `@claude` once the GitHub app is installed.
+4. Request changes in plain language; mention `@claude` to have Claude act on them (owner, members and collaborators only).
 
 ## Test minis
 
