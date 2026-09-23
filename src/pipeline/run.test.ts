@@ -61,6 +61,17 @@ describe('runPipeline', () => {
     for (const lod of lods) expect(lod.mesh.cavity?.length).toBe(lod.mesh.positions.length / 3);
   }, 120_000);
 
+  it('ends in the memory message when baking runs out of memory, instead of falling back', async () => {
+    vi.mocked(compressDetail).mockRejectedValueOnce(
+      new RangeError('Array buffer allocation failed'),
+    );
+    await expect(runPipeline(sheet(), { bake: BAKE })).rejects.toMatchObject({
+      name: 'ConversionProblem',
+      code: 'out-of-memory',
+      detail: 'Array buffer allocation failed',
+    });
+  }, 120_000);
+
   it('falls back to the per-vertex look when the device cannot hold the texture', async () => {
     const { baked, stats } = await runPipeline(sheet(), { maxTextureSize: 512 });
     expect(baked).toBeUndefined();

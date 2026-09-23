@@ -12,9 +12,13 @@ describe('problems', () => {
     ]) {
       expect(isOutOfMemory(new RangeError(message)), message).toBe(true);
     }
-    expect(isOutOfMemory(new TypeError("Cannot read properties of undefined (reading 'x')"))).toBe(
-      false,
-    );
+    for (const message of [
+      "Cannot read properties of undefined (reading 'x')",
+      "Cannot read properties of undefined (reading 'zoom')",
+      'no room left in the atlas',
+    ]) {
+      expect(isOutOfMemory(new TypeError(message)), message).toBe(false);
+    }
   });
 
   it('turns anything thrown into a problem with a message for the user and the detail kept', () => {

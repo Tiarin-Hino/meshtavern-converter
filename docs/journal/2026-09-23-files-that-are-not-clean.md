@@ -25,6 +25,8 @@ Story 3 of the [Phase 1 spec](../specs/phase-1-converter.md) (#43): whatever a s
 ## Problems and how we solved them
 
 - **The new ASCII reader was four times slower.** Reading bytes directly instead of decoding the whole file into one string saves a copy of the file, but turning each number into a string for `Number()` took 2.4 s for 103 MB, against 0.56 s for the old regular expression. **Cause:** one small string allocation per coordinate, 4.5 million of them. **Fix:** a hand-written decimal parser on the bytes, with `Number()` only for oddities such as `nan`. 0.37 s, and every float identical to the old reader's.
+- **The review found three gaps** (Claude Fable 5.1 and GPT Astra on PR #68). The page's "Dropped" figure and the corpus report still showed only one of the three kinds of dropped triangle; they now show all three. An allocation failure during unwrap, bake or compression was caught by the bake's own fallback and quietly became "per-vertex look"; it now ends in the memory message and a fresh worker like any other. And the test for out-of-memory messages matched "OOM" in any case, so an error about "zoom" would have told the user the file was too large; it now matches only the word in capitals. Two figures in the table below were also 20 MB off the formula and were corrected.
+- **The automatic fix job could not start.** Adding the `astra-review` label ran the job that applies review findings for the first time, and it stopped at once. **Cause:** the GitHub action installs Claude Code 2.1.278, and the fix job's model, Opus 5.5, needs 2.1.280. **Fix:** the findings were applied by hand here; the workflow is fixed in its own PR.
 - **An empty STL was converted.** Found in #53: a file with no triangles went through the whole pipeline and got a blank texture. It is now refused as empty, and the old test that expected it to convert was changed.
 
 ## Dead ends
@@ -39,9 +41,9 @@ Peak memory of the page's process (the renderer, which also runs the worker) dur
 | ----------------------------- | --------: | ------: | ----------: |
 | Generated sheet, binary       |     3,200 |     333 |         361 |
 | Terrain piece, binary         |      144k |     387 |         422 |
-| Winged humanoid, binary       |      500k |     487 |         574 |
-| Humanoid, binary              |     1.25M |     695 |         878 |
-| Large dragon, 281 MB binary   |      5.6M |   2,630 |       2,754 |
+| Winged humanoid, binary       |      500k |     487 |         575 |
+| Humanoid, binary              |     1.25M |     695 |         898 |
+| Large dragon, 281 MB binary   |      5.6M |   2,630 |       2,774 |
 | Generated sheet, 103 MB ASCII |      500k |     555 |         720 |
 
 The GPU process stayed at 177–191 MB in every run. With these figures the large dragon converts on a device that reports 8 GB and is refused at 4 GB or less; a 63 MB humanoid still converts on a device that reports 2 GB.

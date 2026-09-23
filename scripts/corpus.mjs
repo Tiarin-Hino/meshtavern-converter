@@ -115,6 +115,8 @@ try {
       sourceTriangles: stats.sourceTriangles,
       triangles: stats.triangles,
       degenerateTriangles: stats.degenerateTriangles,
+      duplicateTriangles: stats.duplicateTriangles,
+      invalidTriangles: stats.invalidTriangles,
       sizeMm: stats.sizeMm.map((mm) => round(mm, 2)),
       up: stats.up,
       upMethod: stats.upMethod,

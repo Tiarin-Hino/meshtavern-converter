@@ -94,6 +94,15 @@ describe('Converter', () => {
     expect(workers[1]!.requests).toHaveLength(1);
   });
 
+  it('ends every job still waiting for a worker that ran out of memory', async () => {
+    const { converter, workers } = setUp();
+    const first = converter.convert(new ArrayBuffer(84), () => {});
+    const second = converter.convert(new ArrayBuffer(84), () => {});
+    workers[0]!.reply({ type: 'error', id: 1, code: 'out-of-memory' });
+    await expect(first).rejects.toMatchObject({ code: 'out-of-memory' });
+    await expect(second).rejects.toMatchObject({ code: 'out-of-memory' });
+  });
+
   it('turns a worker that dies without a word into a problem, and starts a fresh one', async () => {
     const { converter, workers } = setUp();
     const job = converter.convert(new ArrayBuffer(84), () => {});

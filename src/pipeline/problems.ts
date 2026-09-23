@@ -56,8 +56,12 @@ export class ConversionProblem extends Error {
  */
 export function isOutOfMemory(error: unknown): boolean {
   const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
-  return /out of memory|allocation failed|array buffer allocation|invalid (typed )?array length|cannot enlarge memory|memory\.grow|maximum memory size|OOM/i.test(
-    text,
+  return (
+    /out of memory|allocation failed|array buffer allocation|invalid (typed )?array length|cannot enlarge memory|memory\.grow|maximum memory size/i.test(
+      text,
+    ) ||
+    // "OOM" only as a word in capitals: "zoom" or "room" in a message is not about memory.
+    /\bOOM\b/.test(text)
   );
 }
 

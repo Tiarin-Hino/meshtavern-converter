@@ -80,8 +80,12 @@ export class Converter {
     this.jobs.delete(response.id);
     if (response.type === 'done') return job.resolve(response.result);
     job.reject(new ConversionProblem(response.code, response.detail));
-    // After running out of memory the worker's heap may be left full: start afresh.
-    if (response.code === 'out-of-memory') this.restart();
+    // After running out of memory the worker's heap may be left full: start afresh, and
+    // end whatever else was waiting for the old worker.
+    if (response.code === 'out-of-memory') {
+      this.failAll(new ConversionProblem('out-of-memory', response.detail));
+      this.restart();
+    }
   }
 
   private restart(): void {

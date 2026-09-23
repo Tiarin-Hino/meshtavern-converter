@@ -8,7 +8,7 @@ import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './o
 import { shade } from './shade';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
-import { ConversionProblem } from './problems';
+import { ConversionProblem, isOutOfMemory } from './problems';
 import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
 export const STEPS = ['read', 'weld', 'orient', 'simplify', 'shade', 'levels'] as const;
@@ -275,6 +275,8 @@ export async function runPipeline(
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        // Out of memory is not a baking problem: the worker must end it and start afresh.
+        if (isOutOfMemory(error)) throw new ConversionProblem('out-of-memory', message);
         bakeSkipped = { reason: 'failed', step, message };
       }
     }
