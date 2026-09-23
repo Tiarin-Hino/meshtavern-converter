@@ -122,7 +122,7 @@ No server, no storage, no accounts, no analytics. Files are read in the browser 
 ## Risks
 
 - **Messy files are open-ended.** Time-box #43 per kind of mess; what cannot be repaired cheaply becomes a clear refusal.
-- **Base and support detection are heuristics** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
+- **Base detection is a heuristic** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
 - **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer and #57 built it: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. On the reference laptop the same cut gave 3.2 s instead of 33.8 s for a large mini (#35).
 - **Two young dependencies** (`xatlas-wasm`, `ktx2-encoder`) sit in the critical path until #33 and #38 are done.
 - **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus.
