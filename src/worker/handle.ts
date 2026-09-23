@@ -1,20 +1,13 @@
 import { meshBuffers } from '../pipeline/mesh';
 import { runPipeline } from '../pipeline/run';
-import type { IslandFinder } from '../pipeline/unwrap-parts';
 import type { Post, WorkerRequest } from './protocol';
 
 /** Everything the worker does, kept free of `self` so it can be unit-tested. */
-export async function handleRequest(
-  request: WorkerRequest,
-  post: Post,
-  /** Spike #34: where the islands of an unwrap variant are found. Default: on this thread. */
-  findIslands?: IslandFinder,
-): Promise<void> {
+export async function handleRequest(request: WorkerRequest, post: Post): Promise<void> {
   try {
     const { up, ...options } = request.options ?? {};
     const result = await runPipeline(request.stl, {
       ...options,
-      findIslands,
       forcedUp: up ?? null,
       onProgress: (progress) => post({ type: 'progress', id: request.id, progress }),
     });

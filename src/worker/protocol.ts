@@ -1,6 +1,5 @@
 import type { UpAxis } from '../pipeline/orient';
 import type { ConversionResult, Progress } from '../pipeline/run';
-import type { UnwrapVariant } from '../pipeline/unwrap-parts';
 
 /** What the page may ask for. Everything is optional: the defaults give a baked, compressed mini. */
 export interface ConvertOptions {
@@ -11,8 +10,6 @@ export interface ConvertOptions {
   compress?: number | null;
   /** Largest texture the device can hold; a mini that needs more keeps the per-vertex look. */
   maxTextureSize?: number;
-  /** Spike #34, development only: another way to unwrap the table level. */
-  unwrapVariant?: UnwrapVariant;
 }
 
 /** Messages between the page and the conversion worker. Every job carries an id so replies can be matched. */

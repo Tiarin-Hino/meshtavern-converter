@@ -51,7 +51,7 @@ Order rationale _(proposal)_: first the net that catches regressions, then the s
    - **Then the change itself,** as its own issue, only if the spike finds a variant that meets the target below. Same rules as every step: in the worker, timed, with progress, cancellable, per-vertex look when it fails; the regression baseline is updated on purpose.
    - Target _(proposal)_: on the development PC every corpus mini except the largest file unwraps in 15 s or less, and no mini looks worse on its comparison sheet (PM's call). Texture coordinates also carry painting later, so visibly more seams count as worse.
    - If no variant gets there, the spike's recommendation says what to do instead: for example accept the time for large minis and show the per-vertex mini at once while the baked one finishes _(proposal, a product decision for the PM)_.
-   - Status: spike done (#34, 2026-09-22); figures and sheets under "Story 9: what the spike found" below. A variant meets the target with room to spare: the table level cut into 8 slabs and handed to xatlas as 8 meshes of one atlas. The change itself is drafted as #57 and waits for the PM's look at the comparison sheets.
+   - Status: spike done (#34, 2026-09-22); figures and sheets under "Story 9: what the spike found" below. The PM chose "8 slabs, one atlas" and released #57 on 2026-09-23. Built in #57: the table level is cut into 8 slabs (`SLAB_COUNT`) and unwrapped as meshes of one atlas; a level under 8,000 triangles (`WHOLE_UNWRAP_BELOW`) is unwrapped whole, because below that the cut saves under half a second and costs up to 70 % more islands. The spike's workers, second packing pass, `?unwrap=` and scripts are removed. Corpus run on the development PC (2026-09-23, commit on the #57 branch, window visible, untouched steps within 0.3 s of the run of 2026-09-21): all 30 minis baked, none fell back; unwrap 0.6–8.5 s (largest file 4.9 s; slowest `32mm_GiantBat` and `32mm_CaveWallLong` at 8.5 s), whole conversion of the 2048 px minis 21–36 s (largest file 114 s, of which 70 s are steps before the unwrap); islands −3 % to +31 %, texture use within 3 points; levels unchanged.
 
 ## Story 9: what the spike found (#34, 2026-09-22)
 
@@ -95,7 +95,7 @@ Unwrap time in seconds, real Chrome:
 
 What this leaves as the longest steps of a large mini: the bake (11–17 s at 2048 px on the development PC, 10 s on the laptop) and the texture encoding (6 s / 4.6 s). Not measured here: whether the cuts show once minis are painted (a cut that follows the shape instead of a straight slab is the idea to keep for then).
 
-To run it again: `npm run build && node scripts/spike34/measure.mjs` (Chrome, sheets), `node scripts/spike34/dump-tables.mjs` then `node scripts/spike34/sweep.mjs <mini> "base;multi8"` (Node). In the page: `?unwrap=multi8`, `?unwrap=cut8&workers=4`, `?unwrap=whole&chart={…}`.
+The spike's scripts and page options were removed with #57; to run it again, check out commit `c69dd1b` (#58): `npm run build && node scripts/spike34/measure.mjs` (Chrome, sheets), `node scripts/spike34/dump-tables.mjs` then `node scripts/spike34/sweep.mjs <mini> "base;multi8"` (Node).
 
 ## Exit criteria
 
@@ -112,7 +112,7 @@ No server, no storage, no accounts, no analytics. Files are read in the browser 
 
 - **Messy files are open-ended.** Time-box #43 per kind of mess; what cannot be repaired cheaply becomes a clear refusal.
 - **Base and support detection are heuristics** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
-- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. Until #57 is built the old times hold. On the reference laptop the spike's option gave 3.2 s instead of 33.8 s for a large mini (#35).
+- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer and #57 built it: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. On the reference laptop the same cut gave 3.2 s instead of 33.8 s for a large mini (#35).
 - **Two young dependencies** (`xatlas-wasm`, `ktx2-encoder`) sit in the critical path until #33 and #38 are done.
 - **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus.
 

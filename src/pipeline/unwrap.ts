@@ -1,6 +1,7 @@
-import type { ChartOptions, XAtlasModule } from 'xatlas-wasm';
+import type { XAtlasModule } from 'xatlas-wasm';
 import { generateBumpySheet } from './generate';
 import { weldVertices, type IndexedMesh } from './mesh';
+import { cutIntoSlabs, splitByGroup, type MeshPart } from './slabs';
 
 /** Texels left empty around every UV island, so neighbouring islands do not bleed into each other. */
 export const ISLAND_PADDING = 3;
@@ -22,6 +23,8 @@ export interface Unwrapped {
   charts: number;
   /** Share of the texture that is covered by islands, 0..1. */
   utilisation: number;
+  /** Number of slabs the mesh was unwrapped in; 1 when it was unwrapped whole. */
+  slabs: number;
 }
 
 let module: Promise<XAtlasModule> | null = null;
@@ -54,17 +57,36 @@ function warmUp(xatlas: XAtlasModule): void {
 }
 
 /**
+ * The table level is cut into this many slabs, unwrapped as meshes of one atlas. xatlas's time
+ * grows roughly with the square of the mesh it is given, so eight slabs take a fraction of the
+ * time of the whole (spike #34: 2.3–4.7 s instead of 7.5–85.6 s). The price is one seam along
+ * every cut: 6–26 % more islands, 5–12 % more seam length. 16 slabs save one more second at
+ * twice the seam cost.
+ */
+export const SLAB_COUNT = 8;
+
+/**
+ * Meshes with fewer triangles are unwrapped whole. Measured on five corpus minis reduced to
+ * 500–15,000 triangles (Node, one core): below about 2,000 the slabs are no faster at all and
+ * add 40–70 % islands; at 8,000 they save 0.15–0.4 s. Table levels have at least 15,000
+ * triangles unless the file itself has fewer, so this only spares small files a seam cost.
+ */
+export const WHOLE_UNWRAP_BELOW = 8_000;
+
+/**
  * Gives a mesh texture coordinates with xatlas. `resolution` is the texture size the
  * island padding is planned for; the coordinates themselves are normalised to 0..1.
+ * A mesh of `WHOLE_UNWRAP_BELOW` triangles or more is cut into `SLAB_COUNT` slabs that are
+ * handed to xatlas as meshes of one atlas: islands are found per slab and packed together, at
+ * one scale. Triangles come back grouped by slab.
  */
 export async function unwrap(
   source: IndexedMesh,
   resolution: number,
   /** Called with 0..100 as the unwrap advances. Finding the islands is nearly all of the time. */
   onProgress: (percent: number) => void = () => {},
-  /** Spike #34 only: other settings for finding the islands. */
-  chartOptions: ChartOptions = { maxCost: MAX_CHART_COST },
 ): Promise<Unwrapped> {
+  const parts = partsToUnwrap(source);
   const xatlas = await unwrapperReady();
   const atlas = xatlas.createAtlas();
   try {
@@ -78,39 +100,56 @@ export async function unwrap(
       }
       return true;
     });
-    const error = atlas.addMesh({
-      positions: source.positions,
-      normals: source.normals,
-      indices: source.indices,
-    });
-    if (error !== 0) throw new Error(`Unwrap failed: ${xatlas.addMeshErrorString(error)}`);
-    atlas.generate(chartOptions, {
-      resolution,
-      padding: ISLAND_PADDING,
-      bilinear: true,
-      blockAlign: true,
-    });
+    for (const part of parts) {
+      const error = atlas.addMesh({
+        positions: part.mesh.positions,
+        normals: part.mesh.normals,
+        indices: part.mesh.indices,
+        meshCountHint: parts.length,
+      });
+      if (error !== 0) throw new Error(`Unwrap failed: ${xatlas.addMeshErrorString(error)}`);
+    }
+    atlas.generate(
+      { maxCost: MAX_CHART_COST },
+      { resolution, padding: ISLAND_PADDING, bilinear: true, blockAlign: true },
+    );
 
-    const out = atlas.getMesh(0);
-    const count = out.vertexCount;
+    let count = 0;
+    let indexCount = 0;
+    const outs = parts.map((_, p) => {
+      const out = atlas.getMesh(p);
+      count += out.vertexCount;
+      indexCount += out.indices.length;
+      return out;
+    });
+    const sourceVertex = new Uint32Array(count);
+    const uvs = new Float32Array(count * 2);
+    const indices = new Uint32Array(indexCount);
+    let vertex = 0;
+    let index = 0;
+    outs.forEach((out, p) => {
+      const offset = vertex;
+      for (const { xref, uv } of out.vertices) {
+        sourceVertex[vertex] = parts[p]!.sourceVertex[xref]!;
+        uvs[vertex * 2] = uv[0] / atlas.width;
+        uvs[vertex * 2 + 1] = uv[1] / atlas.height;
+        vertex++;
+      }
+      for (const local of out.indices) indices[index++] = offset + local;
+    });
     const carry = (values: Float32Array | undefined, width: number): Float32Array | undefined => {
       if (!values) return undefined;
       const carried = new Float32Array(count * width);
       for (let v = 0; v < count; v++) {
-        const from = out.vertices[v]!.xref * width;
+        const from = sourceVertex[v]! * width;
         for (let k = 0; k < width; k++) carried[v * width + k] = values[from + k]!;
       }
       return carried;
     };
-    const uvs = new Float32Array(count * 2);
-    for (let v = 0; v < count; v++) {
-      uvs[v * 2] = out.vertices[v]!.uv[0] / atlas.width;
-      uvs[v * 2 + 1] = out.vertices[v]!.uv[1] / atlas.height;
-    }
     return {
       mesh: {
         positions: carry(source.positions, 3)!,
-        indices: out.indices.slice(),
+        indices,
         normals: carry(source.normals, 3),
         cavity: carry(source.cavity, 1),
         occlusion: carry(source.occlusion, 1),
@@ -118,8 +157,19 @@ export async function unwrap(
       },
       charts: atlas.chartCount,
       utilisation: atlas.getUtilization(0),
+      slabs: parts.length,
     };
   } finally {
     atlas.destroy();
   }
+}
+
+/** The slabs a mesh is unwrapped in: the whole mesh as one when it is too small to cut. */
+function partsToUnwrap(source: IndexedMesh): Pick<MeshPart, 'mesh' | 'sourceVertex'>[] {
+  if (source.indices.length / 3 < WHOLE_UNWRAP_BELOW) {
+    const vertices = source.positions.length / 3;
+    return [{ mesh: source, sourceVertex: Uint32Array.from({ length: vertices }, (_, v) => v) }];
+  }
+  const { groupOfTriangle, groupSizes } = cutIntoSlabs(source, SLAB_COUNT);
+  return splitByGroup(source, groupOfTriangle, groupSizes.length);
 }
