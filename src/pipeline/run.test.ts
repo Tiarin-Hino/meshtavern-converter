@@ -3,7 +3,7 @@ import { KTX2_ZSTANDARD, readKtx2Header } from './compress';
 import { generateBumpySheet } from './generate';
 import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
 import { encodeBinaryStl } from './stl';
-import { generateFigure } from '../regression/shapes';
+import { generateFigure, generateSwarm } from '../regression/shapes';
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {
@@ -158,5 +158,29 @@ describe('runPipeline', () => {
       sizing: { plainBase: true },
     });
     expect(sizing).toMatchObject({ plainBase: null, base: { shape: 'round' } });
+  }, 60_000);
+
+  it('scales a 25 mm base to 32 mm when asked, and nothing else changes size', async () => {
+    const stl = encodeBinaryStl(generateFigure(true));
+    const kept = await runPipeline(stl, { bake: 0 });
+    const scaledUp = await runPipeline(stl, { bake: 0, sizing: { scaleToBaseMm: 32 } });
+    const factor = 32 / kept.sizing.baseDiameterMm;
+    expect(scaledUp.sizing.scale).toBeCloseTo(factor, 6);
+    expect(factor).toBeCloseTo(1.28, 1);
+    for (let axis = 0; axis < 3; axis++)
+      expect(scaledUp.stats.sizeMm[axis]).toBeCloseTo(kept.stats.sizeMm[axis]! * factor, 3);
+    expect(scaledUp.sizing).toMatchObject({ size: 'medium', baseDiameterMm: 32, warnings: [] });
+  }, 60_000);
+
+  it('warns when the chosen size is smaller than the base, and does not rescale', async () => {
+    const { sizing, stats } = await runPipeline(encodeBinaryStl(generateSwarm()), {
+      bake: 0,
+      sizing: { size: 'medium' },
+    });
+    expect(sizing.scale).toBe(1);
+    expect(stats.sizeMm[0]).toBeCloseTo(50, 0);
+    expect(sizing.warnings).toEqual([
+      { kind: 'base-exceeds-footprint', baseMm: sizing.baseDiameterMm, footprintMm: 32 },
+    ]);
   }, 60_000);
 });

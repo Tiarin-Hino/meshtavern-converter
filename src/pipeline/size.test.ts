@@ -151,4 +151,42 @@ describe('sizeMini', () => {
     sizeMini(placed);
     expect(Array.from(placed.mesh.positions)).toEqual(before);
   });
+
+  it('scales to the base diameter the user entered', () => {
+    const { sizeMm, sizing, mesh } = sizeMini(placedMini([30, 40, 30], 25), { scaleToBaseMm: 32 });
+    expect(sizing.scale).toBeCloseTo(1.28, 9);
+    expect(sizing.baseDiameterMm).toBeCloseTo(32, 9);
+    expect(sizing.base!.footprintMm[0]).toBeCloseTo(32, 9);
+    expect(sizing).toMatchObject({ size: 'medium', units: 'mm' });
+    expect(sizeMm[1]).toBeCloseTo(40 * 1.28, 9);
+    expect(mesh.positions[4]).toBeCloseTo(40 * 1.28, 4);
+  });
+
+  it('scales a base that does not fit its footprint to fit it, and the warning goes', () => {
+    const tooLarge = sizeMini(placedMini([50, 40, 50], 50), { size: 'medium' });
+    expect(tooLarge.sizing.warnings.map((w) => w.kind)).toEqual(['base-exceeds-footprint']);
+    const fitted = sizeMini(placedMini([50, 40, 50], 50), { size: 'medium', scaleToBaseMm: 32 });
+    expect(fitted.sizing.warnings).toEqual([]);
+    expect(fitted.sizing.scale).toBeCloseTo(0.64, 9);
+  });
+
+  it('scales a mini without a base by its wider side, and gives a plain base that diameter', () => {
+    const { sizing } = sizeMini(placedMini([20, 40, 16], null), {
+      scaleToBaseMm: 32,
+      plainBase: true,
+    });
+    expect(sizing.scale).toBeCloseTo(1.6, 9);
+    expect(sizing).toMatchObject({
+      plainBase: { diameterMm: 32 },
+      baseDiameterMm: 32,
+      size: 'medium',
+    });
+  });
+
+  it('refuses a base diameter that is not a positive number', () => {
+    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY])
+      expect(() => sizeMini(placedMini([30, 40, 30], 25), { scaleToBaseMm: bad })).toThrow(
+        RangeError,
+      );
+  });
 });

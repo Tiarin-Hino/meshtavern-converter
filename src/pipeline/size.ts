@@ -155,15 +155,23 @@ export interface SizedMini {
 /**
  * The size step: turns file units into mm, suggests or takes the creature size, adds a
  * plain base when asked and there is none, and works out the warnings. Only the options
- * scale anything; with none, a mm file keeps its measured size. The input is left untouched.
+ * scale anything; with none, a mm file keeps its measured size. `scaleToBaseMm` replaces
+ * the units: it sets the base (or, without one, the figure's wider side) to that diameter
+ * in mm, and a plain base added with it gets that diameter. The input is left untouched.
  */
 export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {}): SizedMini {
   const units = options.units ?? guessUnits(placed.sizeMm[1]);
-  const scale = UNIT_FACTORS[units];
+  const unitScale = UNIT_FACTORS[units];
+
+  // Scaling to a base diameter measures the base, or the figure's wider side without one.
+  const measuredInFile = placed.base?.diameterMm ?? Math.max(placed.sizeMm[0], placed.sizeMm[2]);
+  const target = options.scaleToBaseMm;
+  if (target !== undefined && !(target > 0 && Number.isFinite(target)))
+    throw new RangeError(`Cannot scale to a base of ${target} mm`);
+  const scale = target !== undefined && measuredInFile > 0 ? target / measuredInFile : unitScale;
 
   const baseMm = placed.base ? placed.base.diameterMm * scale : null;
-  const figureMm = Math.max(placed.sizeMm[0], placed.sizeMm[2]) * scale;
-  const measuredMm = baseMm ?? figureMm;
+  const measuredMm = measuredInFile * scale;
   const size = options.size ?? suggestSize(measuredMm);
 
   let mesh = scale === 1 ? placed.mesh : scaled(placed.mesh, scale);
@@ -174,7 +182,10 @@ export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {})
   ];
   let plainBase: Sizing['plainBase'] = null;
   if (options.plainBase && !placed.base) {
-    plainBase = { diameterMm: SIZES[size].plainBaseMm, heightMm: PLAIN_BASE_HEIGHT_MM };
+    plainBase = {
+      diameterMm: target ?? SIZES[size].plainBaseMm,
+      heightMm: PLAIN_BASE_HEIGHT_MM,
+    };
     mesh = standOnBase(mesh, generatePlainBase(plainBase.diameterMm), plainBase.heightMm);
     sizeMm[0] = Math.max(sizeMm[0], plainBase.diameterMm);
     sizeMm[1] += plainBase.heightMm;
