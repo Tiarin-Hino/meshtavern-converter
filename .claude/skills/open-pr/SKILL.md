@@ -11,6 +11,7 @@ argument-hint: [issue number]
 2. **Scan the diff** (`git diff <base>...HEAD`) for things that must not ship: STL files, converted output or renders of real minis, secrets, `.env` files, user data, names of third-party minis, creators or shops, leftover debug code, network calls with user data. This repo is public: nothing about business, pricing, licensing deals or partners.
 3. **Fill `.github/pull_request_template.md`:**
    - `Closes #N` on the first line. For a stacked PR, target the parent branch and say so at the top.
+   - **Second opinion.** If the change is complex or risky, add one line under `Closes #N`: `Suggest the astra-review label: <reason in one line>`. Complex or risky means a new pipeline stage, data shape or structure; a changed spec decision; a moved regression baseline; anything near "the user's STL never leaves the browser"; a large diff across several areas; or work that needed planning, not just building. Never add the label yourself: the PM decides, and GPT Astra is a paid review worth it where a second model family may see what Claude does not.
    - **What changed**: three to six plain-language sentences. What a user or the PM will notice, then the technical gist.
    - **Acceptance criteria**: copied from the issue. Tick only what is proven, and put the evidence next to each tick (test name, measured number with its device, screenshot).
    - **Needs a human look**: every visual or taste judgement, with before/after screenshots.
