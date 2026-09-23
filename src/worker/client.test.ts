@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ConversionProblem, PROBLEM_MESSAGES } from '../pipeline/problems';
 import type { ConversionResult } from '../pipeline/run';
 import { ConversionCancelled, Converter, type WorkerLike } from './client';
 import type { WorkerRequest, WorkerResponse } from './protocol';
@@ -70,5 +71,40 @@ describe('Converter', () => {
     converter.cancel();
     expect(workers).toHaveLength(1);
     expect(workers[0]!.terminated).toBe(false);
+  });
+
+  it('rejects a refused file with the message for the user', async () => {
+    const { converter, workers } = setUp();
+    const job = converter.convert(new ArrayBuffer(84), () => {});
+    workers[0]!.reply({ type: 'error', id: 1, code: 'truncated', detail: '84 bytes' });
+    const problem = await job.catch((error: unknown) => error);
+    expect(problem).toBeInstanceOf(ConversionProblem);
+    expect(problem).toMatchObject({ code: 'truncated', message: PROBLEM_MESSAGES.truncated });
+    expect(workers).toHaveLength(1);
+  });
+
+  it('starts a fresh worker after memory ran out, and converts the next file there', async () => {
+    const { converter, workers } = setUp();
+    const job = converter.convert(new ArrayBuffer(84), () => {});
+    workers[0]!.reply({ type: 'error', id: 1, code: 'out-of-memory' });
+    await expect(job).rejects.toMatchObject({ code: 'out-of-memory' });
+    expect(workers[0]!.terminated).toBe(true);
+    expect(workers).toHaveLength(2);
+    void converter.convert(new ArrayBuffer(84), () => {});
+    expect(workers[1]!.requests).toHaveLength(1);
+  });
+
+  it('turns a worker that dies without a word into a problem, and starts a fresh one', async () => {
+    const { converter, workers } = setUp();
+    const job = converter.convert(new ArrayBuffer(84), () => {});
+    workers[0]!.onerror?.call(
+      workers[0] as unknown as Worker,
+      { message: 'out of memory' } as ErrorEvent,
+    );
+    await expect(job).rejects.toMatchObject({
+      code: 'out-of-memory',
+      message: PROBLEM_MESSAGES['too-large'],
+    });
+    expect(workers).toHaveLength(2);
   });
 });
