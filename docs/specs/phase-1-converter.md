@@ -55,7 +55,7 @@ Order rationale _(proposal)_: first the net that catches regressions, then the s
 
 ## Story 9: what the spike found (#34, 2026-09-22)
 
-Development PC: RTX 3060, i7-11700F (16 threads), 64 GB, Chrome 153, window in front, a fresh page per conversion. The reference laptop is not measured. The run's "today" column matches the PM's corpus run of 2026-09-21 (85.6 s against 84.1 s for the slowest mini), and the steps no variant touches (weld, simplify, shade) stayed within 0.2 s across the variants for seven minis and within 1 s for the other two, so the machine held still. An earlier run of the same session did not pass that check (up to twice as slow) and is used for the chart options only, as a ratio within each mini.
+Development PC: RTX 3060, i7-11700F (16 threads), 64 GB, Chrome 153, window in front, a fresh page per conversion. The reference laptop was measured afterwards by the PM (below). The run's "today" column matches the PM's corpus run of 2026-09-21 (85.6 s against 84.1 s for the slowest mini), and the steps no variant touches (weld, simplify, shade) stayed within 0.2 s across the variants for seven minis and within 1 s for the other two, so the machine held still. An earlier run of the same session did not pass that check (up to twice as slow) and is used for the chart options only, as a ratio within each mini.
 
 **Why the unwrap is slow.** xatlas's time grows roughly with the square of the mesh it is given: half the mesh takes about a quarter of the time. Cut into 8 slabs and unwrapped one after the other on one core, the slowest mini drops from 86 s to 6 s. Parallel work was never the lever; smaller pieces are.
 
@@ -89,9 +89,11 @@ Unwrap time in seconds, real Chrome:
 - **The whole corpus, 8 slabs in one atlas** (Node, one core, the table levels of all 30 minis at the texture size the policy gives them; Node's times match Chrome's for today's unwrap): 0.7–9.2 s, median 3.5 s, the largest file 5.3 s. Slowest: `32mm_CaveWallLong` 9.2 s and `32mm_GiantBat` 8.3 s (slabs of equal triangle count are not slabs of equal work); all others 5.3 s or less. Islands −3 % to +31 %, texture use within 1 point of today (one mini +3).
 - **Comparison sheets:** `out/spike34/chrome2/<mini>.png` on the development PC, one column per variant, three views of the baked table level. No difference visible to the agent at these views; the call is the PM's.
 
+**Reference laptop** (Intel Iris Xe, on the power cord, `npm run lan` from main after #58, PM, 2026-09-23; full table in #35): M-001a (ordinary, 1024 px) unwrap 2.4 s today, 1.7 s with 8 slabs, whole conversion 9.0 s → 8.3 s; HillGiant_32mm_FDM (2048 px) unwrap 33.8 s → 3.2 s, whole conversion 54.4 s → 20.5 s, of which the bake is 10.4 s and the encode 4.6 s. Longest stall 17 / 33 ms. The untouched steps agree between the pairs and with the run of 2026-09-20. The large mini with a 2K texture that #35 owed is thereby measured: 54 s today, far under the 3-minute criterion.
+
 **Recommendation: build "8 slabs, one atlas"** (#57). It meets the target on every corpus mini, the largest file included, is the simplest of the variants (no workers, no second packing, about 60 lines), uses less memory than today and keeps the texture use. With it a large mini converts in 23–40 s instead of 62–110 s and an ordinary one in about 10 s instead of 15–20 s. 16 slabs save one more second at twice the seam cost: not worth it. Workers and chart options: drop.
 
-What this leaves as the longest steps of a large mini: the bake (11–17 s at 2048 px) and the texture encoding (6 s). Not measured here: the reference laptop; whether the cuts show once minis are painted (a cut that follows the shape instead of a straight slab is the idea to keep for then).
+What this leaves as the longest steps of a large mini: the bake (11–17 s at 2048 px on the development PC, 10 s on the laptop) and the texture encoding (6 s / 4.6 s). Not measured here: whether the cuts show once minis are painted (a cut that follows the shape instead of a straight slab is the idea to keep for then).
 
 To run it again: `npm run build && node scripts/spike34/measure.mjs` (Chrome, sheets), `node scripts/spike34/dump-tables.mjs` then `node scripts/spike34/sweep.mjs <mini> "base;multi8"` (Node). In the page: `?unwrap=multi8`, `?unwrap=cut8&workers=4`, `?unwrap=whole&chart={…}`.
 
@@ -110,7 +112,7 @@ No server, no storage, no accounts, no analytics. Files are read in the browser 
 
 - **Messy files are open-ended.** Time-box #43 per kind of mess; what cannot be repaired cheaply becomes a clear refusal.
 - **Base and support detection are heuristics** and will be wrong sometimes: every guess is shown and overridable, and the corpus decides whether a heuristic is good enough.
-- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. Until #57 is built the old times hold; the reference laptop is still to be measured.
+- **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. Until #57 is built the old times hold. On the reference laptop the spike's option gave 3.2 s instead of 33.8 s for a large mini (#35).
 - **Two young dependencies** (`xatlas-wasm`, `ktx2-encoder`) sit in the critical path until #33 and #38 are done.
 - **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus.
 
