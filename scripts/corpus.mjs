@@ -1,7 +1,8 @@
 // The regression run over the local corpus (issue #46). Converts every STL in corpus/ in
 // real Chrome (GPU on) and writes to out/corpus/:
 //   results.json     triangles, error, sizes and times per level for every mini
-//   results.md       the same as tables, the corpus coverage, and what changed since the last run
+//   results.md       the same as tables, the corpus coverage, the size suggestions checked
+//                    against scripts/corpus-index.json, and what changed since the last run
 //   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels
 // Sort the corpus into folders named after the kind of mini (see KINDS); files directly in
 // corpus/ count as "unsorted".
@@ -16,6 +17,11 @@ import { createServer } from 'vite';
 import { CORPUS, corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4179;
+/**
+ * The expected creature size per corpus mini, keyed like results.json (issue #44). Committed;
+ * the corpus itself is not. Fields other than `size` (a `note`, later `up` for #72) are left alone.
+ */
+const INDEX = 'scripts/corpus-index.json';
 /** The kinds the Phase 1 spec asks the corpus to cover; each is a folder under corpus/. */
 const KINDS = ['humanoid', 'large-creature', 'quadruped', 'flying', 'mounted', 'swarm', 'terrain'];
 const CORPUS_GOAL = [20, 30];
@@ -120,6 +126,20 @@ try {
       sizeMm: stats.sizeMm.map((mm) => round(mm, 2)),
       up: stats.up,
       upMethod: stats.upMethod,
+      sizing: {
+        units: stats.sizing.units,
+        size: stats.sizing.size,
+        footprintSquares: stats.sizing.footprintSquares,
+        base: stats.sizing.base && {
+          shape: stats.sizing.base.shape,
+          diameterMm: round(stats.sizing.base.diameterMm, 2),
+          footprintMm: stats.sizing.base.footprintMm.map((mm) => round(mm, 2)),
+          coverage: round(stats.sizing.base.coverage, 3),
+        },
+        baseDiameterMm: round(stats.sizing.baseDiameterMm, 2),
+        suggestedFrom: stats.sizing.suggestedFrom,
+        warnings: stats.sizing.warnings.map((warning) => warning.kind),
+      },
       bakeSkipped: stats.bakeSkipped ?? null,
       levels: stats.lods.map((lod, i) => ({
         name: lod.name,
@@ -184,7 +204,7 @@ try {
       viewport: { width: 380 * columns.length + 20, height: 100 },
     });
     await sheet.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
-      <h3 style="margin:0 0 8px">${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod})</h3>
+      <h3 style="margin:0 0 8px">${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod}), ${stats.sizing.size} (${stats.sizing.footprintSquares}×${stats.sizing.footprintSquares})</h3>
       <div style="display:grid;grid-template-columns:repeat(${columns.length},1fr);gap:6px">
       ${shots.map((s) => `<figure style="margin:0"><img src="data:image/png;base64,${s.data}" style="width:100%;display:block"><figcaption>${s.caption}</figcaption></figure>`).join('')}
       </div></body>`);
@@ -244,6 +264,42 @@ const count = (values) => {
   return [...seen].map(([value, times]) => `${value}: ${times}`).join(', ') || 'none';
 };
 const kinds = Object.values(minis).map((mini) => mini.kind);
+
+/** The size suggestions against the committed index: a mismatch is reported, not fatal. */
+function sizeReport() {
+  if (!existsSync(INDEX)) return `No ${INDEX}: nothing to check the suggestions against.`;
+  const index = JSON.parse(readFileSync(INDEX, 'utf8'));
+  const measured = (m) =>
+    m.sizing.base
+      ? `base ${m.sizing.base.diameterMm} mm ${m.sizing.base.shape}`
+      : `no base, figure ${Math.max(m.sizeMm[0], m.sizeMm[2])} mm`;
+  const listed = converted.filter(([key]) => index[key]?.size);
+  const matches = listed.filter(([key, m]) => m.sizing.size === index[key].size);
+  const mismatches = listed.filter(([key, m]) => m.sizing.size !== index[key].size);
+  const unlisted = converted.filter(([key]) => !index[key]?.size).map(([key]) => key);
+  const stale = Object.keys(index).filter((key) => !(key in minis));
+  return [
+    `${matches.length} of ${listed.length} suggestions match ${INDEX}.`,
+    mismatches.length === 0
+      ? 'No mismatches.'
+      : table(
+          ['Mini', 'Suggested', 'Expected', 'Measured', 'Up', 'Note'],
+          mismatches.map(
+            ([key, m]) =>
+              `| ${key} | ${m.sizing.size} | ${index[key].size} | ${measured(m)} | ${m.up} (${m.upMethod}) | ${index[key].note ?? ''} |`,
+          ),
+        ),
+    `Minis not in the index: ${unlisted.join(', ') || 'none'}.`,
+    ...(stale.length > 0 ? [`In the index but not in the corpus: ${stale.join(', ')}.`] : []),
+    table(
+      ['Mini', 'Suggested', 'Measured', 'Units', 'Warnings'],
+      converted.map(
+        ([key, m]) =>
+          `| ${key} | ${m.sizing.size} (${m.sizing.footprintSquares}×${m.sizing.footprintSquares}) | ${measured(m)} | ${m.sizing.units} | ${m.sizing.warnings.join(', ') || 'none'} |`,
+      ),
+    ),
+  ].join('\n\n');
+}
 const missing = KINDS.filter((kind) => !kinds.includes(kind));
 
 const md = `# Corpus results
@@ -258,6 +314,10 @@ ${results.machine.gpu} · ${results.machine.cpu} · ${results.machine.memoryGb} 
 - Kinds still missing: ${missing.join(', ') || 'none'}.
 - Up direction taken from the file: ${count(converted.map(([, mini]) => mini.up))}.
 - Flat base found: ${count(converted.map(([, mini]) => (mini.upMethod === 'base' ? 'yes' : 'no')))}.
+
+## Size suggestions
+
+${sizeReport()}
 
 ## Changes since the last run
 

@@ -1,0 +1,38 @@
+{
+  "flying/32mm_GiantBat": { "size": "large", "note": "SRD giant bat is Large" },
+  "flying/32mm_GreenAquaWyvern": { "size": "large", "note": "SRD wyvern is Large" },
+  "flying/PixieWarrior_32mm": { "size": "tiny", "note": "pixie; Tiny is never suggested" },
+  "flying/SpectralCountess_32mm": { "size": "medium" },
+  "humanoid/AvaNaeronin_32mm+_FDM": { "size": "medium" },
+  "humanoid/FellWarrior_32mm": { "size": "medium" },
+  "humanoid/M-001a": { "size": "medium" },
+  "humanoid/MINI-001": { "size": "medium" },
+  "humanoid/MINI-004": { "size": "medium" },
+  "humanoid/MINI-012": { "size": "medium" },
+  "humanoid/MINI-014": { "size": "medium" },
+  "humanoid/SoftDagger_32mm": { "size": "medium" },
+  "large-creature/AlpharioxDragonForebearer_32mm_Onepiece": {
+    "size": "gargantuan",
+    "note": "ancient dragon"
+  },
+  "large-creature/HillGiant_32mm_FDM": { "size": "huge", "note": "SRD hill giant is Huge" },
+  "large-creature/M-100": { "size": "huge", "note": "PM's own; creature unknown to the builder" },
+  "large-creature/TormentedGiant_32mm": { "size": "huge", "note": "a giant" },
+  "mounted/32mm_GoblinBatrider_Mount": {
+    "size": "large",
+    "note": "goblin on a giant bat; the file may be the mount only"
+  },
+  "mounted/32mm_SirRichardMounted": { "size": "large", "note": "rider on a horse" },
+  "mounted/AbigailMounted_32mm": { "size": "large", "note": "rider on a horse" },
+  "quadruped/B-001": { "size": "large", "note": "PM's own, 50 mm base" },
+  "quadruped/FangsGiantBoar_32mm": { "size": "large", "note": "SRD giant boar is Large" },
+  "quadruped/FellHound_32mm": { "size": "medium", "note": "a hound, like the SRD wolf" },
+  "quadruped/WildCat_32mm": { "size": "tiny", "note": "SRD cat is Tiny; never suggested" },
+  "swarm/RavagerSwarm_32mm": { "size": "large", "note": "swarm on a 50 mm base" },
+  "swarm/SquidlingSwarm_32mm": { "size": "large" },
+  "swarm/SwarmOfBats_32mm_A": { "size": "medium", "note": "SRD swarm of bats is Medium" },
+  "terrain/32mm_CaveWallLong": { "size": "huge", "note": "terrain: by footprint only" },
+  "terrain/32mm_OldTree": { "size": "large", "note": "terrain: by footprint only" },
+  "terrain/Barrels_32mm": { "size": "medium", "note": "terrain: by footprint only" },
+  "terrain/T-001": { "size": "huge", "note": "terrain: by footprint only" }
+}
