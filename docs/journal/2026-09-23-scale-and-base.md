@@ -40,7 +40,7 @@ Story 4 of the Phase 1 spec (#44): a mini has to take the right number of square
 
 ## Numbers
 
-Development PC, `npm run corpus` with a headed Chrome started from the agent session. Its times are not usable: weld, a step this change does not touch, ran 1.4–1.8 times slower than in the PM's run of the same night.
+Development PC. Sizes and counts come from three `npm run corpus` runs; times only from the last, a full run on 2026-09-24 with the PC free and the Chrome window in front (the two runs started unattended from the agent session ran at about half speed and are not quoted).
 
 - **All 30 corpus minis converted** and all were read as millimetres. A base was measured on the 13 minis the up detection finds one on: 15, 20, 20, 24 (not round), 25, 26.5, 32, 49, 50, 50, 97, 99 mm and a 107 mm wall piece (not round).
 - **Suggestions against the index the PM confirmed: 16 of 30 agreed** while the figure's width sized minis without a base, **13 of 30 with Medium for them.** Medium fixes five (humanoids, a ghost, a hound, a swarm of bats) and misses eight large creatures without a base (a dragon, two giants, two riders, a boar, a wyvern, a swarm). The rest: two Tiny creatures (never suggested, by design), three of the PM's humanoids on 20–24 mm bases called Small, and two terrain pieces.
@@ -48,6 +48,7 @@ Development PC, `npm run corpus` with a headed Chrome started from the agent ses
 - **After the 18 mm line and the scale-up offer: 17 of 30 match** (quick run without baking); the three humanoids now come out Medium with the offer to scale up. The 13 misses: eight large creatures without a base (Medium by default), two Tiny creatures, a pixie and a cat, a mount, a swarm and a wall piece.
 - **A second full run after the renames** changed no level, triangle or bake figure; only the file sizes by a few bytes (the shorter names are written into the GLB).
 - **The origin shift moves the far level** of three minis on a base by +2.5 %, +1.3 % and −1.2 % triangles, with the error still at the level's target. Measured in Node on the same machine, `main` against this branch, nothing else different. The generated shapes of the regression baseline did not move, because their bases are centred already.
+- **Times, clean run of 2026-09-24:** the largest file 112.6 s whole (114 s in the PM's clean run before this change), the other minis with a 2048 px texture 21–34 s; all 30 baked, longest page stall 49 ms. Orienting the largest file takes 1.95 s against 0.94 s before, so measuring its base adds about 1 s; the size step itself stays under 1 ms.
 - **The base measurement costs** 0.8 s on the largest file (5.6 million triangles), 60–120 ms on ordinary minis (Node, development PC).
 - Unit tests 175 → 225; e2e 14 → 17 tests.
 
