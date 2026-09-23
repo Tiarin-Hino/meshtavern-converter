@@ -3,13 +3,15 @@ title: Claude reviews every PR, Astra only on request
 date: 2026-09-23
 phase: 1
 issues: []
-prs: []
+prs: [66]
 topics: [workflow, tooling]
 ---
 
 ## What we did
 
 The automatic PR review now runs Claude on the Fable 5.1 model on every PR, with the same instructions GPT Astra used. Astra stays, but it runs only while a maintainer puts the `astra-review` label on a PR. `astra-review.yml` became `pr-review.yml`, and the instructions moved to `.github/pr-review.md`. The fix loop is unchanged: blocking findings, then a Claude fix on the branch, then a new review, and `needs-human` after three rounds. Its label is now `changes-requested`.
+
+Companion PR in the private repo: Tiarin-Hino/meshtavern#15.
 
 Models now have fixed roles: Opus 5.5 builds (the fix job, `@claude`, `/implement`), Fable 5.1 reviews. `/implement` checks whether an issue needs strategic thinking first and, if the session is not on Fable, reminds the PM before branching. `/review-pr` gives the same reminder. `/open-pr` adds "Suggest the astra-review label: …" to the description when a PR is complex or risky, and never adds the label itself.
 
