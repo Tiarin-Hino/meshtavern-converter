@@ -10,6 +10,7 @@ Specs say what the converter must do. ADRs (in the private product repo) say wha
 - A PR that continues earlier work (figures for a spike, a follow-up fix) may extend the earlier entry instead: add to its sections and add the new PR to `prs`. When the later work changes the conclusion, write a new entry and add a line `Later: see <file>` at the end of the old one. Never rewrite history in an old entry; the wrong turn is part of the story.
 - A PR closed without merging that taught something (a spike that lost, an approach that was dropped) goes under "Dead ends" in the entry of the work that replaced it.
 - No entry for dependency bumps, CI version bumps, typo fixes and formatting.
+- When one change needs PRs in two repos (companion PRs), each PR gets an entry in its own repo for its own part, and the two link each other.
 
 ## File name and header
 
