@@ -18,7 +18,8 @@ The PM's Fable budget is small. Until now an issue that needed strategic thinkin
 ## How
 
 - `/implement` step 3 has three outcomes instead of two: clear building work goes on with any model; design needed on Opus stops and asks for Fable, as before; design needed on Fable does the design pass and stops after the draft PR.
-- `/continue-pr` repeats the building half of `/implement` with this repo's commands (`npm run check`, `npm run e2e`, `npm run corpus`, `npm run baseline:update`, `verify-3d`) and adds what a hand-over needs: the PR must be a draft with a design note, the note is never changed silently, the note's stop points are where the builder asks on the PR, criteria are ticked with evidence as they are proven.
+- `/continue-pr` holds only what a hand-over adds (read the brief, check the draft state, check the model, build in the note's order and stop where it says, never change the note silently, keep the PR body ticked with evidence, mark the PR ready) and points at `/implement` steps 6 to 10 for the building rules, so those live in one file per repo. The first review of PR #75 asked for that instead of a copy.
+- `/open-pr` learned the two hand-over cases both commands rely on: a design-pass draft (`gh pr create --draft`, the brief as the body, no journal entry yet) and an existing PR (`gh pr edit --body-file`, the brief kept, the criteria ticked). Before this it only created finished PRs; the same review caught that.
 - `docs/design/` now holds design notes as well as wireframes; `CLAUDE.md` says so.
 
 ## Still open
