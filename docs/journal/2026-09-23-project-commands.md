@@ -28,11 +28,10 @@ Planning commands (specs, decisions, research, status) were not copied. Planning
 
 ## Problems and how we solved them
 
-- **A command pointed at an issue form that does not exist.** The original `/fix-bug` says to create a bug issue "following the bug form"; this repo has no issue forms yet (the folder is empty, although `CONTRIBUTING.md` asks people to use them). **Fix:** the command lists the fields to fill instead. The missing forms are left as a separate gap.
+- **A command needed the bug form's fields.** The original `/fix-bug` says to create a bug issue "following the bug form". **Fix:** the command lists the form's fields (steps, expected, actual, browser/OS/GPU) inline instead of reading the YAML, for a fast CLI issue creation.
 
 ## Still open
 
-- `CONTRIBUTING.md` asks contributors to use issue forms that this repo does not have.
 - The copies can drift from the originals. When one changes, the other should follow in a companion PR.
 
 ## Story angle
