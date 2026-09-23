@@ -20,7 +20,7 @@ This project is built by a small team together with the Claude Code agent. Human
 
 ## Automatic reviews
 
-On PRs from branches of this repo (not forks, not drafts), Claude (Fable 5.1) reviews the change: one pass looks for bugs, another checks that the solution is as simple as the problem and fits the rest of the codebase (instructions in `.github/pr-review.md`, read from `main`). When a maintainer adds the `astra-review` label, GPT Astra reviews with the same instructions too. If no reviewer finds anything blocking, the PR gets `ready-for-human-review`. If one does, the PR gets `changes-requested`, Claude fixes the findings on the branch and the next push is reviewed again; after three rounds the PR gets `needs-human`. The labels are advice: a human still reviews and merges.
+On PRs from branches of this repo (not forks, not drafts), Claude (Fable 5.1) reviews the change: one pass looks for bugs, another checks that the solution is as simple as the problem and fits the rest of the codebase (instructions in `.github/pr-review.md`, read from `main`). When a maintainer adds the `astra-review` label, GPT Astra reviews with the same instructions too. If no reviewer finds anything blocking, the PR gets `ready-for-human-review`. If one does, the PR gets `changes-requested`, Claude fixes the findings on the branch and the next push is reviewed again; after three rounds the PR gets `needs-human`, which a later pass removes. The labels are advice: a human still reviews and merges.
 
 ## Reviewing an agent PR
 
