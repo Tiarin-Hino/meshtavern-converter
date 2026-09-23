@@ -57,7 +57,7 @@
     "upMethod": "base",
     "sizing": {
       "units": "mm",
-      "size": "small",
+      "size": "medium",
       "base": "round",
       "baseDiameterMm": 25
     },
@@ -111,7 +111,7 @@
     "upMethod": "base",
     "sizing": {
       "units": "mm",
-      "size": "small",
+      "size": "medium",
       "base": "round",
       "baseDiameterMm": 25
     },

@@ -99,7 +99,7 @@ describe('runPipeline', () => {
       units: 'mm',
       unitsMethod: 'guessed',
       scale: 1,
-      size: 'small',
+      size: 'medium',
       sizeMethod: 'suggested',
       footprintSquares: 1,
       suggestedFrom: 'base',
@@ -114,7 +114,7 @@ describe('runPipeline', () => {
   it('reads a file in inches as inches and brings it to mm', async () => {
     const inches = generateFigure(true).map((value) => value / 25.4);
     const { sizing, stats, lods } = await runPipeline(encodeBinaryStl(inches), { bake: 0 });
-    expect(sizing).toMatchObject({ units: 'in', scale: 25.4, size: 'small' });
+    expect(sizing).toMatchObject({ units: 'in', scale: 25.4, size: 'medium' });
     expect(sizing.baseDiameterMm).toBeCloseTo(25, 0);
     expect(stats.sizeMm[0]).toBeCloseTo(25, 0);
     // The levels are made from the mesh in mm: their error budgets are in mm.

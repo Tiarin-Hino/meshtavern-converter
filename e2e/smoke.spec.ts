@@ -102,7 +102,7 @@ test('draws the 32 mm grid and stands stress minis one footprint apart', async (
   page,
 }, testInfo) => {
   test.setTimeout(120_000);
-  // The demo pyramid stands on a 25 mm base: Small, one square.
+  // The demo pyramid stands on a 25 mm base: Medium, one square.
   await page.evaluate(() => window.__mt.loadDemo());
   await page.evaluate(() => window.__mt.setCamera(34, 55, 0.3));
   await page.waitForTimeout(500);
@@ -136,25 +136,36 @@ test('suggests a creature size and lets the user change units, size, scale and b
   // A control converts the file again; the next step waits until that is done.
   const settled = () => page.waitForFunction(() => !window.__mt.state.busy);
 
-  // The demo pyramid stands on a 25 mm square base: Small, one square.
+  // The demo pyramid stands on a 25 mm square base: Medium, one square.
   await page.evaluate(() => window.__mt.loadDemo());
   expect(await sizing()).toMatchObject({
     units: 'mm',
     unitsMethod: 'guessed',
-    size: 'small',
+    size: 'medium',
     sizeMethod: 'suggested',
     footprintSquares: 1,
     baseDiameterMm: 25,
     base: { shape: 'other' },
   });
-  await expect(page.locator('#stats')).toContainText('Small (1×1) (suggested), base 25.0 mm');
+  await expect(page.locator('#stats')).toContainText('Medium (1×1) (suggested), base 25.0 mm');
   await expect(page.locator('#stats')).toContainText('mm (guessed)');
-  await expect(page.locator('#size')).toHaveValue('small');
+  await expect(page.locator('#size')).toHaveValue('medium');
   await expect(page.locator('#plain-base')).toBeDisabled();
 
-  await page.evaluate(() => window.__mt.setSizing({ size: 'medium' }));
-  expect(await sizing()).toMatchObject({ size: 'medium', sizeMethod: 'manual' });
-  await expect(page.locator('#stats')).toContainText('Medium (1×1) (chosen)');
+  await page.evaluate(() => window.__mt.setSizing({ size: 'small' }));
+  expect(await sizing()).toMatchObject({ size: 'small', sizeMethod: 'manual' });
+  await expect(page.locator('#stats')).toContainText('Small (1×1) (chosen)');
+
+  // A Medium mini on a 20 mm base is offered a scale up to 25 mm, and only scaled on the click.
+  await page.evaluate(() => window.__mt.setSizing({ size: 'medium', scaleToBaseMm: 20 }));
+  expect((await sizing()).warnings).toEqual([
+    { kind: 'base-small-for-size', baseMm: 20, targetMm: 25 },
+  ]);
+  expect((await sizing()).baseDiameterMm).toBeCloseTo(20, 4);
+  await page.getByRole('button', { name: 'Scale up to a 25 mm base' }).click();
+  await settled();
+  expect(await sizing()).toMatchObject({ size: 'medium', baseDiameterMm: 25, warnings: [] });
+  await expect(page.locator('#sizing-warning')).toBeHidden();
 
   // Scaling to a 32 mm base: 25 → 32 mm across, the height with it.
   await page.evaluate(() => window.__mt.setSizing({ scaleToBaseMm: 32 }));
@@ -195,7 +206,7 @@ test('suggests a creature size and lets the user change units, size, scale and b
 
   // A new file starts without the choices of the last one.
   await page.evaluate(() => window.__mt.loadDemo());
-  expect(await sizing()).toMatchObject({ units: 'mm', size: 'small', scale: 1 });
+  expect(await sizing()).toMatchObject({ units: 'mm', size: 'medium', scale: 1 });
 });
 
 test('adds a plain base to a mini without one', async ({ page }) => {

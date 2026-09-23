@@ -17,8 +17,19 @@ export const GRID_SQUARE_MM = 32;
 /** A base up to this share larger than its footprint still fits it, so a 33 mm base is 1×1. _(proposal)_ */
 export const FOOTPRINT_TOLERANCE = 0.05;
 
-/** Within one square, a base narrower than this suggests Small, a wider one Medium. _(proposal)_ */
-export const SMALL_BELOW_MM = 26;
+/**
+ * Within one square, a base narrower than this suggests Small, a wider one Medium. PM
+ * decision on PR #74, 2026-09-24 (was 26 mm): humanoids on 20 mm bases are Medium, often
+ * just printed small; a 15 mm base stays Small.
+ */
+export const SMALL_BELOW_MM = 18;
+
+/**
+ * A Medium mini on a base narrower than this is offered a scale up to it (never scaled
+ * without the user's click). PM decision on PR #74, 2026-09-24: 25 mm, because scaled to a
+ * 32 mm base the small humanoids of the corpus stand taller than any bought one.
+ */
+export const MEDIUM_MIN_BASE_MM = 25;
 
 export type CreatureSize = 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'gargantuan';
 export type FootprintSquares = 1 | 2 | 3 | 4;
@@ -58,7 +69,9 @@ export type SizingWarning =
   /** The base is larger than the chosen footprint; the page offers to scale it to fit. */
   | { kind: 'base-exceeds-footprint'; baseMm: number; footprintMm: number }
   /** The base does not fit even Gargantuan; the mini is probably in the wrong units. */
-  | { kind: 'larger-than-gargantuan'; baseMm: number };
+  | { kind: 'larger-than-gargantuan'; baseMm: number }
+  /** A Medium mini on a small base, probably printed small; the page offers to scale it up to `targetMm`. */
+  | { kind: 'base-small-for-size'; baseMm: number; targetMm: number };
 
 export interface Sizing {
   units: Units;
@@ -100,8 +113,9 @@ export function suggestSize(mm: number): CreatureSize {
 }
 
 /**
- * The warnings for a sizing: a measured base larger than the chosen footprint, and a
- * measurement (base or figure) that does not fit even Gargantuan.
+ * The warnings for a sizing: a measured base larger than the chosen footprint, a Medium
+ * mini on a base under `MEDIUM_MIN_BASE_MM`, and a measurement (base or figure) that does
+ * not fit even Gargantuan.
  */
 export function sizingWarnings(
   size: CreatureSize,
@@ -111,6 +125,8 @@ export function sizingWarnings(
   const warnings: SizingWarning[] = [];
   if (baseMm !== null && !fits(baseMm, SIZES[size].squares))
     warnings.push({ kind: 'base-exceeds-footprint', baseMm, footprintMm: footprintMm(size) });
+  if (baseMm !== null && size === 'medium' && baseMm < MEDIUM_MIN_BASE_MM)
+    warnings.push({ kind: 'base-small-for-size', baseMm, targetMm: MEDIUM_MIN_BASE_MM });
   if (!fits(measuredMm, SIZES.gargantuan.squares))
     warnings.push({ kind: 'larger-than-gargantuan', baseMm: measuredMm });
   return warnings;

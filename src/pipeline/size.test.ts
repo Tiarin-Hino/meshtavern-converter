@@ -12,8 +12,11 @@ import {
 
 describe('suggestSize', () => {
   it.each([
-    [20, 'small'],
-    [24, 'small'],
+    [15, 'small'],
+    [17.9, 'small'],
+    [18, 'medium'],
+    [20, 'medium'], // a humanoid on a 20 mm base: Medium, printed small
+    [24, 'medium'],
     [26, 'medium'],
     [32, 'medium'],
     [33, 'medium'], // within the 5 % tolerance of one square
@@ -52,6 +55,18 @@ describe('sizingWarnings', () => {
     expect(sizingWarnings('medium', 50, 50)).toEqual([
       { kind: 'base-exceeds-footprint', baseMm: 50, footprintMm: 32 },
     ]);
+  });
+
+  it('offers to scale a Medium mini on a base under 25 mm up to 25 mm', () => {
+    expect(sizingWarnings('medium', 20, 20)).toEqual([
+      { kind: 'base-small-for-size', baseMm: 20, targetMm: 25 },
+    ]);
+    expect(sizingWarnings('medium', 25, 25)).toEqual([]);
+    // Only Medium: a Small or Tiny mini on a small base is as it should be.
+    expect(sizingWarnings('small', 15, 15)).toEqual([]);
+    expect(sizingWarnings('tiny', 20, 20)).toEqual([]);
+    // Without a base there is nothing to scale up.
+    expect(sizingWarnings('medium', null, 15)).toEqual([]);
   });
 
   it('does not warn about the footprint for a mini without a base', () => {
@@ -139,7 +154,7 @@ describe('sizeMini', () => {
 
   it('scales a file in metres to mm, base and all', () => {
     const { mesh, sizeMm, sizing } = sizeMini(placedMini([0.025, 0.035, 0.025], 0.025));
-    expect(sizing).toMatchObject({ units: 'm', scale: 1000, size: 'small' });
+    expect(sizing).toMatchObject({ units: 'm', scale: 1000, size: 'medium', warnings: [] });
     expect(sizing.baseDiameterMm).toBeCloseTo(25, 4);
     expect(sizeMm[1]).toBeCloseTo(35, 4);
     expect(mesh.positions[4]).toBeCloseTo(35, 4);

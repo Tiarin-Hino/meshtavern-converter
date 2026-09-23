@@ -9,7 +9,6 @@ import { toProblem, type ProblemCode } from './pipeline/problems';
 import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
 import {
   CREATURE_SIZES,
-  footprintMm,
   sizeLabel,
   type CreatureSize,
   type Sizing,
@@ -262,6 +261,9 @@ function describeUnits(sizing: Sizing): string {
   return Math.abs(extra - 1) < 1e-6 ? units : `${units}, scaled ×${extra.toFixed(3)}`;
 }
 
+/** The base diameter the warning's button scales to; null when it offers none. */
+let scaleTarget: number | null = null;
+
 /** Sets the size form to what the conversion made of the mini, and shows any warning. */
 function showSizing(sizing: Sizing): void {
   sizingInputs.units.value = sizing.units;
@@ -273,12 +275,23 @@ function showSizing(sizing: Sizing): void {
   sizingInputs.plainBase.disabled = sizing.base !== null;
   const warning = sizing.warnings[0];
   sizingInputs.warning.hidden = !warning;
-  sizingInputs.scaleFit.hidden = warning?.kind !== 'base-exceeds-footprint';
+  scaleTarget = null;
+  if (warning?.kind === 'base-exceeds-footprint') {
+    scaleTarget = warning.footprintMm;
+    sizingInputs.scaleFit.textContent = 'Scale to fit';
+  } else if (warning?.kind === 'base-small-for-size') {
+    scaleTarget = warning.targetMm;
+    sizingInputs.scaleFit.textContent = `Scale up to a ${warning.targetMm} mm base`;
+  }
+  sizingInputs.scaleFit.hidden = scaleTarget === null;
   if (warning) {
+    const base = `The base (${warning.baseMm.toFixed(1)} mm)`;
     sizingInputs.warning.querySelector('span')!.textContent =
       warning.kind === 'base-exceeds-footprint'
-        ? `The base (${warning.baseMm.toFixed(1)} mm) is larger than ${sizeLabel(sizing.size)}, ${warning.footprintMm} mm.`
-        : `The mini measures ${warning.baseMm.toFixed(0)} mm across, more than Gargantuan: are the units right?`;
+        ? `${base} is larger than ${sizeLabel(sizing.size)}, ${warning.footprintMm} mm.`
+        : warning.kind === 'base-small-for-size'
+          ? `${base} is small for ${sizeLabel(sizing.size)}: the mini may be printed small.`
+          : `The mini measures ${warning.baseMm.toFixed(0)} mm across, more than Gargantuan: are the units right?`;
   }
   sizingPanel.hidden = false;
 }
@@ -315,7 +328,7 @@ sizingInputs.plainBase.addEventListener('change', () => {
 });
 sizingInputs.scaleFit.addEventListener('click', () => {
   const size = state.stats?.sizing.size;
-  if (size) void setSizing({ size, scaleToBaseMm: footprintMm(size) });
+  if (size && scaleTarget !== null) void setSizing({ size, scaleToBaseMm: scaleTarget });
 });
 
 /** The table level is drawn from its baked maps when it has them, unless `preferBaked` is off. */
