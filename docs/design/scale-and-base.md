@@ -103,8 +103,8 @@ New committed file `scripts/corpus-index.json`, keyed like `results.json` (the p
 
 ```json
 {
-  "quadruped/FellHound_32mm": { "size": "medium" },
-  "large-creature/HillGiant_32mm_FDM": { "size": "huge" }
+  "quadruped/quadruped-02": { "size": "medium" },
+  "large-creature/large-02": { "size": "huge" }
 }
 ```
 
@@ -140,3 +140,13 @@ Each step is a commit with its tests; `npm run check` green after each.
 - A criterion needs a product answer the issue does not give (for example what to suggest for a mounted figure whose base is oval).
 
 Ask on the PR, label the issue `needs-human` if the answer is the PM's, and continue with the steps that do not depend on it.
+
+## 8. PM decisions on PR #74
+
+2026-09-23, answers to the questions the build raised under §7:
+
+1. **The origin shift may move the levels.** Moving the origin to the centre of the base changes the far level of three corpus minis by up to 2.5 % triangles at the same error; accepted as the shift's effect.
+2. **Small below 26 mm:** open, see PR #74.
+3. **A mini without a base is suggested Medium** (`NO_BASE_SIZE`), not sized by its own width; `suggestedFrom` is `'default'` for it. To be revisited after other PRs (#72 among them).
+4. **Generic corpus names.** The bought minis in the local corpus are renamed to `<kind>-NN` (a local, git-ignored `corpus/NAMES.md` maps the old names), so the committed index names none of them; the example keys in §4 follow.
+5. **The proposed corpus index is confirmed.**
