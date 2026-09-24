@@ -80,7 +80,7 @@ declare global {
       state: AppState;
       loadDemo: () => Promise<void>;
       /** Converts a generated sheet of `quadsPerSide`² × 2 triangles; 1000 gives a 100 MB STL. */
-      loadGenerated: (quadsPerSide: number) => Promise<void>;
+      loadGenerated: (quadsPerSide: number, sizing?: SizingOptions) => Promise<void>;
       showLevel: (level: number) => void;
       setCamera: (azimuthDeg: number, elevationDeg: number, zoom: number) => void;
       setWireframe: (wireframe: boolean) => void;
@@ -741,11 +741,11 @@ window.__mt = {
     choices = { sizing: {} };
     return convert(demoStl(), 'demo.stl');
   },
-  loadGenerated: (quadsPerSide) => {
+  loadGenerated: (quadsPerSide, sizing = {}) => {
     const read = async (): Promise<ArrayBuffer> =>
       encodeBinaryStl(generateBumpySheet(quadsPerSide));
     lastSource = { name: `generated-${quadsPerSide}.stl`, read };
-    choices = { sizing: {} };
+    choices = { sizing };
     return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
   },
   setUp,

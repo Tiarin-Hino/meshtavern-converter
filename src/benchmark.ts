@@ -59,12 +59,9 @@ export async function runBenchmark(
 
   // 1. Conversion. Skipped when the user loaded a real mini: that conversion already happened.
   const ownMini = mt.state.stats !== null && !mt.state.fileName?.startsWith('generated-');
-  if (!ownMini) {
-    await mt.loadGenerated(SHEET_QUADS[size]);
-    // The 50 mm sheet has no base and would be Medium, 32 mm apart: copies would overlap.
-    // As Large they stand 64 mm apart, near the 50.8 mm of the scenes before the 32 mm grid (#44).
-    await mt.setSizing({ size: 'large' });
-  }
+  // The 50 mm sheet has no base and would be Medium, 32 mm apart: copies would overlap.
+  // As Large they stand 64 mm apart, near the 50.8 mm of the scenes before the 32 mm grid (#44).
+  if (!ownMini) await mt.loadGenerated(SHEET_QUADS[size], { size: 'large' });
   const { stats, baked, error } = mt.state;
   if (error || !stats) {
     add(`**Conversion failed:** ${error ?? 'no result'}`);
