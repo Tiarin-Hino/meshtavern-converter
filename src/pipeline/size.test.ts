@@ -46,41 +46,40 @@ describe('footprintMm', () => {
 
 describe('sizingWarnings', () => {
   it('says nothing when the base fits', () => {
-    expect(sizingWarnings('medium', 25, 25)).toEqual([]);
-    expect(sizingWarnings('medium', 33, 33)).toEqual([]);
-    expect(sizingWarnings('large', 50, 50)).toEqual([]);
+    expect(sizingWarnings('medium', 25)).toEqual([]);
+    expect(sizingWarnings('medium', 33)).toEqual([]);
+    expect(sizingWarnings('large', 50)).toEqual([]);
   });
 
   it('warns when the base is larger than the chosen footprint', () => {
-    expect(sizingWarnings('medium', 50, 50)).toEqual([
+    expect(sizingWarnings('medium', 50)).toEqual([
       { kind: 'base-exceeds-footprint', baseMm: 50, footprintMm: 32 },
     ]);
   });
 
   it('offers to scale a Medium mini on a base under 25 mm up to 25 mm', () => {
-    expect(sizingWarnings('medium', 20, 20)).toEqual([
+    expect(sizingWarnings('medium', 20)).toEqual([
       { kind: 'base-small-for-size', baseMm: 20, targetMm: 25 },
     ]);
-    expect(sizingWarnings('medium', 25, 25)).toEqual([]);
+    expect(sizingWarnings('medium', 25)).toEqual([]);
     // Only Medium: a Small or Tiny mini on a small base is as it should be.
-    expect(sizingWarnings('small', 15, 15)).toEqual([]);
-    expect(sizingWarnings('tiny', 20, 20)).toEqual([]);
+    expect(sizingWarnings('small', 15)).toEqual([]);
+    expect(sizingWarnings('tiny', 20)).toEqual([]);
     // Without a base there is nothing to scale up.
-    expect(sizingWarnings('medium', null, 15)).toEqual([]);
+    expect(sizingWarnings('medium', null)).toEqual([]);
   });
 
   it('does not warn about the footprint for a mini without a base', () => {
-    expect(sizingWarnings('medium', null, 60)).toEqual([]);
+    expect(sizingWarnings('medium', null)).toEqual([]);
   });
 
   it('warns when the measurement does not fit even Gargantuan', () => {
-    expect(sizingWarnings('gargantuan', 135, 135)).toEqual([
+    expect(sizingWarnings('gargantuan', 135)).toEqual([
       { kind: 'base-exceeds-footprint', baseMm: 135, footprintMm: 128 },
       { kind: 'larger-than-gargantuan', baseMm: 135 },
     ]);
-    expect(sizingWarnings('gargantuan', null, 250)).toEqual([
-      { kind: 'larger-than-gargantuan', baseMm: 250 },
-    ]);
+    // Without a base, no warning: the figure's width says little.
+    expect(sizingWarnings('gargantuan', null)).toEqual([]);
   });
 });
 
@@ -144,10 +143,10 @@ describe('sizeMini', () => {
     }
   });
 
-  it('still warns when a mini without a base is too large for any size', () => {
+  it('gives a wide mini without a base no warning: its width says little', () => {
     const { sizing } = sizeMini(placedMini([250, 300, 200], null));
     expect(sizing.size).toBe('medium');
-    expect(sizing.warnings).toEqual([{ kind: 'larger-than-gargantuan', baseMm: 250 }]);
+    expect(sizing.warnings).toEqual([]);
   });
 
   it('scales a file in metres to mm, base and all', () => {

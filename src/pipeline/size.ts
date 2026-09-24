@@ -114,22 +114,18 @@ export function suggestSize(mm: number): CreatureSize {
 }
 
 /**
- * The warnings for a sizing: a measured base larger than the chosen footprint, a Medium
- * mini on a base under `MEDIUM_MIN_BASE_MM`, and a measurement (base or figure) that does
- * not fit even Gargantuan.
+ * The warnings for a sizing, all about a measured base: larger than the chosen footprint,
+ * a Medium mini's base under `MEDIUM_MIN_BASE_MM`, or too large even for Gargantuan. A mini
+ * without a base gets none: its own width says little (PM decision on PR #74).
  */
-export function sizingWarnings(
-  size: CreatureSize,
-  baseMm: number | null,
-  measuredMm: number,
-): SizingWarning[] {
+export function sizingWarnings(size: CreatureSize, baseMm: number | null): SizingWarning[] {
   const warnings: SizingWarning[] = [];
   if (baseMm !== null && !fits(baseMm, SIZES[size].squares))
     warnings.push({ kind: 'base-exceeds-footprint', baseMm, footprintMm: footprintMm(size) });
   if (baseMm !== null && size === 'medium' && baseMm < MEDIUM_MIN_BASE_MM)
     warnings.push({ kind: 'base-small-for-size', baseMm, targetMm: MEDIUM_MIN_BASE_MM });
-  if (!fits(measuredMm, SIZES.gargantuan.squares))
-    warnings.push({ kind: 'larger-than-gargantuan', baseMm: measuredMm });
+  if (baseMm !== null && !fits(baseMm, SIZES.gargantuan.squares))
+    warnings.push({ kind: 'larger-than-gargantuan', baseMm });
   return warnings;
 }
 
@@ -189,7 +185,6 @@ export function sizeMini(placed: PlacedMesh, options: SizingOptions = {}): Sized
   const scale = target !== undefined && measuredInFile > 0 ? target / measuredInFile : unitScale;
 
   const baseMm = placed.base ? placed.base.diameterMm * scale : null;
-  const measuredMm = measuredInFile * scale;
   const size = options.size ?? (baseMm === null ? NO_BASE_SIZE : suggestSize(baseMm));
 
   let mesh = scale === 1 ? placed.mesh : scaled(placed.mesh, scale);
@@ -229,7 +224,7 @@ export function sizeMini(placed: PlacedMesh, options: SizingOptions = {}): Sized
       footprintSquares: SIZES[size].squares,
       baseDiameterMm: baseMm ?? plainBase?.diameterMm ?? SIZES[size].plainBaseMm,
       suggestedFrom: placed.base ? 'base' : 'default',
-      warnings: sizingWarnings(size, baseMm, measuredMm),
+      warnings: sizingWarnings(size, baseMm),
     },
   };
 }
