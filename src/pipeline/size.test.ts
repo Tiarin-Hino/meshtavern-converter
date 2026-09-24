@@ -108,7 +108,6 @@ function placedMini(sizeMm: [number, number, number], baseMm: number | null): Pl
             diameterMm: baseMm,
             footprintMm: [baseMm, baseMm],
             coverage: 0.9,
-            centre: [0, 0],
           },
   };
 }
@@ -130,7 +129,6 @@ describe('sizeMini', () => {
       suggestedFrom: 'base',
       warnings: [],
     });
-    expect(sizing.base).not.toHaveProperty('centre');
   });
 
   it('suggests Medium for a mini without a base, whatever its width, and expects a 32 mm base', () => {

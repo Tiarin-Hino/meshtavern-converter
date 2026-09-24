@@ -64,7 +64,8 @@ export interface Perf {
 /**
  * Coordinate conventions (keep in sync with CLAUDE.md):
  * the scene is Y-up and 1 unit = 1 mm. The pipeline delivers meshes already converted
- * to that convention, standing on y = 0 and centred on the origin.
+ * to that convention, standing on y = 0 with the origin at the centre of the base (of the
+ * bounding box when there is none), measured in x and z.
  */
 export class Viewer {
   private readonly renderer: THREE.WebGLRenderer;

@@ -20,8 +20,9 @@ export const ROUND_ASPECT = 0.1;
  */
 export const ROUND_FILL = 0.85;
 
-/** A base as measured, with where its centre is in the mesh's x and z. */
-export interface MeasuredBase extends BaseMeasurement {
+/** A base as measured, and where its centre is in the mesh's x and z (for placing only). */
+export interface MeasuredBase {
+  base: BaseMeasurement;
   centre: [number, number];
 }
 
@@ -125,10 +126,12 @@ export function measureBase({ positions, indices }: IndexedMesh): MeasuredBase |
     fill <= 1 / ROUND_FILL;
 
   return {
-    shape: round ? 'round' : 'other',
-    diameterMm: round ? mean : longer,
-    footprintMm: [width, depth],
-    coverage,
+    base: {
+      shape: round ? 'round' : 'other',
+      diameterMm: round ? mean : longer,
+      footprintMm: [width, depth],
+      coverage,
+    },
     centre: [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2],
   };
 }

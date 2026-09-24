@@ -34,3 +34,5 @@ The spec's story 4 is rewritten and story 10 added; the issues #44 and #70 carry
 ## Story angle
 
 Why a mini's size should be measured in squares, not millimetres, and why your dragon's base can be smaller than the dragon.
+
+Later: see 2026-09-23-scale-and-base.md. The build changed two of these proposals on the PM's decision: a base under 18 mm (not 26) suggests Small, and a mini without a base is suggested Medium.

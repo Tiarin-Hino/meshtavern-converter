@@ -1,11 +1,6 @@
-import {
-  FLAT_ANGLE_COS,
-  measureBase,
-  MIN_BASE_COVERAGE,
-  RESTING_BAND,
-  type MeasuredBase,
-} from './base';
+import { FLAT_ANGLE_COS, measureBase, MIN_BASE_COVERAGE, RESTING_BAND } from './base';
 import type { IndexedMesh } from './mesh';
+import type { BaseMeasurement } from './size';
 
 /** The direction in the source file that points up. */
 export type UpAxis = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
@@ -32,7 +27,7 @@ export interface PlacedMesh {
   /** Width (x), height (y) and depth (z) in mm, in scene axes. */
   sizeMm: [number, number, number];
   /** The base the mini stands on, measured after placing; null when it has none. */
-  base: MeasuredBase | null;
+  base: BaseMeasurement | null;
 }
 
 /**
@@ -149,19 +144,18 @@ export function orientAndPlace(mesh: IndexedMesh, sourceUp: UpAxis = DEFAULT_UP)
   }
 
   const placed = { positions, indices: mesh.indices };
-  const base = measureBase(placed);
-  if (base && (base.centre[0] !== 0 || base.centre[1] !== 0)) {
-    const [baseX, baseZ] = base.centre;
+  const measured = measureBase(placed);
+  if (measured && (measured.centre[0] !== 0 || measured.centre[1] !== 0)) {
+    const [baseX, baseZ] = measured.centre;
     for (let i = 0; i < positions.length; i += 3) {
       positions[i] = positions[i]! - baseX;
       positions[i + 2] = positions[i + 2]! - baseZ;
     }
-    base.centre = [0, 0];
   }
 
   return {
     mesh: placed,
     sizeMm: [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!],
-    base,
+    base: measured?.base ?? null,
   };
 }

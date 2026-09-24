@@ -209,10 +209,9 @@ export function sizeMini(placed: PlacedMesh, options: SizingOptions = {}): Sized
     sizeMm[2] = Math.max(sizeMm[2], plainBase.diameterMm);
   }
   const base: BaseMeasurement | null = placed.base && {
-    shape: placed.base.shape,
+    ...placed.base,
     diameterMm: placed.base.diameterMm * scale,
     footprintMm: [placed.base.footprintMm[0] * scale, placed.base.footprintMm[1] * scale],
-    coverage: placed.base.coverage,
   };
 
   return {
