@@ -174,8 +174,9 @@ export interface SizedMini {
  * scale anything; with none, a mm file keeps its measured size. `scaleToBaseMm` replaces
  * the units: it sets the base (or, without one, the figure's wider side) to that diameter
  * in mm, and a plain base added with it gets that diameter. The input is left untouched.
+ *
+ * @param placed What `orientAndPlace` returns, still in file units.
  */
-/** `placed` is what `orientAndPlace` returns, still in file units. */
 export function sizeMini(placed: PlacedMesh, options: SizingOptions = {}): SizedMini {
   const units = options.units ?? guessUnits(placed.sizeMm[1]);
   const unitScale = UNIT_FACTORS[units];

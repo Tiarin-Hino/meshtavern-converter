@@ -326,9 +326,9 @@ sizingInputs.plainBase.addEventListener('change', () => {
   void setSizing({ plainBase: sizingInputs.plainBase.checked });
 });
 sizingInputs.scaleFit.addEventListener('click', () => {
-  const sizing = state.stats?.sizing;
-  const target = scaleTargetOf(sizing?.warnings[0]);
-  if (sizing && target !== null) void setSizing({ size: sizing.size, scaleToBaseMm: target });
+  // Only the scale: a size the user chose is already in the choices, a suggested one stays suggested.
+  const target = scaleTargetOf(state.stats?.sizing.warnings[0]);
+  if (target !== null) void setSizing({ scaleToBaseMm: target });
 });
 
 /** The table level is drawn from its baked maps when it has them, unless `preferBaked` is off. */

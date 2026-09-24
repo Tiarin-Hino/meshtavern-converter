@@ -150,3 +150,5 @@ Ask on the PR, label the issue `needs-human` if the answer is the PM's, and cont
 3. **A mini without a base is suggested Medium** (`NO_BASE_SIZE`), not sized by its own width; `suggestedFrom` is `'default'` for it. To be revisited after other PRs (#72 among them).
 4. **Generic corpus names.** The bought minis in the local corpus are renamed to `<kind>-NN` (a local, git-ignored `corpus/NAMES.md` maps the old names), so the committed index names none of them; the example keys in §4 follow.
 5. **The proposed corpus index is confirmed.**
+
+What these decisions changed in the shapes of §1 (the code in `src/pipeline/size.ts` is the reference): `suggestedFrom` is `'base' | 'default'`; `SizingWarning` gains `{ kind: 'base-small-for-size'; baseMm; targetMm }`; the base's centre is used inside `orientAndPlace` only and is not part of `BaseMeasurement` (review of PR #74, 2026-09-25).
