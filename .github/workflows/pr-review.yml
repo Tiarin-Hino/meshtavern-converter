@@ -225,7 +225,9 @@ jobs:
 
   fix:
     needs: verdict
-    if: needs.verdict.outputs.fix == 'true'
+    # always(): without it GitHub also demands success from every job before verdict, and
+    # astra is skipped on PRs without the astra-review label, which skipped the fix too (#76).
+    if: always() && needs.verdict.result == 'success' && needs.verdict.outputs.fix == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
