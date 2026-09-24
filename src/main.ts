@@ -261,29 +261,28 @@ function describeUnits(sizing: Sizing): string {
   return Math.abs(extra - 1) < 1e-6 ? units : `${units}, scaled ×${extra.toFixed(3)}`;
 }
 
-/** The base diameter the warning's button scales to; null when it offers none. */
-let scaleTarget: number | null = null;
+/** The base diameter a warning offers to scale to; null when it offers none. */
+function scaleTargetOf(warning: Sizing['warnings'][number] | undefined): number | null {
+  if (warning?.kind === 'base-exceeds-footprint') return warning.footprintMm;
+  if (warning?.kind === 'base-small-for-size') return warning.targetMm;
+  return null;
+}
 
 /** Sets the size form to what the conversion made of the mini, and shows any warning. */
 function showSizing(sizing: Sizing): void {
   sizingInputs.units.value = sizing.units;
   sizingInputs.size.value = sizing.size;
-  const target = choices.sizing.scaleToBaseMm;
-  sizingInputs.scaleTo.value = target === undefined ? '' : String(target);
+  const chosen = choices.sizing.scaleToBaseMm;
+  sizingInputs.scaleTo.value = chosen === undefined ? '' : String(chosen);
   sizingInputs.plainBase.checked = sizing.plainBase !== null;
   // A mini that came with a base gets no second one.
   sizingInputs.plainBase.disabled = sizing.base !== null;
   const warning = sizing.warnings[0];
   sizingInputs.warning.hidden = !warning;
-  scaleTarget = null;
-  if (warning?.kind === 'base-exceeds-footprint') {
-    scaleTarget = warning.footprintMm;
-    sizingInputs.scaleFit.textContent = 'Scale to fit';
-  } else if (warning?.kind === 'base-small-for-size') {
-    scaleTarget = warning.targetMm;
-    sizingInputs.scaleFit.textContent = `Scale up to a ${warning.targetMm} mm base`;
-  }
-  sizingInputs.scaleFit.hidden = scaleTarget === null;
+  const target = scaleTargetOf(warning);
+  sizingInputs.scaleFit.hidden = target === null;
+  sizingInputs.scaleFit.textContent =
+    warning?.kind === 'base-small-for-size' ? `Scale up to a ${target} mm base` : 'Scale to fit';
   if (warning) {
     const base = `The base (${warning.baseMm.toFixed(1)} mm)`;
     sizingInputs.warning.querySelector('span')!.textContent =
@@ -327,8 +326,9 @@ sizingInputs.plainBase.addEventListener('change', () => {
   void setSizing({ plainBase: sizingInputs.plainBase.checked });
 });
 sizingInputs.scaleFit.addEventListener('click', () => {
-  const size = state.stats?.sizing.size;
-  if (size && scaleTarget !== null) void setSizing({ size, scaleToBaseMm: scaleTarget });
+  const sizing = state.stats?.sizing;
+  const target = scaleTargetOf(sizing?.warnings[0]);
+  if (sizing && target !== null) void setSizing({ size: sizing.size, scaleToBaseMm: target });
 });
 
 /** The table level is drawn from its baked maps when it has them, unless `preferBaked` is off. */

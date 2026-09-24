@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { PlacedMesh } from './orient';
 import {
   CREATURE_SIZES,
   footprintMm,
@@ -7,7 +8,6 @@ import {
   sizeMini,
   sizingWarnings,
   suggestSize,
-  type PlacedInFileUnits,
 } from './size';
 
 describe('suggestSize', () => {
@@ -92,7 +92,7 @@ describe('sizeLabel', () => {
 });
 
 /** A placed stand-in: two vertices spanning the size, with or without a measured base. */
-function placedMini(sizeMm: [number, number, number], baseMm: number | null): PlacedInFileUnits {
+function placedMini(sizeMm: [number, number, number], baseMm: number | null): PlacedMesh {
   const [w, h, d] = sizeMm;
   return {
     mesh: {

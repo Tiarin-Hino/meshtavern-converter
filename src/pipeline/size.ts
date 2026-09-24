@@ -1,5 +1,6 @@
-import { generatePlainBase, PLAIN_BASE_HEIGHT_MM, standOnBase, type MeasuredBase } from './base';
+import { generatePlainBase, PLAIN_BASE_HEIGHT_MM, standOnBase } from './base';
 import type { IndexedMesh } from './mesh';
+import type { PlacedMesh } from './orient';
 import { guessUnits, UNIT_FACTORS } from './units';
 
 /**
@@ -159,13 +160,6 @@ export interface SizingOptions {
   plainBase?: boolean;
 }
 
-/** A mesh placed by `orientAndPlace`, in file units. */
-export interface PlacedInFileUnits {
-  mesh: IndexedMesh;
-  sizeMm: [number, number, number];
-  base: MeasuredBase | null;
-}
-
 export interface SizedMini {
   /** The input mesh, or a new one when it was scaled. */
   mesh: IndexedMesh;
@@ -181,7 +175,8 @@ export interface SizedMini {
  * the units: it sets the base (or, without one, the figure's wider side) to that diameter
  * in mm, and a plain base added with it gets that diameter. The input is left untouched.
  */
-export function sizeMini(placed: PlacedInFileUnits, options: SizingOptions = {}): SizedMini {
+/** `placed` is what `orientAndPlace` returns, still in file units. */
+export function sizeMini(placed: PlacedMesh, options: SizingOptions = {}): SizedMini {
   const units = options.units ?? guessUnits(placed.sizeMm[1]);
   const unitScale = UNIT_FACTORS[units];
 
