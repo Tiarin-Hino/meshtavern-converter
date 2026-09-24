@@ -79,6 +79,10 @@ test('fills the table with 100 minis and reports rendering figures', async ({ pa
   // Software rendering of 100 minis is slow on CI runners.
   test.setTimeout(180_000);
   await page.evaluate(() => window.__mt.loadGenerated(200));
+  // The 50 mm sheet is Medium without a base; 32 mm apart the copies overlap and the scene
+  // gets too heavy for CI's software renderer. As Large they stand 64 mm apart, close to the
+  // 50.8 mm the scene had before the 32 mm grid.
+  await page.evaluate(() => window.__mt.setSizing({ size: 'large' }));
   await page.getByRole('button', { name: '100 minis', exact: true }).click();
   await page.waitForFunction(() => window.__mt.state.perf?.minis === 100);
   await page.waitForTimeout(1500);
