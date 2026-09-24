@@ -30,7 +30,7 @@ Story 4 of the Phase 1 spec (#44): a mini must take the right number of squares.
 - **Without a base, the figure's width misled** 5 of 17 minis (a bat came out Gargantuan). **Fix (PM):** suggest Medium; revisit after #72.
 - **20 mm bases came out Small** under the proposed 26 mm line. Three of the PM's humanoids on 20–24 mm bases are Medium creatures printed small: 29–32 mm tall against 36–48 mm for bought ones. **Fix (PM):** Small only under 18 mm, plus the offer to scale up to 25 mm (at 32 mm two of them would outgrow every bought humanoid).
 - **The index named bought minis.** The spec keyed it by corpus file path, and this public repo names no bought mini. **Fix (PM):** those files were renamed to `<kind>-NN` locally; a git-ignored map keeps the originals.
-- **CI broke the browser after the stress test.** As Medium, the 50 mm test sheet's 100 copies stood 32 mm apart and overlapped; CI's software renderer choked. **Fix:** the test makes the sheet Large (64 mm apart) and ends on a drawn frame.
+- **CI broke the browser after the stress test.** As Medium, the 50 mm test sheet's 100 copies stood 32 mm apart and overlapped; CI's software renderer choked. **Fix:** the test makes the sheet Large (64 mm apart) and ends on a drawn frame. The device benchmark does the same and prints the spacing, since its scenes stood 50.8 mm apart before.
 
 ## Numbers
 
