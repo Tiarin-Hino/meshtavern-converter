@@ -23,7 +23,22 @@ describe('handleRequest', () => {
       p.response.type === 'progress' ? [p.response.progress] : [],
     );
     expect(progress.map((p) => p.step)).toEqual([...STEPS]);
-    expect(progress.map((p) => p.percent)).toEqual([0, 17, 33, 50, 67, 83]);
+    expect(progress.map((p) => p.percent)).toEqual([0, 14, 29, 43, 57, 71, 86]);
+  });
+
+  it('passes the sizing options to the pipeline and returns the sizing', async () => {
+    const last = (
+      await collect(encodeBinaryStl(generateBumpySheet(4)), 7, {
+        bake: 0,
+        sizing: { units: 'in', size: 'huge' },
+      })
+    ).at(-1)!;
+    if (last.response.type !== 'done') throw new Error('expected done');
+    const { sizing, stats } = last.response.result;
+    expect(sizing).toMatchObject({ units: 'in', unitsMethod: 'manual', scale: 25.4 });
+    expect(sizing).toMatchObject({ size: 'huge', sizeMethod: 'manual', footprintSquares: 3 });
+    expect(stats.sizing).toEqual(sizing);
+    expect(stats.sizeMm[0]).toBeCloseTo(50 * 25.4, 1);
   });
 
   it('echoes the job id on every message', async () => {

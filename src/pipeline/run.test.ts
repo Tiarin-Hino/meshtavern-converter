@@ -3,6 +3,7 @@ import { KTX2_ZSTANDARD, readKtx2Header } from './compress';
 import { generateBumpySheet } from './generate';
 import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
 import { encodeBinaryStl } from './stl';
+import { generateFigure, generateSwarm } from '../regression/shapes';
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {
@@ -89,4 +90,97 @@ describe('runPipeline', () => {
     expect(raw.baked?.detail?.length).toBe(BAKE * BAKE * 4);
     expect(raw.stats.timings.map((timing) => timing.step)).not.toContain('compress');
   }, 120_000);
+
+  it('sizes the mini between orient and simplify: units, base and the suggested size', async () => {
+    const { sizing, stats } = await runPipeline(encodeBinaryStl(generateFigure(true)), { bake: 0 });
+    expect(STEPS.indexOf('size')).toBe(STEPS.indexOf('orient') + 1);
+    expect(STEPS.indexOf('simplify')).toBe(STEPS.indexOf('size') + 1);
+    expect(sizing).toMatchObject({
+      units: 'mm',
+      unitsMethod: 'guessed',
+      scale: 1,
+      size: 'medium',
+      sizeMethod: 'suggested',
+      footprintSquares: 1,
+      suggestedFrom: 'base',
+      plainBase: null,
+      warnings: [],
+    });
+    expect(sizing.base).toMatchObject({ shape: 'round' });
+    expect(sizing.baseDiameterMm).toBeCloseTo(25, 0);
+    expect(stats.sizing).toBe(sizing);
+  }, 60_000);
+
+  it('reads a file in inches as inches and brings it to mm', async () => {
+    const inches = generateFigure(true).map((value) => value / 25.4);
+    const { sizing, stats, lods } = await runPipeline(encodeBinaryStl(inches), { bake: 0 });
+    expect(sizing).toMatchObject({ units: 'in', scale: 25.4, size: 'medium' });
+    expect(sizing.baseDiameterMm).toBeCloseTo(25, 0);
+    expect(stats.sizeMm[0]).toBeCloseTo(25, 0);
+    // The levels are made from the mesh in mm: their error budgets are in mm.
+    expect(lods[0]!.mesh.positions.some((value) => value > 12)).toBe(true);
+  }, 60_000);
+
+  it('adds a plain base under a figure without one when asked', async () => {
+    const stl = encodeBinaryStl(generateFigure(false));
+    const bare = await runPipeline(stl, { bake: 0 });
+    const { sizing, stats, mesh } = await runPipeline(stl, {
+      bake: 0,
+      sizing: { plainBase: true },
+    });
+    expect(bare.sizing).toMatchObject({ base: null, plainBase: null, size: 'medium' });
+    expect(sizing).toMatchObject({
+      base: null,
+      plainBase: { diameterMm: 32, heightMm: 3 },
+      size: 'medium',
+      baseDiameterMm: 32,
+    });
+    expect(stats.triangles).toBeGreaterThan(bare.stats.triangles);
+    expect(stats.sizeMm[1]).toBeCloseTo(bare.stats.sizeMm[1] + 3, 4);
+    expect(stats.sizeMm[0]).toBeCloseTo(32, 4);
+    // Stands on y = 0, on the base.
+    let minY = Infinity;
+    for (let i = 1; i < mesh.positions.length; i += 3) minY = Math.min(minY, mesh.positions[i]!);
+    expect(minY).toBe(0);
+  }, 60_000);
+
+  it('makes the plain base follow the chosen size', async () => {
+    const { sizing } = await runPipeline(encodeBinaryStl(generateFigure(false)), {
+      bake: 0,
+      sizing: { plainBase: true, size: 'large' },
+    });
+    expect(sizing).toMatchObject({ plainBase: { diameterMm: 50 }, baseDiameterMm: 50 });
+  }, 60_000);
+
+  it('adds no plain base to a mini that has one', async () => {
+    const { sizing } = await runPipeline(encodeBinaryStl(generateFigure(true)), {
+      bake: 0,
+      sizing: { plainBase: true },
+    });
+    expect(sizing).toMatchObject({ plainBase: null, base: { shape: 'round' } });
+  }, 60_000);
+
+  it('scales a 25 mm base to 32 mm when asked, and nothing else changes size', async () => {
+    const stl = encodeBinaryStl(generateFigure(true));
+    const kept = await runPipeline(stl, { bake: 0 });
+    const scaledUp = await runPipeline(stl, { bake: 0, sizing: { scaleToBaseMm: 32 } });
+    const factor = 32 / kept.sizing.baseDiameterMm;
+    expect(scaledUp.sizing.scale).toBeCloseTo(factor, 6);
+    expect(factor).toBeCloseTo(1.28, 1);
+    for (let axis = 0; axis < 3; axis++)
+      expect(scaledUp.stats.sizeMm[axis]).toBeCloseTo(kept.stats.sizeMm[axis]! * factor, 3);
+    expect(scaledUp.sizing).toMatchObject({ size: 'medium', baseDiameterMm: 32, warnings: [] });
+  }, 60_000);
+
+  it('warns when the chosen size is smaller than the base, and does not rescale', async () => {
+    const { sizing, stats } = await runPipeline(encodeBinaryStl(generateSwarm()), {
+      bake: 0,
+      sizing: { size: 'medium' },
+    });
+    expect(sizing.scale).toBe(1);
+    expect(stats.sizeMm[0]).toBeCloseTo(50, 0);
+    expect(sizing.warnings).toEqual([
+      { kind: 'base-exceeds-footprint', baseMm: sizing.baseDiameterMm, footprintMm: 32 },
+    ]);
+  }, 60_000);
 });

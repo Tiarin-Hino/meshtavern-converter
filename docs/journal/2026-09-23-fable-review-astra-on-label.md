@@ -2,8 +2,8 @@
 title: Claude reviews every PR, Astra only on request
 date: 2026-09-23
 phase: 1
-issues: []
-prs: [66, 67, 69]
+issues: [76]
+prs: [66, 67, 69, 77]
 topics: [workflow, tooling]
 ---
 
@@ -54,6 +54,8 @@ Review jobs time out after 20 minutes and cancel the review of an older push of 
 **Later, 2026-09-23:** #67 fixed both. A pass now removes `needs-human`, which used to stay on a PR after a human fixed it and the review passed. The fix job may now run only `git status`, `git diff`, `git log`, `git show`, `git add`, `git commit` and a plain `git push`, instead of any git command: `git -c …` options can run any shell command, and a push could go to any branch. Edits inside `.git` are denied too. One gap remains here: the job may also run `npm run check`, which runs scripts from `package.json`, a file the job can edit. Branch protection on `main` is what keeps such a push off `main`.
 
 **Later, 2026-09-23:** the fix job never ran successfully. Its first run, on converter PR #68, stopped in half a second with "Claude encountered an error" and nothing else. Cause: `claude-code-action@v1` installs Claude Code 2.1.278, and Opus 5.5, the fix job's model, needs 2.1.280 or newer; the action reports only `is_error: true`, and the reason ("does not support this model") showed when the same command was run locally. Fable 5.1 works on 2.1.278, which is why the reviews never failed. The `@claude` workflow (`claude.yml`) runs Opus 5.5 too and had the same fault. Both now install Claude Code 2.1.280 in a step of their own and hand it to the action through `path_to_claude_code_executable`; checked locally, 2.1.280 runs Opus 5.5 with the fix job's tool rules. The step can go once the action ships a newer Claude Code (PR #69).
+
+**Later, 2026-09-24:** the fix job still never ran on a PR without the `astra-review` label (#76). On PR #74 the verdict twice posted "Claude is applying the blocking findings" and the `fix` job was skipped both times; in the last 100 review runs it ran only on PR #68, which had the label. Cause: the job's condition `needs.verdict.outputs.fix == 'true'` has no status function, so GitHub adds an implicit `success()` that checks every job upstream, not only `verdict`, and `astra` is skipped without the label. `verdict` escaped this because its condition starts with `always()`. The condition now reads `always() && needs.verdict.result == 'success' && needs.verdict.outputs.fix == 'true'`. Like every change to this workflow, it only shows on the first PR after the merge. The findings of PR #74 were applied by hand.
 
 ## Story angle
 

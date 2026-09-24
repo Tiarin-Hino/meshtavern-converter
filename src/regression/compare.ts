@@ -6,6 +6,7 @@
 export const RELATIVE_TOLERANCE: Readonly<Record<string, number>> = {
   errorMm: 0.01,
   sizeMm: 0.001,
+  baseDiameterMm: 0.001,
   compactGlbBytes: 0.005,
   utilisation: 0.01,
   coverage: 0.01,

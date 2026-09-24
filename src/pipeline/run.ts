@@ -6,12 +6,13 @@ import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh
 import { checkFits } from './memory';
 import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { shade } from './shade';
+import { sizeMini, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
 import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
-export const STEPS = ['read', 'weld', 'orient', 'simplify', 'shade', 'levels'] as const;
+export const STEPS = ['read', 'weld', 'orient', 'size', 'simplify', 'shade', 'levels'] as const;
 /** The steps that turn the table level into a baked mini. They run unless baking is switched off. */
 export const BAKE_STEPS = ['unwrap', 'bake', 'compress'] as const;
 export type BakeStepName = (typeof BAKE_STEPS)[number];
@@ -53,7 +54,10 @@ export interface ConversionStats {
   duplicateTriangles: number;
   /** Dropped: a coordinate that is not a number or infinite. */
   invalidTriangles: number;
+  /** Width, height and depth in scene mm, after any change of units or scale. */
   sizeMm: [number, number, number];
+  /** Units, base, creature size and footprint: what the table needs to place the mini. */
+  sizing: Sizing;
   /** Which way was taken as up in the file, and how that was decided. */
   up: UpAxis;
   upMethod: UpDetection['method'] | 'manual';
@@ -98,6 +102,8 @@ export interface ConversionResult {
   lods: Lod[];
   /** Only when baking was requested. */
   baked?: Baked;
+  /** The same object as `stats.sizing`. */
+  sizing: Sizing;
   stats: ConversionStats;
 }
 
@@ -114,6 +120,8 @@ export interface PipelineOptions {
   onProgress?: (progress: Progress) => void;
   /** Overrides up-axis detection, for when the guess is wrong. */
   forcedUp?: UpAxis | null;
+  /** Units, size, scale and plain base as the user chose them; the rest is guessed. */
+  sizing?: SizingOptions;
   /**
    * Texture size for baked detail maps on the table level: 'auto' (the default) picks one
    * from the mini's surface area (see bake-policy.ts). A size in texels, or 0 to skip
@@ -140,6 +148,7 @@ export async function runPipeline(
   {
     onProgress = () => {},
     forcedUp = null,
+    sizing: sizingOptions = {},
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
     maxTextureSize,
@@ -194,7 +203,7 @@ export async function runPipeline(
       `${soup.length / 9 + invalidTriangles} triangles, none usable`,
     );
   }
-  const placed = run(
+  const oriented = run(
     'orient',
     () => {
       const detection = detectUpAxis(welded.mesh);
@@ -202,6 +211,15 @@ export async function runPipeline(
       return { ...orientAndPlace(welded.mesh, up), up, detection };
     },
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
+  );
+  const placed = run(
+    'size',
+    () => sizeMini(oriented, sizingOptions),
+    // A scaled mesh is a copy; the oriented one is dropped once this step is done.
+    (s) =>
+      stl.byteLength +
+      meshBytes(oriented.mesh) +
+      (s.mesh === oriented.mesh ? 0 : meshBytes(s.mesh)),
   );
   const close = run(
     'simplify',
@@ -286,6 +304,7 @@ export async function runPipeline(
     mesh: placed.mesh,
     lods,
     baked,
+    sizing: placed.sizing,
     stats: {
       format,
       sourceTriangles: soup.length / 9 + invalidTriangles,
@@ -295,8 +314,9 @@ export async function runPipeline(
       duplicateTriangles: welded.duplicateTriangles,
       invalidTriangles,
       sizeMm: placed.sizeMm,
-      up: placed.up,
-      upMethod: forcedUp ? 'manual' : placed.detection.method,
+      sizing: placed.sizing,
+      up: oriented.up,
+      upMethod: forcedUp ? 'manual' : oriented.detection.method,
       lods: lods.map((lod) => ({
         name: lod.name,
         decidedBy: lod.decidedBy,

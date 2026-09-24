@@ -9,6 +9,12 @@
     "sizeMm": [50, 50, 3.99939],
     "up": "+y",
     "upMethod": "tallest",
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": null,
+      "baseDiameterMm": 32
+    },
     "levels": [
       {
         "name": "close",
@@ -49,6 +55,12 @@
     "sizeMm": [25, 32.2337, 25],
     "up": "+z",
     "upMethod": "base",
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": "round",
+      "baseDiameterMm": 25
+    },
     "levels": [
       {
         "name": "close",
@@ -97,6 +109,12 @@
     "sizeMm": [25, 32.2337, 25],
     "up": "+y",
     "upMethod": "base",
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": "round",
+      "baseDiameterMm": 25
+    },
     "levels": [
       {
         "name": "close",
@@ -137,6 +155,12 @@
     "sizeMm": [16.2986, 30.63, 8.34041],
     "up": "+z",
     "upMethod": "tallest",
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": null,
+      "baseDiameterMm": 32
+    },
     "levels": [
       {
         "name": "close",
@@ -177,6 +201,12 @@
     "sizeMm": [50, 14.437, 50],
     "up": "+z",
     "upMethod": "base",
+    "sizing": {
+      "units": "mm",
+      "size": "large",
+      "base": "round",
+      "baseDiameterMm": 50
+    },
     "levels": [
       {
         "name": "close",
@@ -217,6 +247,12 @@
     "sizeMm": [40, 28, 18],
     "up": "+y",
     "upMethod": "tallest",
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": null,
+      "baseDiameterMm": 32
+    },
     "levels": [
       {
         "name": "close",
