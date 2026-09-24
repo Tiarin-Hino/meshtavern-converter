@@ -206,9 +206,10 @@ test('suggests a creature size and lets the user change units, size, scale and b
   await settled();
   await expect(page.locator('#stats')).toContainText('inches (chosen)');
   expect((await sizeMm())[0]).toBeCloseTo(25 * 25.4, 2);
-  expect((await sizing()).warnings.map((warning) => warning.kind)).toContain(
-    'larger-than-gargantuan',
-  );
+  // A 635 mm base: the page asks about the units and offers no scale button.
+  expect((await sizing()).warnings[0]?.kind).toBe('larger-than-gargantuan');
+  await expect(page.locator('#sizing-warning')).toContainText('are the units right?');
+  await expect(page.locator('#scale-fit')).toBeHidden();
 
   // A new file starts without the choices of the last one.
   await page.evaluate(() => window.__mt.loadDemo());

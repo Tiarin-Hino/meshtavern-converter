@@ -73,10 +73,10 @@ describe('sizingWarnings', () => {
     expect(sizingWarnings('medium', null)).toEqual([]);
   });
 
-  it('warns when the measurement does not fit even Gargantuan', () => {
+  it('warns first that a base does not fit even Gargantuan: the units are the likely cause', () => {
     expect(sizingWarnings('gargantuan', 135)).toEqual([
-      { kind: 'base-exceeds-footprint', baseMm: 135, footprintMm: 128 },
       { kind: 'larger-than-gargantuan', baseMm: 135 },
+      { kind: 'base-exceeds-footprint', baseMm: 135, footprintMm: 128 },
     ]);
     // Without a base, no warning: the figure's width says little.
     expect(sizingWarnings('gargantuan', null)).toEqual([]);

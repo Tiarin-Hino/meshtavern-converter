@@ -116,16 +116,18 @@ export function suggestSize(mm: number): CreatureSize {
 /**
  * The warnings for a sizing, all about a measured base: larger than the chosen footprint,
  * a Medium mini's base under `MEDIUM_MIN_BASE_MM`, or too large even for Gargantuan. A mini
- * without a base gets none: its own width says little (PM decision on PR #74).
+ * without a base gets none: its own width says little (PM decision on PR #74). The page
+ * shows the first warning only, so a base too large for any size comes first: its likely
+ * cause is the units, and scaling it to fit would hide that.
  */
 export function sizingWarnings(size: CreatureSize, baseMm: number | null): SizingWarning[] {
   const warnings: SizingWarning[] = [];
+  if (baseMm !== null && !fits(baseMm, SIZES.gargantuan.squares))
+    warnings.push({ kind: 'larger-than-gargantuan', baseMm });
   if (baseMm !== null && !fits(baseMm, SIZES[size].squares))
     warnings.push({ kind: 'base-exceeds-footprint', baseMm, footprintMm: footprintMm(size) });
   if (baseMm !== null && size === 'medium' && baseMm < MEDIUM_MIN_BASE_MM)
     warnings.push({ kind: 'base-small-for-size', baseMm, targetMm: MEDIUM_MIN_BASE_MM });
-  if (baseMm !== null && !fits(baseMm, SIZES.gargantuan.squares))
-    warnings.push({ kind: 'larger-than-gargantuan', baseMm });
   return warnings;
 }
 

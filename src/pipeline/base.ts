@@ -75,6 +75,8 @@ export function measureBase({ positions, indices }: IndexedMesh): MeasuredBase |
   const floor = min[1]!;
   const band = (max[1]! - floor) * RESTING_BAND;
 
+  // The same resting-area test as `detectUpAxis` (orient.ts), for one axis: a second pass,
+  // about 1 s on the largest corpus file. Merging the two is part of #72.
   let resting = 0;
   for (let t = 0; t < indices.length; t += 3) {
     const a = indices[t]! * 3;
