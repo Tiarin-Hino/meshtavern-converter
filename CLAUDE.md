@@ -37,7 +37,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `scripts/measure-baked.mjs` — a full table of baked minis at given texture sizes, uncompressed unless `KTX=0` (an effort) is in the environment.
 - `scripts/measure-memory.mjs` — peak memory of the page's process in real Chrome while it converts given STL files (Windows and Linux): the figures behind `memory.ts`.
 - `scripts/measure-stress.mjs` — measures the 100/400-mini stress scene in real Chrome, with and without the frame-rate cap.
-- `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (Excalidraw JSON + PNG export).
+- `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (Excalidraw JSON + PNG export), renders and screenshots from `verify-3d`, and design notes from a design pass (`<name>.md`, one per hand-over PR).
 - `docs/journal/` — one entry per piece of work: what was done, why, problems and their fixes, dead ends, numbers. Format and rules in its `README.md`. Read the entries of the area you are about to change.
 
 ## Conventions
