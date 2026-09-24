@@ -96,6 +96,9 @@ test('fills the table with 100 minis and reports rendering figures', async ({ pa
 
   await page.getByRole('button', { name: 'Single mini' }).click();
   expect(await page.evaluate(() => window.__mt.state.stressCount)).toBe(0);
+  // End on a drawn frame of the single mini: in software rendering one frame of 100 minis can
+  // take seconds, and closing the page during it broke the browser for the next test on CI.
+  await page.waitForFunction(() => window.__mt.state.perf?.minis === 0, null, { timeout: 120_000 });
 });
 
 test('draws the 32 mm grid and stands stress minis one footprint apart', async ({
