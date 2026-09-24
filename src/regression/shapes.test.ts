@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { weldVertices } from '../pipeline/mesh';
 import { detectUpAxis } from '../pipeline/orient';
-import { addBlob, addRoundBase, generateFigure, generateSwarm, toYUp } from './shapes';
+import { addRoundBase } from '../pipeline/base';
+import { addBlob, generateFigure, generateSwarm, toYUp } from './shapes';
 
 /** Every edge of a closed surface is shared by exactly two triangles, once in each direction. */
 function openEdges(indices: Uint32Array, vertexCount: number): number {

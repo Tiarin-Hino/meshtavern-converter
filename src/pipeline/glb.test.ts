@@ -6,6 +6,7 @@ import { encodeGlb, glbEncoderReady } from './glb';
 import { DEFAULT_LOOK, vertexColours } from './look';
 import { computeVertexNormals, weldVertices, type IndexedMesh } from './mesh';
 import { shade } from './shade';
+import type { Sizing } from './size';
 
 // 40 × 40 quads: 3,200 triangles, 1,681 vertices, 50 mm wide, shaded like a converted mini.
 const sheet: IndexedMesh = weldVertices(generateBumpySheet(40)).mesh;
@@ -33,7 +34,7 @@ interface Gltf {
   nodes: { scale: number[]; translation?: number[] }[];
   meshes: { primitives: { attributes: Record<string, number> }[] }[];
   extensionsRequired?: string[];
-  extras: { sizeMm: number[] };
+  extras: { sizeMm: number[]; meshtavern?: Record<string, unknown> };
 }
 
 function parse(glb: ArrayBuffer): { json: Gltf; bin: Uint8Array } {
@@ -95,6 +96,43 @@ describe('encodeGlb, plain', () => {
 
   it('uses 16-bit indices for small meshes', () => {
     expect(json.bufferViews[0]!.byteLength).toBe(sheet.indices.length * 2);
+  });
+});
+
+describe('encodeGlb, with the sizing', () => {
+  const sizing: Sizing = {
+    units: 'in',
+    unitsMethod: 'guessed',
+    scale: 25.4,
+    base: null,
+    plainBase: { diameterMm: 50, heightMm: 3 },
+    size: 'large',
+    sizeMethod: 'manual',
+    footprintSquares: 2,
+    baseDiameterMm: 50,
+    suggestedFrom: 'default',
+    warnings: [],
+  };
+
+  it.each([false, true])(
+    'records what the table needs in extras (compact: %s)',
+    async (compact) => {
+      const glb = encodeGlb(sheet, { ...options, compact, sizing });
+      expect(parse(glb).json.extras.meshtavern).toEqual({
+        gridSquareMm: 32,
+        size: 'large',
+        footprintSquares: 2,
+        baseDiameterMm: 50,
+        units: 'in',
+        scale: 25.4,
+      });
+      expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+    },
+  );
+
+  it('writes no block without a sizing', () => {
+    const glb = encodeGlb(sheet, { ...options, compact: false });
+    expect(parse(glb).json.extras).not.toHaveProperty('meshtavern');
   });
 });
 

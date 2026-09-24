@@ -10,28 +10,12 @@
  * exactly so that welding joins them.
  */
 
-type Vec3 = [number, number, number];
+import { addRoundBase, pushOutward, type Vec3 } from '../pipeline/base';
 
 /** A wave between -1 and 1 with period 1, smooth at its peaks. */
 function wave(x: number): number {
   const saw = Math.abs(x - Math.floor(x) - 0.5) * 4 - 1;
   return saw * (1.5 - 0.5 * saw * saw);
-}
-
-/** Appends a triangle, turned so that it faces away from `inside`. */
-function pushOutward(soup: number[], a: Vec3, b: Vec3, c: Vec3, inside: Vec3): void {
-  const ux = b[0] - a[0];
-  const uy = b[1] - a[1];
-  const uz = b[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  const facing =
-    (uy * vz - uz * vy) * (a[0] - inside[0]) +
-    (uz * vx - ux * vz) * (a[1] - inside[1]) +
-    (ux * vy - uy * vx) * (a[2] - inside[2]);
-  if (facing >= 0) soup.push(...a, ...b, ...c);
-  else soup.push(...a, ...c, ...b);
 }
 
 /**
@@ -80,54 +64,6 @@ export function addBlob(
         }
       }
     }
-  }
-}
-
-/**
- * A round base standing on z = 0: flat underside, flat top, straight wall.
- * 4 × cells² + 8 × cells triangles.
- */
-export function addRoundBase(
-  soup: number[],
-  centre: [number, number],
-  diameterMm: number,
-  heightMm: number,
-  cells: number,
-): void {
-  const radius = diameterMm / 2;
-  // Squeezes the square grid into a disc: every ring of the grid becomes a circle.
-  const onDisc = (i: number, j: number): [number, number] => {
-    const u = -1 + (2 * i) / cells;
-    const v = -1 + (2 * j) / cells;
-    const ring = Math.max(Math.abs(u), Math.abs(v));
-    if (ring === 0) return [centre[0], centre[1]];
-    const scale = (ring * radius) / Math.sqrt(u * u + v * v);
-    return [centre[0] + u * scale, centre[1] + v * scale];
-  };
-  const inside: Vec3 = [centre[0], centre[1], heightMm / 2];
-  for (const z of [0, heightMm]) {
-    for (let j = 0; j < cells; j++) {
-      for (let i = 0; i < cells; i++) {
-        const [ax, ay] = onDisc(i, j);
-        const [bx, by] = onDisc(i + 1, j);
-        const [cx, cy] = onDisc(i + 1, j + 1);
-        const [dx, dy] = onDisc(i, j + 1);
-        pushOutward(soup, [ax, ay, z], [bx, by, z], [cx, cy, z], inside);
-        pushOutward(soup, [ax, ay, z], [cx, cy, z], [dx, dy, z], inside);
-      }
-    }
-  }
-  // The wall follows the outermost ring of the grid, once around.
-  const rim: [number, number][] = [];
-  for (let i = 0; i < cells; i++) rim.push(onDisc(i, 0));
-  for (let j = 0; j < cells; j++) rim.push(onDisc(cells, j));
-  for (let i = cells; i > 0; i--) rim.push(onDisc(i, cells));
-  for (let j = cells; j > 0; j--) rim.push(onDisc(0, j));
-  for (let k = 0; k < rim.length; k++) {
-    const [ax, ay] = rim[k]!;
-    const [bx, by] = rim[(k + 1) % rim.length]!;
-    pushOutward(soup, [ax, ay, 0], [bx, by, 0], [bx, by, heightMm], inside);
-    pushOutward(soup, [ax, ay, 0], [bx, by, heightMm], [ax, ay, heightMm], inside);
   }
 }
 

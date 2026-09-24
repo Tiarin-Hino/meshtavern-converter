@@ -59,7 +59,9 @@ export async function runBenchmark(
 
   // 1. Conversion. Skipped when the user loaded a real mini: that conversion already happened.
   const ownMini = mt.state.stats !== null && !mt.state.fileName?.startsWith('generated-');
-  if (!ownMini) await mt.loadGenerated(SHEET_QUADS[size]);
+  // The 50 mm sheet has no base and would be Medium, 32 mm apart: copies would overlap.
+  // As Large they stand 64 mm apart, near the 50.8 mm of the scenes before the 32 mm grid (#44).
+  if (!ownMini) await mt.loadGenerated(SHEET_QUADS[size], { size: 'large' });
   const { stats, baked, error } = mt.state;
   if (error || !stats) {
     add(`**Conversion failed:** ${error ?? 'no result'}`);
@@ -89,15 +91,20 @@ export async function runBenchmark(
     ['100 minis, all at table level', 100, 1],
     ['400 minis, detail by distance', 400, null],
   ];
+  let spacingMm = 0;
   for (const [label, count, level] of scenes) {
     mt.startStress(count, level);
     await wait(SETTLE_SECONDS);
     const perf = mt.state.perf;
     if (!perf) continue;
+    spacingMm = perf.stressSpacingMm;
     add(
       `| ${label} | ${perf.fps.toFixed(0)} | ${perf.frameMs.toFixed(1)} ms | ${perf.worstFrameMs.toFixed(0)} ms | ${perf.renderCpuMs.toFixed(1)} ms | ${perf.triangles.toLocaleString()} | ${perf.bakedMinis}, ${Math.round(perf.textureBytes / 1048576)} MB |`,
     );
   }
+  // Scenes before #44 stood every mini 50.8 mm apart; since then by its footprint.
+  add('');
+  add(`Minis stand ${spacingMm} mm apart, their footprint on the 32 mm grid.`);
   // 3. Headroom.
   let best = 0;
   let held = { count: 0, triangles: 0 };

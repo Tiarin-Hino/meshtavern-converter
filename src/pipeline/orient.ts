@@ -1,4 +1,6 @@
+import { FLAT_ANGLE_COS, measureBase, MIN_BASE_COVERAGE, RESTING_BAND } from './base';
 import type { IndexedMesh } from './mesh';
+import type { BaseMeasurement } from './size';
 
 /** The direction in the source file that points up. */
 export type UpAxis = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
@@ -6,16 +8,6 @@ export const UP_AXES: readonly UpAxis[] = ['+x', '-x', '+y', '-y', '+z', '-z'];
 
 /** Slicers and most print files are Z-up. */
 export const DEFAULT_UP: UpAxis = '+z';
-
-/** A face counts as part of the underside when its normal is within this angle of straight down. */
-const FLAT_ANGLE_COS = Math.cos((10 * Math.PI) / 180);
-/** ...and when it lies within this share of the mesh's extent from the lowest point. */
-const RESTING_BAND = 0.02;
-/**
- * The underside must cover at least this share of the footprint to count as a base.
- * Feet and cloak hems touch the ground with far less.
- */
-const MIN_BASE_COVERAGE = 0.15;
 
 export interface UpDetection {
   up: UpAxis;
@@ -34,6 +26,8 @@ export interface PlacedMesh {
   mesh: IndexedMesh;
   /** Width (x), height (y) and depth (z) in mm, in scene axes. */
   sizeMm: [number, number, number];
+  /** The base the mini stands on, measured after placing; null when it has none. */
+  base: BaseMeasurement | null;
 }
 
 /**
@@ -116,8 +110,9 @@ const TO_Y_UP: Record<UpAxis, (x: number, y: number, z: number) => [number, numb
 };
 
 /**
- * Converts a mesh to the scene convention: Y-up, standing on y = 0, centred on the
- * origin in x and z. Units are never changed. Returns a new mesh; the input is left
+ * Converts a mesh to the scene convention: Y-up, standing on y = 0, with the origin at
+ * the centre of its base in x and z (the centre of its bounding box when it has no base),
+ * so the table can centre it in its footprint. Units are never changed. Returns a new mesh; the input is left
  * untouched.
  */
 export function orientAndPlace(mesh: IndexedMesh, sourceUp: UpAxis = DEFAULT_UP): PlacedMesh {
@@ -137,7 +132,7 @@ export function orientAndPlace(mesh: IndexedMesh, sourceUp: UpAxis = DEFAULT_UP)
   }
 
   if (positions.length === 0)
-    return { mesh: { positions, indices: mesh.indices }, sizeMm: [0, 0, 0] };
+    return { mesh: { positions, indices: mesh.indices }, sizeMm: [0, 0, 0], base: null };
 
   const centreX = (min[0]! + max[0]!) / 2;
   const centreZ = (min[2]! + max[2]!) / 2;
@@ -148,8 +143,19 @@ export function orientAndPlace(mesh: IndexedMesh, sourceUp: UpAxis = DEFAULT_UP)
     positions[i + 2] = positions[i + 2]! - centreZ;
   }
 
+  const placed = { positions, indices: mesh.indices };
+  const measured = measureBase(placed);
+  if (measured && (measured.centre[0] !== 0 || measured.centre[1] !== 0)) {
+    const [baseX, baseZ] = measured.centre;
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i] = positions[i]! - baseX;
+      positions[i + 2] = positions[i + 2]! - baseZ;
+    }
+  }
+
   return {
-    mesh: { positions, indices: mesh.indices },
+    mesh: placed,
     sizeMm: [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!],
+    base: measured?.base ?? null,
   };
 }

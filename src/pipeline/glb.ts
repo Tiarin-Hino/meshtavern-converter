@@ -1,6 +1,7 @@
 import { MeshoptEncoder } from 'meshoptimizer';
 import { vertexColours, type Look } from './look';
 import { computeVertexNormals, type IndexedMesh } from './mesh';
+import { GRID_SQUARE_MM, type Sizing } from './size';
 
 /**
  * Writes one mesh as a binary glTF 2.0 file (GLB). Two variants:
@@ -22,6 +23,12 @@ export interface GlbOptions {
   name: string;
   look: Look;
   compact: boolean;
+  /**
+   * The mini's size on the table. When given, `extras.meshtavern` carries what the table
+   * needs to place it: grid square, creature size, footprint in squares, base diameter,
+   * and the units and scale the file was read with.
+   */
+  sizing?: Sizing;
 }
 
 const MM_TO_M = 0.001;
@@ -160,6 +167,16 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
     extras: {
       units: 'Vertex data is in millimetres; the node scale converts to metres.',
       sizeMm: size.max.map((value, axis) => Number((value - size.min[axis]!).toFixed(3))),
+      ...(options.sizing && {
+        meshtavern: {
+          gridSquareMm: GRID_SQUARE_MM,
+          size: options.sizing.size,
+          footprintSquares: options.sizing.footprintSquares,
+          baseDiameterMm: Number(options.sizing.baseDiameterMm.toFixed(3)),
+          units: options.sizing.units,
+          scale: options.sizing.scale,
+        },
+      }),
     },
     ...parts,
   };

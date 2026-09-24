@@ -78,7 +78,8 @@ h1 {
   font-size: 0.85rem;
 }
 
-#look {
+#look,
+#sizing {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -90,12 +91,14 @@ h1 {
   font-size: 0.85rem;
 }
 
-#look legend {
+#look legend,
+#sizing legend {
   padding: 0 4px;
   color: #a9afb8;
 }
 
-#look label {
+#look label,
+#sizing label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -103,6 +106,26 @@ h1 {
 
 #look input[type='range'] {
   width: 90px;
+}
+
+#sizing input[type='number'] {
+  width: 7em;
+}
+
+#sizing button {
+  padding: 2px 8px;
+  border: 1px solid #3a3f49;
+  border-radius: 4px;
+  background: #252830;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#sizing-warning {
+  flex-basis: 100%;
+  margin: 0;
+  color: #f0b35e;
 }
 
 #perf {

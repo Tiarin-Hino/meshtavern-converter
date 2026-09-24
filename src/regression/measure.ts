@@ -48,6 +48,13 @@ export interface CaseFigures extends Pick<
   | 'up'
   | 'upMethod'
 > {
+  /** What the size step made of the mesh. */
+  sizing: {
+    units: ConversionStats['sizing']['units'];
+    size: ConversionStats['sizing']['size'];
+    base: 'round' | 'other' | null;
+    baseDiameterMm: number;
+  };
   levels: LevelFigures[];
   baked?: {
     resolution: number;
@@ -78,6 +85,12 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
     sizeMm: stats.sizeMm,
     up: stats.up,
     upMethod: stats.upMethod,
+    sizing: {
+      units: stats.sizing.units,
+      size: stats.sizing.size,
+      base: stats.sizing.base?.shape ?? null,
+      baseDiameterMm: stats.sizing.baseDiameterMm,
+    },
     levels: stats.lods.map((lod, level) => ({
       ...lod,
       glbBytes: glb(level, false),
