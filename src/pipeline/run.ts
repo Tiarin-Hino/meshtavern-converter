@@ -9,6 +9,7 @@ import {
   orientAndPlace,
   resolveOrientation,
   type Orientation,
+  type OrientationOptions,
   type UpAxis,
 } from './orient';
 import { shade } from './shade';
@@ -128,8 +129,8 @@ const meshBytes = (mesh: IndexedMesh): number =>
 
 export interface PipelineOptions {
   onProgress?: (progress: Progress) => void;
-  /** Overrides up-axis detection, for when the guess is wrong. */
-  forcedUp?: UpAxis | null;
+  /** The user's axis or free turn, for when the detection is wrong (see OrientationOptions). */
+  orientation?: OrientationOptions;
   /** Units, size, scale and plain base as the user chose them; the rest is guessed. */
   sizing?: SizingOptions;
   /**
@@ -157,7 +158,7 @@ export async function runPipeline(
   stl: ArrayBuffer,
   {
     onProgress = () => {},
-    forcedUp = null,
+    orientation: orientationOptions = {},
     sizing: sizingOptions = {},
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
@@ -216,7 +217,7 @@ export async function runPipeline(
   const oriented = run(
     'orient',
     () => {
-      const detection = resolveOrientation(welded.mesh, forcedUp ? { up: forcedUp } : {});
+      const detection = resolveOrientation(welded.mesh, orientationOptions);
       const { orientation } = detection;
       const coverage = coverageFor(detection, orientation.up);
       return { ...orientAndPlace(welded.mesh, orientation.rotation, coverage), orientation };

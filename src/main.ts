@@ -4,7 +4,7 @@ import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { checkFits, memoryBudgetBytes } from './pipeline/memory';
-import { UP_AXES, type UpAxis } from './pipeline/orient';
+import { UP_AXES, type OrientationOptions, type UpAxis } from './pipeline/orient';
 import { toProblem, type ProblemCode } from './pipeline/problems';
 import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
 import {
@@ -186,7 +186,10 @@ let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
 let lastSource: { name: string; read: () => Promise<ArrayBuffer> } | null = null;
 /** What the user chose for the last source; a new file starts without choices. */
-let choices: { up?: UpAxis; sizing: SizingOptions } = { sizing: {} };
+let choices: { orientation: OrientationOptions; sizing: SizingOptions } = {
+  orientation: {},
+  sizing: {},
+};
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 
@@ -396,7 +399,7 @@ setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
   if (!lastSource || state.busy) return;
-  choices.up = up;
+  choices.orientation = { up };
   await convert(await lastSource.read(), lastSource.name);
 }
 
@@ -524,7 +527,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
         status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%${within}`;
       },
       {
-        up: choices.up,
+        orientation: choices.orientation,
         sizing: choices.sizing,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
@@ -702,7 +705,7 @@ async function loadFile(file: File | undefined): Promise<void> {
     return showProblem(file.name, error);
   }
   lastSource = { name: file.name, read: () => file.arrayBuffer() };
-  choices = { sizing: {} };
+  choices = { orientation: {}, sizing: {} };
   await convert(stl, file.name);
 }
 
@@ -738,14 +741,14 @@ window.__mt = {
   state,
   loadDemo: () => {
     lastSource = { name: 'demo.stl', read: async () => demoStl() };
-    choices = { sizing: {} };
+    choices = { orientation: {}, sizing: {} };
     return convert(demoStl(), 'demo.stl');
   },
   loadGenerated: (quadsPerSide, sizing = {}) => {
     const read = async (): Promise<ArrayBuffer> =>
       encodeBinaryStl(generateBumpySheet(quadsPerSide));
     lastSource = { name: `generated-${quadsPerSide}.stl`, read };
-    choices = { sizing };
+    choices = { orientation: {}, sizing };
     return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
   },
   setUp,

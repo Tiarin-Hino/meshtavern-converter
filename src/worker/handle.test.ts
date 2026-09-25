@@ -41,6 +41,19 @@ describe('handleRequest', () => {
     expect(stats.sizeMm[0]).toBeCloseTo(50 * 25.4, 1);
   });
 
+  it('passes the orientation options to the pipeline and returns the orientation', async () => {
+    const last = (
+      await collect(encodeBinaryStl(generateBumpySheet(4)), 7, {
+        bake: 0,
+        orientation: { up: '+y', setDown: false },
+      })
+    ).at(-1)!;
+    if (last.response.type !== 'done') throw new Error('expected done');
+    const { orientation, stats } = last.response.result;
+    expect(orientation).toMatchObject({ up: '+y', method: 'manual', setDownDeg: 0 });
+    expect(stats.orientation).toEqual(orientation);
+  });
+
   it('echoes the job id on every message', async () => {
     const posted = await collect(encodeBinaryStl(generateBumpySheet(2)), 42);
     expect(posted.every((p) => p.response.id === 42)).toBe(true);
