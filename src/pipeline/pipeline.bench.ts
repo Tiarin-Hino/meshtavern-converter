@@ -13,5 +13,5 @@ const options = { iterations: 5, time: 0, warmupIterations: 1, warmupTime: 0 };
 describe('2M-triangle input', () => {
   bench('readStlTriangles', () => void readStlTriangles(stl), options);
   bench('weldVertices', () => void weldVertices(soup), options);
-  bench('orientAndPlace', () => void orientAndPlace(welded), options);
+  bench('orientAndPlace', () => void orientAndPlace(welded, '+z', 0), options);
 });

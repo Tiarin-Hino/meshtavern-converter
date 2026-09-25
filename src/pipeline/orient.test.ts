@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { generateFigure } from '../regression/shapes';
+import { generatePlainBase } from './base';
+import { generateBumpySheet } from './generate';
 import { weldVertices, type IndexedMesh } from './mesh';
-import { detectUpAxis, orientAndPlace, UP_AXES, type UpAxis } from './orient';
+import { coverageFor, detectUpAxis, orientAndPlace, UP_AXES, type UpAxis } from './orient';
 
 // Z-up box corner points: 20 mm wide (x 10..30), 10 mm deep (y 0..10), 32 mm tall (z 5..37).
 const zUp: IndexedMesh = {
@@ -79,27 +82,28 @@ function signedVolume({ positions: p, indices }: IndexedMesh): number {
 
 describe('orientAndPlace', () => {
   it('converts Z-up to Y-up and reports the size in mm', () => {
-    expect(orientAndPlace(zUp).sizeMm).toEqual([20, 32, 10]);
+    expect(orientAndPlace(zUp, '+z', 0).sizeMm).toEqual([20, 32, 10]);
   });
 
   it('stands the mesh on y = 0 and centres it on the origin', () => {
-    const { min, max } = bounds(orientAndPlace(zUp).mesh.positions);
+    const { min, max } = bounds(orientAndPlace(zUp, '+z', 0).mesh.positions);
     expect(min).toEqual([-10, 0, -5]);
     expect(max).toEqual([10, 32, 5]);
   });
 
   it('rotates rather than mirrors: +y in the file becomes -z', () => {
-    const placed = orientAndPlace(zUp).mesh.positions;
+    const placed = orientAndPlace(zUp, '+z', 0).mesh.positions;
     // Vertex 0 has the smallest file y, so it must have the largest scene z.
     expect(placed[2]).toBe(5);
   });
 
   it('leaves the axes alone for a Y-up source', () => {
-    expect(orientAndPlace(zUp, '+y').sizeMm).toEqual([20, 10, 32]);
+    expect(orientAndPlace(zUp, '+y', 0).sizeMm).toEqual([20, 10, 32]);
   });
 
   it.each(UP_AXES)('stands a %s mini upright without mirroring it', (up) => {
-    const placed = orientAndPlace(pillarOnBase(up), up);
+    const mesh = pillarOnBase(up);
+    const placed = orientAndPlace(mesh, up, coverageFor(detectUpAxis(mesh), up));
     expect(placed.sizeMm).toEqual([24, 43, 24]);
     expect(signedVolume(placed.mesh)).toBeGreaterThan(0);
     // The wide base is at the bottom: the vertices on the floor span the full 24 mm.
@@ -110,13 +114,13 @@ describe('orientAndPlace', () => {
 
   it('does not modify its input', () => {
     const before = Array.from(zUp.positions);
-    orientAndPlace(zUp);
+    orientAndPlace(zUp, '+z', 0);
     expect(Array.from(zUp.positions)).toEqual(before);
   });
 
   it('handles an empty mesh', () => {
     const empty = { positions: new Float32Array(0), indices: new Uint32Array(0) };
-    expect(orientAndPlace(empty).sizeMm).toEqual([0, 0, 0]);
+    expect(orientAndPlace(empty, '+z', 0).sizeMm).toEqual([0, 0, 0]);
   });
 });
 
@@ -135,5 +139,47 @@ describe('detectUpAxis', () => {
   it('falls back to Z-up for an empty mesh', () => {
     const empty = { positions: new Float32Array(0), indices: new Uint32Array(0) };
     expect(detectUpAxis(empty)).toMatchObject({ up: '+z', method: 'tallest' });
+  });
+});
+
+describe('detectUpAxis: the one pass', () => {
+  it('reports the coverage of every axis, the base only for the one it stands on', () => {
+    const detection = detectUpAxis(pillarOnBase('+z'));
+    expect(coverageFor(detection, '+z')).toBeCloseTo(1, 1);
+    expect(coverageFor(detection, '-z')).toBeLessThan(0.1);
+    expect(detection.coverageByAxis).toHaveLength(6);
+  });
+
+  it('finds the volume and centroid of a closed disc', () => {
+    // A 32 mm plain base, Y-up, centred on the origin, 3 mm high.
+    const { scan } = detectUpAxis(generatePlainBase(32));
+    expect(scan.volume / (Math.PI * 16 * 16 * 3)).toBeCloseTo(1, 2);
+    expect(scan.centroid[0]).toBeCloseTo(0, 6);
+    expect(scan.centroid[1]).toBeCloseTo(1.5, 6);
+    expect(scan.centroid[2]).toBeCloseTo(0, 6);
+  });
+
+  it('puts the centroid of a figure on a base above the base and under the head', () => {
+    const { scan } = detectUpAxis(weldVertices(generateFigure(true)).mesh);
+    expect(scan.volume).toBeGreaterThan(0);
+    // The base is 3 mm high; the body blob's centre sits at 14 mm, the head at 28 mm.
+    expect(scan.centroid[2]).toBeGreaterThan(8);
+    expect(scan.centroid[2]).toBeLessThan(16);
+    expect(Math.abs(scan.centroid[0])).toBeLessThan(1);
+  });
+
+  it('falls back to the surface centroid for an open sheet', () => {
+    const sheet = weldVertices(generateBumpySheet(20)).mesh;
+    const { scan } = detectUpAxis(sheet);
+    expect(scan.volume).toBe(0);
+    for (let axis = 0; axis < 3; axis++) {
+      expect(scan.centroid[axis]).toBeGreaterThanOrEqual(scan.min[axis]!);
+      expect(scan.centroid[axis]).toBeLessThanOrEqual(scan.max[axis]!);
+    }
+  });
+
+  it('gives an empty mesh a zero volume', () => {
+    const empty = { positions: new Float32Array(0), indices: new Uint32Array(0) };
+    expect(detectUpAxis(empty).scan.volume).toBe(0);
   });
 });

@@ -8,13 +8,18 @@ import {
   standOnBase,
 } from './base';
 import { weldVertices, type IndexedMesh } from './mesh';
-import { detectUpAxis, orientAndPlace } from './orient';
+import { coverageFor, detectUpAxis, orientAndPlace } from './orient';
 
 /** A Z-up soup as the pipeline places it: welded, oriented, standing on y = 0. */
 function placed(soup: Float32Array): IndexedMesh {
   const mesh = weldVertices(soup).mesh;
-  return orientAndPlace(mesh, detectUpAxis(mesh).up).mesh;
+  const { up } = detectUpAxis(mesh);
+  return orientAndPlace(mesh, up, coverageFor(detectUpAxis(mesh), up)).mesh;
 }
+
+/** The base of a mesh standing Y-up, with the coverage the up detection finds for +y. */
+const measured = (mesh: IndexedMesh): ReturnType<typeof measureBase> =>
+  measureBase(mesh, coverageFor(detectUpAxis(mesh), '+y'));
 
 /** Outward-facing Z-up box as a triangle soup. */
 function box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number[] {
@@ -45,7 +50,7 @@ describe('convexHullArea', () => {
 
 describe('measureBase', () => {
   it('measures the 25 mm round base of the generated figure', () => {
-    const base = measureBase(placed(generateFigure(true)))?.base;
+    const base = measured(placed(generateFigure(true)))?.base;
     expect(base).toMatchObject({ shape: 'round' });
     expect(base!.diameterMm).toBeCloseTo(25, 0);
     expect(Math.abs(base!.diameterMm - 25)).toBeLessThan(0.5);
@@ -53,31 +58,31 @@ describe('measureBase', () => {
   });
 
   it('measures the 50 mm round base of the generated swarm', () => {
-    const base = measureBase(placed(generateSwarm()))?.base;
+    const base = measured(placed(generateSwarm()))?.base;
     expect(base).toMatchObject({ shape: 'round' });
     expect(Math.abs(base!.diameterMm - 50)).toBeLessThan(0.5);
   });
 
   it('calls a square plinth "other" and gives its longer side', () => {
     const plinth = [...box(0, 0, 0, 30, 30, 4), ...box(12, 12, 4, 18, 18, 40)];
-    const base = measureBase(placed(new Float32Array(plinth)))?.base;
+    const base = measured(placed(new Float32Array(plinth)))?.base;
     expect(base).toMatchObject({ shape: 'other', diameterMm: 30, footprintMm: [30, 30] });
   });
 
   it('calls an oval base "other"', () => {
     const oval = [...box(0, 0, 0, 60, 35, 4), ...box(25, 12, 4, 35, 22, 40)];
-    expect(measureBase(placed(new Float32Array(oval)))?.base).toMatchObject({
+    expect(measured(placed(new Float32Array(oval)))?.base).toMatchObject({
       shape: 'other',
       diameterMm: 60,
     });
   });
 
   it('finds no base under a figure on bare feet', () => {
-    expect(measureBase(placed(generateFigure(false)))).toBeNull();
+    expect(measured(placed(generateFigure(false)))).toBeNull();
   });
 
   it('finds nothing in an empty mesh', () => {
-    expect(measureBase({ positions: new Float32Array(0), indices: new Uint32Array(0) })).toBeNull();
+    expect(measured({ positions: new Float32Array(0), indices: new Uint32Array(0) })).toBeNull();
   });
 });
 
@@ -90,10 +95,10 @@ describe('orientAndPlace with a base', () => {
       ...box(18, 14, 30, 50, 16, 32),
     ];
     const mesh = weldVertices(new Float32Array(soup)).mesh;
-    const result = orientAndPlace(mesh, '+z');
+    const result = orientAndPlace(mesh, '+z', coverageFor(detectUpAxis(mesh), '+z'));
     expect(result.base).toMatchObject({ diameterMm: 30 });
     // Placed again, the base is centred: nothing left to move.
-    expect(measureBase(result.mesh)?.centre).toEqual([0, 0]);
+    expect(measured(result.mesh)?.centre).toEqual([0, 0]);
     let minX = Infinity;
     let maxX = -Infinity;
     for (let i = 0; i < result.mesh.positions.length; i += 3) {
@@ -104,7 +109,8 @@ describe('orientAndPlace with a base', () => {
   });
 
   it('keeps the bounding-box centre for a mini without a base', () => {
-    const result = orientAndPlace(weldVertices(generateFigure(false)).mesh, '+z');
+    const mesh = weldVertices(generateFigure(false)).mesh;
+    const result = orientAndPlace(mesh, '+z', coverageFor(detectUpAxis(mesh), '+z'));
     expect(result.base).toBeNull();
   });
 });
@@ -112,9 +118,9 @@ describe('orientAndPlace with a base', () => {
 describe('generatePlainBase', () => {
   it.each([25, 32, 50, 100])('makes a closed %d mm disc standing on y = 0', (diameter) => {
     const base = generatePlainBase(diameter);
-    const measured = measureBase(base);
-    expect(measured).toMatchObject({ base: { shape: 'round' }, centre: [0, 0] });
-    expect(Math.abs(measured!.base.diameterMm - diameter)).toBeLessThan(0.1);
+    const plain = measured(base);
+    expect(plain).toMatchObject({ base: { shape: 'round' }, centre: [0, 0] });
+    expect(Math.abs(plain!.base.diameterMm - diameter)).toBeLessThan(0.1);
     let minY = Infinity;
     let maxY = -Infinity;
     for (let i = 1; i < base.positions.length; i += 3) {

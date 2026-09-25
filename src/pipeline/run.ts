@@ -4,7 +4,7 @@ import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
 import { checkFits } from './memory';
-import { detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
+import { coverageFor, detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
 import { shade } from './shade';
 import { sizeMini, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
@@ -208,7 +208,7 @@ export async function runPipeline(
     () => {
       const detection = detectUpAxis(welded.mesh);
       const up = forcedUp ?? detection.up;
-      return { ...orientAndPlace(welded.mesh, up), up, detection };
+      return { ...orientAndPlace(welded.mesh, up, coverageFor(detection, up)), up, detection };
     },
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
   );
