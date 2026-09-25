@@ -336,6 +336,8 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     baseDiameterMm: 32,
     units: 'mm',
     scale: 1,
+    // The generated sheet is Y-up in its file: turned by nothing.
+    rotation: [0, 0, 0, 1],
   });
   expect(result.compactBytes).toBeLessThan(result.plainBytes / 2);
   expect(result.imported?.triangles).toBe(result.table.triangles);
