@@ -26,10 +26,13 @@ export interface MeasuredBase {
   centre: [number, number];
 }
 
-/** Area of the convex hull of points given as x, z pairs (Andrew's monotone chain). */
-export function convexHullArea(xz: Float64Array): number {
+/**
+ * The convex hull of points given as x, z pairs (Andrew's monotone chain): the indices of
+ * its corners, counter-clockwise. Points on an edge are left out.
+ */
+export function convexHull(xz: Float64Array): number[] {
   const count = xz.length / 2;
-  if (count < 3) return 0;
+  if (count < 3) return Array.from({ length: count }, (_, i) => i);
   const order = Array.from({ length: count }, (_, i) => i);
   order.sort((a, b) => xz[a * 2]! - xz[b * 2]! || xz[a * 2 + 1]! - xz[b * 2 + 1]!);
   const cross = (o: number, a: number, b: number): number =>
@@ -48,13 +51,24 @@ export function convexHullArea(xz: Float64Array): number {
     }
     hull.pop();
   }
+  return hull;
+}
+
+/** Twice the signed area of a polygon given by indices into x, z pairs: positive counter-clockwise. */
+export function polygonArea2(xz: Float64Array, polygon: readonly number[]): number {
   let twice = 0;
-  for (let k = 0; k < hull.length; k++) {
-    const a = hull[k]!;
-    const b = hull[(k + 1) % hull.length]!;
+  for (let k = 0; k < polygon.length; k++) {
+    const a = polygon[k]!;
+    const b = polygon[(k + 1) % polygon.length]!;
     twice += xz[a * 2]! * xz[b * 2 + 1]! - xz[b * 2]! * xz[a * 2 + 1]!;
   }
-  return Math.abs(twice) / 2;
+  return twice;
+}
+
+/** Area of the convex hull of points given as x, z pairs. */
+export function convexHullArea(xz: Float64Array): number {
+  if (xz.length < 6) return 0;
+  return Math.abs(polygonArea2(xz, convexHull(xz))) / 2;
 }
 
 /**
