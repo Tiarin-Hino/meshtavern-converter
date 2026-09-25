@@ -100,7 +100,10 @@ export function detectUpAxis(mesh: IndexedMesh): UpDetection {
  * Rotations taking the source up direction to scene +y. All are proper rotations, so
  * triangle winding is kept. `0 - value` rather than `-value` avoids negative zeros.
  */
-const TO_Y_UP: Record<UpAxis, (x: number, y: number, z: number) => [number, number, number]> = {
+export const TO_Y_UP: Record<
+  UpAxis,
+  (x: number, y: number, z: number) => [number, number, number]
+> = {
   '+y': (x, y, z) => [x, y, z],
   '-y': (x, y, z) => [0 - x, 0 - y, z],
   '+z': (x, y, z) => [x, z, 0 - y],
