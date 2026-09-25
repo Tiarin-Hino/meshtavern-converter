@@ -234,6 +234,77 @@ test('adds a plain base to a mini without one', async ({ page }) => {
   await expect(page.locator('#stats')).toContainText('plain base 32.0 mm (added)');
 });
 
+test('turns the mini by hand, shows the turn before converting, and sets it down', async ({
+  page,
+}, testInfo) => {
+  const stats = () => page.evaluate(() => window.__mt.state.stats!);
+  // The demo pyramid stands on a flat 25 mm base: found as a base, Z-up.
+  await page.evaluate(() => window.__mt.loadDemo());
+  expect((await stats()).orientation).toMatchObject({ up: '+z', method: 'base', tiltDeg: 0 });
+  await expect(page.locator('#stats')).toContainText('+z (base, 1.00)');
+  const conversions = await page.evaluate(() => window.__mt.state.progressLog.length);
+
+  // Two steps of 15°: shown in the viewer and in words, nothing converted.
+  await page.evaluate(() => {
+    window.__mt.turn('pitch', 15);
+    window.__mt.turn('pitch', 15);
+  });
+  const turned = await page.evaluate(() => window.__mt.state.orientation);
+  expect(turned.turnDeg).toBeCloseTo(30, 6);
+  expect(await page.evaluate(() => window.__mt.state.busy)).toBe(false);
+  expect(await page.evaluate(() => window.__mt.state.progressLog.length)).toBe(conversions);
+  await expect(page.locator('#turn-pending')).toHaveText('Turned 30°, not set down yet');
+  await page.evaluate(() => window.__mt.setCamera(90, 10, 1));
+  await page.waitForTimeout(500);
+  const pendingShot = testInfo.outputPath('turn-pending.png');
+  await page.screenshot({ path: pendingShot });
+  await testInfo.attach('turn-pending', { path: pendingShot, contentType: 'image/png' });
+
+  // Set down: converted with the turn, and back on its flat base, level.
+  await page.evaluate(() => window.__mt.setDown());
+  const orientation = (await stats()).orientation;
+  expect(orientation).toMatchObject({ up: '+z', method: 'manual', tiltDeg: 0 });
+  expect(orientation.setDownDeg).toBeCloseTo(30, 3);
+  expect((await stats()).sizing.base).not.toBeNull();
+  expect((await stats()).sizeMm).toEqual([25, 32, 25]);
+  await expect(page.locator('#stats')).toContainText('+z (manual, set down 30°)');
+  await expect(page.locator('#turn-pending')).toBeHidden();
+  expect(await page.evaluate(() => window.__mt.state.orientation.turn)).toBeNull();
+  await page.evaluate(() => window.__mt.setCamera(90, 10, 1));
+  await page.waitForTimeout(500);
+  const setDownShot = testInfo.outputPath('turn-set-down.png');
+  await page.locator('#viewport').screenshot({ path: setDownShot });
+  await testInfo.attach('turn-set-down', { path: setDownShot, contentType: 'image/png' });
+
+  // Apply keeps exactly what the user turned: the placement is theirs, nothing is levelled.
+  await page.evaluate(() => window.__mt.turn('roll', 15));
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__mt.state.stats?.orientation.method))
+    .toBe('manual');
+  await page.waitForFunction(() => !window.__mt.state.busy);
+  const applied = (await stats()).orientation;
+  expect(applied).toMatchObject({ up: '+z', setDownDeg: 0 });
+  expect(applied.tiltDeg).toBeCloseTo(15, 3);
+  await expect(page.locator('#stats')).toContainText('+z (manual, tilted 15°)');
+
+  // The six-way select takes the axis as chosen, without setting the mini down.
+  await page.evaluate(() => window.__mt.setUp('+x'));
+  expect((await stats()).orientation).toMatchObject({
+    up: '+x',
+    method: 'manual',
+    tiltDeg: 0,
+    setDownDeg: 0,
+  });
+
+  // A turn can be dropped again without converting.
+  await page.getByRole('button', { name: 'Roll +15°' }).click();
+  await expect(page.locator('#turn-pending')).toHaveText('Turned 15°, not set down yet');
+  await page.getByRole('button', { name: 'Reset' }).click();
+  await expect(page.locator('#turn-pending')).toBeHidden();
+  expect(await page.evaluate(() => window.__mt.state.orientation.turnDeg)).toBe(0);
+});
+
 test('applies the primed-and-washed look and lets the user adjust it', async ({
   page,
 }, testInfo) => {
@@ -286,6 +357,8 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     baseDiameterMm: 32,
     units: 'mm',
     scale: 1,
+    // The generated sheet is Y-up in its file: turned by nothing.
+    rotation: [0, 0, 0, 1],
   });
   expect(result.compactBytes).toBeLessThan(result.plainBytes / 2);
   expect(result.imported?.triangles).toBe(result.table.triangles);

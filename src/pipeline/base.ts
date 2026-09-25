@@ -26,10 +26,13 @@ export interface MeasuredBase {
   centre: [number, number];
 }
 
-/** Area of the convex hull of points given as x, z pairs (Andrew's monotone chain). */
-export function convexHullArea(xz: Float64Array): number {
+/**
+ * The convex hull of points given as x, z pairs (Andrew's monotone chain): the indices of
+ * its corners, counter-clockwise. Points on an edge are left out.
+ */
+export function convexHull(xz: Float64Array): number[] {
   const count = xz.length / 2;
-  if (count < 3) return 0;
+  if (count < 3) return Array.from({ length: count }, (_, i) => i);
   const order = Array.from({ length: count }, (_, i) => i);
   order.sort((a, b) => xz[a * 2]! - xz[b * 2]! || xz[a * 2 + 1]! - xz[b * 2 + 1]!);
   const cross = (o: number, a: number, b: number): number =>
@@ -48,57 +51,44 @@ export function convexHullArea(xz: Float64Array): number {
     }
     hull.pop();
   }
+  return hull;
+}
+
+/** Twice the signed area of a polygon given by indices into x, z pairs: positive counter-clockwise. */
+export function polygonArea2(xz: Float64Array, polygon: readonly number[]): number {
   let twice = 0;
-  for (let k = 0; k < hull.length; k++) {
-    const a = hull[k]!;
-    const b = hull[(k + 1) % hull.length]!;
+  for (let k = 0; k < polygon.length; k++) {
+    const a = polygon[k]!;
+    const b = polygon[(k + 1) % polygon.length]!;
     twice += xz[a * 2]! * xz[b * 2 + 1]! - xz[b * 2]! * xz[a * 2 + 1]!;
   }
-  return Math.abs(twice) / 2;
+  return twice;
+}
+
+/** Area of the convex hull of points given as x, z pairs. */
+export function convexHullArea(xz: Float64Array): number {
+  if (xz.length < 6) return 0;
+  return Math.abs(polygonArea2(xz, convexHull(xz))) / 2;
 }
 
 /**
  * Measures the base of a mesh that stands Y-up on y = 0 (after `orientAndPlace`). A base
  * is there when the faces pointing straight down on the lowest plane cover at least
- * `MIN_BASE_COVERAGE` of the footprint, the test the up detection uses. Its footprint is
- * the x/z extent of the vertices within `RESTING_BAND` of the floor. Null without a base.
+ * `MIN_BASE_COVERAGE` of the footprint: `coverage` is that share, found by the up
+ * detection's one pass over the triangles (`detectUpAxis` in orient.ts). This only
+ * collects the floor outline: the x/z extent of the vertices within `RESTING_BAND` of the
+ * floor. Null without a base.
  */
-export function measureBase({ positions, indices }: IndexedMesh): MeasuredBase | null {
-  if (positions.length === 0) return null;
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < positions.length; i++) {
-    const value = positions[i]!;
-    if (value < min[i % 3]!) min[i % 3] = value;
-    if (value > max[i % 3]!) max[i % 3] = value;
+export function measureBase({ positions }: IndexedMesh, coverage: number): MeasuredBase | null {
+  if (positions.length === 0 || !(coverage >= MIN_BASE_COVERAGE)) return null;
+  let floor = Infinity;
+  let top = -Infinity;
+  for (let i = 1; i < positions.length; i += 3) {
+    const y = positions[i]!;
+    if (y < floor) floor = y;
+    if (y > top) top = y;
   }
-  const floor = min[1]!;
-  const band = (max[1]! - floor) * RESTING_BAND;
-
-  // The same resting-area test as `detectUpAxis` (orient.ts), for one axis: a second pass,
-  // about 1 s on the largest corpus file. Merging the two is part of #72.
-  let resting = 0;
-  for (let t = 0; t < indices.length; t += 3) {
-    const a = indices[t]! * 3;
-    const b = indices[t + 1]! * 3;
-    const c = indices[t + 2]! * 3;
-    const ux = positions[b]! - positions[a]!;
-    const uy = positions[b + 1]! - positions[a + 1]!;
-    const uz = positions[b + 2]! - positions[a + 2]!;
-    const vx = positions[c]! - positions[a]!;
-    const vy = positions[c + 1]! - positions[a + 1]!;
-    const vz = positions[c + 2]! - positions[a + 2]!;
-    const nx = uy * vz - uz * vy;
-    const ny = uz * vx - ux * vz;
-    const nz = ux * vy - uy * vx;
-    const doubleArea = Math.hypot(nx, ny, nz);
-    if (doubleArea === 0 || ny / doubleArea > -FLAT_ANGLE_COS) continue;
-    const centre = (positions[a + 1]! + positions[b + 1]! + positions[c + 1]!) / 3;
-    if (centre - floor <= band) resting += doubleArea / 2;
-  }
-  const footprintArea = (max[0]! - min[0]!) * (max[2]! - min[2]!);
-  const coverage = footprintArea > 0 ? resting / footprintArea : 0;
-  if (coverage < MIN_BASE_COVERAGE) return null;
+  const band = (top - floor) * RESTING_BAND;
 
   let count = 0;
   for (let i = 1; i < positions.length; i += 3) if (positions[i]! - floor <= band) count++;

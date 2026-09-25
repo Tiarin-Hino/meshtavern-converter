@@ -16,6 +16,18 @@
         >Up axis in file
         <select id="up"></select
       ></label>
+      <fieldset id="turn" hidden>
+        <legend>Turn</legend>
+        <button type="button" data-turn="pitch" data-deg="-15">Pitch −15°</button>
+        <button type="button" data-turn="pitch" data-deg="15">Pitch +15°</button>
+        <button type="button" data-turn="roll" data-deg="-15">Roll −15°</button>
+        <button type="button" data-turn="roll" data-deg="15">Roll +15°</button>
+        <label><input id="turn-by-hand" type="checkbox" /> Turn by hand</label>
+        <span id="turn-pending" hidden></span>
+        <button id="turn-apply" type="button" disabled>Apply</button>
+        <button id="set-down" type="button">Set down</button>
+        <button id="turn-reset" type="button" disabled>Reset</button>
+      </fieldset>
       <fieldset id="sizing" hidden>
         <legend>Size</legend>
         <label

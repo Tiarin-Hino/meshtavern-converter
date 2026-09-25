@@ -27,6 +27,11 @@ describe('regression baseline for generated meshes', () => {
       for (const testCase of REGRESSION_CASES) figures[testCase.name] = await measureCase(testCase);
       const current: unknown = JSON.parse(JSON.stringify(figures, rounded));
 
+      // Every case with a known upright axis stands on it, whatever the baseline says.
+      for (const testCase of REGRESSION_CASES) {
+        if (testCase.up) expect(figures[testCase.name]!.up, testCase.name).toBe(testCase.up);
+      }
+
       if (UPDATE) {
         writeFileSync(BASELINE, `${JSON.stringify(current, null, 2)}\n`);
         return;

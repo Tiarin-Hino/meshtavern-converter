@@ -9,6 +9,7 @@
     "sizeMm": [50, 50, 3.99939],
     "up": "+y",
     "upMethod": "tallest",
+    "tiltDeg": 0,
     "sizing": {
       "units": "mm",
       "size": "medium",
@@ -55,6 +56,7 @@
     "sizeMm": [25, 32.2337, 25],
     "up": "+z",
     "upMethod": "base",
+    "tiltDeg": 0,
     "sizing": {
       "units": "mm",
       "size": "medium",
@@ -109,6 +111,7 @@
     "sizeMm": [25, 32.2337, 25],
     "up": "+y",
     "upMethod": "base",
+    "tiltDeg": 0,
     "sizing": {
       "units": "mm",
       "size": "medium",
@@ -155,6 +158,7 @@
     "sizeMm": [16.2986, 30.63, 8.34041],
     "up": "+z",
     "upMethod": "tallest",
+    "tiltDeg": 0,
     "sizing": {
       "units": "mm",
       "size": "medium",
@@ -201,6 +205,7 @@
     "sizeMm": [50, 14.437, 50],
     "up": "+z",
     "upMethod": "base",
+    "tiltDeg": 0,
     "sizing": {
       "units": "mm",
       "size": "large",
@@ -247,6 +252,7 @@
     "sizeMm": [40, 28, 18],
     "up": "+y",
     "upMethod": "tallest",
+    "tiltDeg": 0,
     "sizing": {
       "units": "mm",
       "size": "medium",
@@ -280,6 +286,100 @@
         "errorMm": 0.0410684,
         "glbBytes": 89544,
         "compactGlbBytes": 25176
+      }
+    ]
+  },
+  "quadruped": {
+    "sourceTriangles": 38400,
+    "triangles": 38400,
+    "vertices": 19212,
+    "degenerateTriangles": 0,
+    "duplicateTriangles": 0,
+    "invalidTriangles": 0,
+    "sizeMm": [37.2017, 18.178, 10.6],
+    "up": "+z",
+    "upMethod": "tallest",
+    "tiltDeg": 0,
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": null,
+      "baseDiameterMm": 32
+    },
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "source",
+        "triangles": 38400,
+        "vertices": 19212,
+        "errorMm": 0,
+        "glbBytes": 846660,
+        "compactGlbBytes": 247844
+      },
+      {
+        "name": "table",
+        "decidedBy": "floor",
+        "triangles": 15000,
+        "vertices": 7512,
+        "errorMm": 0.0471792,
+        "glbBytes": 331852,
+        "compactGlbBytes": 112332
+      },
+      {
+        "name": "far",
+        "decidedBy": "floor",
+        "triangles": 4000,
+        "vertices": 2012,
+        "errorMm": 0.18786,
+        "glbBytes": 89864,
+        "compactGlbBytes": 33316
+      }
+    ]
+  },
+  "figure-tilted": {
+    "sourceTriangles": 99600,
+    "triangles": 99600,
+    "vertices": 49808,
+    "degenerateTriangles": 0,
+    "duplicateTriangles": 0,
+    "invalidTriangles": 0,
+    "sizeMm": [16.2986, 25.6676, 20.3604],
+    "up": "+z",
+    "upMethod": "tallest",
+    "tiltDeg": 0,
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": null,
+      "baseDiameterMm": 32
+    },
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54296,
+        "vertices": 27156,
+        "errorMm": 0.019816,
+        "glbBytes": 1196260,
+        "compactGlbBytes": 399108
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 34740,
+        "vertices": 17378,
+        "errorMm": 0.0498686,
+        "glbBytes": 766024,
+        "compactGlbBytes": 260800
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5318,
+        "vertices": 2667,
+        "errorMm": 0.199696,
+        "glbBytes": 118740,
+        "compactGlbBytes": 44120
       }
     ]
   }

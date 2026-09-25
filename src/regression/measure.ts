@@ -3,7 +3,15 @@ import { encodeGlb, glbEncoderReady } from '../pipeline/glb';
 import { DEFAULT_LOOK } from '../pipeline/look';
 import { runPipeline, type ConversionStats, type LodStats } from '../pipeline/run';
 import { encodeBinaryStl } from '../pipeline/stl';
-import { generateBoulder, generateFigure, generateSwarm, toYUp } from './shapes';
+import type { UpAxis } from '../pipeline/orient';
+import {
+  generateBoulder,
+  generateFigure,
+  generateQuadruped,
+  generateSwarm,
+  generateTiltedFigure,
+  toYUp,
+} from './shapes';
 
 /** One generated mesh the baseline watches. */
 export interface RegressionCase {
@@ -11,6 +19,12 @@ export interface RegressionCase {
   soup: () => Float32Array;
   /** Texture size for baked detail maps; 0 for none. Unwrapping is slow, so only one case bakes. */
   bake: number;
+  /**
+   * The file axis the mesh stands upright on, checked on every run. Left out where today's
+   * detection gets it wrong: the sheet and the boulder lie flat (+z) once minis without a
+   * base are detected (#72); the guess stands them on an edge (+y).
+   */
+  up?: UpAxis;
 }
 
 /** Bumpy-sheet size below the close level's floor, so the "small source" path stays covered. */
@@ -19,11 +33,14 @@ const BAKE_RESOLUTION = 512;
 
 export const REGRESSION_CASES: readonly RegressionCase[] = [
   { name: 'sheet', soup: () => generateBumpySheet(SHEET_QUADS_PER_SIDE), bake: 0 },
-  { name: 'figure', soup: () => generateFigure(true), bake: BAKE_RESOLUTION },
-  { name: 'figure-y-up', soup: () => toYUp(generateFigure(true)), bake: 0 },
-  { name: 'figure-no-base', soup: () => generateFigure(false), bake: 0 },
-  { name: 'swarm', soup: generateSwarm, bake: 0 },
+  { name: 'figure', soup: () => generateFigure(true), bake: BAKE_RESOLUTION, up: '+z' },
+  { name: 'figure-y-up', soup: () => toYUp(generateFigure(true)), bake: 0, up: '+y' },
+  { name: 'figure-no-base', soup: () => generateFigure(false), bake: 0, up: '+z' },
+  { name: 'swarm', soup: generateSwarm, bake: 0, up: '+z' },
   { name: 'boulder', soup: generateBoulder, bake: 0 },
+  { name: 'quadruped', soup: generateQuadruped, bake: 0, up: '+z' },
+  // Stands on +z, but tilted by 36.9°: today's guess does not level it (tiltDeg 0).
+  { name: 'figure-tilted', soup: generateTiltedFigure, bake: 0, up: '+z' },
 ];
 
 export interface LevelFigures extends LodStats {
@@ -48,6 +65,8 @@ export interface CaseFigures extends Pick<
   | 'up'
   | 'upMethod'
 > {
+  /** How far the orientation turned the mini beyond the quarter turn (`Orientation.tiltDeg`). */
+  tiltDeg: number;
   /** What the size step made of the mesh. */
   sizing: {
     units: ConversionStats['sizing']['units'];
@@ -85,6 +104,7 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
     sizeMm: stats.sizeMm,
     up: stats.up,
     upMethod: stats.upMethod,
+    tiltDeg: stats.orientation.tiltDeg,
     sizing: {
       units: stats.sizing.units,
       size: stats.sizing.size,

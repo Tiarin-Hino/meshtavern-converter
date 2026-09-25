@@ -6,10 +6,8 @@ import type { Post, WorkerRequest } from './protocol';
 /** Everything the worker does, kept free of `self` so it can be unit-tested. */
 export async function handleRequest(request: WorkerRequest, post: Post): Promise<void> {
   try {
-    const { up, ...options } = request.options ?? {};
     const result = await runPipeline(request.stl, {
-      ...options,
-      forcedUp: up ?? null,
+      ...request.options,
       onProgress: (progress) => post({ type: 'progress', id: request.id, progress }),
     });
     // Transfer instead of copy: mesh buffers can be hundreds of megabytes.

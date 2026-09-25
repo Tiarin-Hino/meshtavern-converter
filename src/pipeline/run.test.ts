@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { KTX2_ZSTANDARD, readKtx2Header } from './compress';
 import { generateBumpySheet } from './generate';
 import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
+import { PLAIN_BASE_HEIGHT_MM } from './base';
 import { encodeBinaryStl } from './stl';
 import { generateFigure, generateSwarm } from '../regression/shapes';
 
@@ -13,6 +14,37 @@ vi.mock('./compress', async (importOriginal) => {
 const { compressDetail } = await import('./compress');
 
 const sheet = (): ArrayBuffer => encodeBinaryStl(generateBumpySheet(40));
+
+/** Outward-facing box as a Z-up triangle soup. */
+function box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number[] {
+  const soup: number[] = [];
+  const quad = (a: number[], b: number[], c: number[], d: number[]): void => {
+    soup.push(...a, ...b, ...c, ...a, ...c, ...d);
+  };
+  quad([x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]);
+  quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
+  quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+  quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]);
+  quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]);
+  quad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+  return soup;
+}
+
+/**
+ * A Z-up table, 30 × 12 × 14 mm on four legs with flat pads, stored tilted about x by the
+ * 3-4-5 turn (cos 0.8, sin 0.6, about 36.9°).
+ */
+function tiltedTable(): ArrayBuffer {
+  const soup = box(-15, -6, 10, 15, 6, 14);
+  for (const x of [-14, 12]) for (const y of [-5, 3]) soup.push(...box(x, y, 0, x + 2, y + 2, 10));
+  const tilted = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) {
+    tilted[i] = soup[i]!;
+    tilted[i + 1] = 0.8 * soup[i + 1]! - 0.6 * soup[i + 2]!;
+    tilted[i + 2] = 0.6 * soup[i + 1]! + 0.8 * soup[i + 2]!;
+  }
+  return encodeBinaryStl(tilted);
+}
 const BAKE = 256;
 
 describe('runPipeline', () => {
@@ -109,6 +141,35 @@ describe('runPipeline', () => {
     expect(sizing.base).toMatchObject({ shape: 'round' });
     expect(sizing.baseDiameterMm).toBeCloseTo(25, 0);
     expect(stats.sizing).toBe(sizing);
+  }, 60_000);
+
+  it('records the orientation: a quarter turn for a mini on a base', async () => {
+    const { orientation, stats } = await runPipeline(encodeBinaryStl(generateFigure(true)), {
+      bake: 0,
+    });
+    expect(orientation).toMatchObject({ up: '+z', method: 'base', tiltDeg: 0, setDownDeg: 0 });
+    expect(stats.orientation).toBe(orientation);
+    expect(stats).toMatchObject({ up: '+z', upMethod: 'base' });
+  }, 60_000);
+
+  it('sets a tilted mini down when the user picks its axis, and puts a plain base under it', async () => {
+    const { orientation, stats, mesh } = await runPipeline(tiltedTable(), {
+      bake: 0,
+      orientation: { up: '+z', setDown: true },
+      sizing: { plainBase: true },
+    });
+    expect(orientation).toMatchObject({ up: '+z', method: 'manual' });
+    // The 3-4-5 turn: acos(0.8) = 36.87°.
+    expect(orientation.tiltDeg).toBeCloseTo(36.87, 1);
+    expect(stats.sizing.plainBase).not.toBeNull();
+    // The plain base stands on y = 0, and the four pads (16 corners) rest level on its top.
+    let floor = Infinity;
+    for (let i = 1; i < mesh.positions.length; i += 3) floor = Math.min(floor, mesh.positions[i]!);
+    expect(floor).toBe(0);
+    let onBase = 0;
+    for (let i = 1; i < mesh.positions.length; i += 3)
+      if (Math.abs(mesh.positions[i]! - PLAIN_BASE_HEIGHT_MM) < 1e-3) onBase++;
+    expect(onBase).toBeGreaterThanOrEqual(16);
   }, 60_000);
 
   it('reads a file in inches as inches and brings it to mm', async () => {

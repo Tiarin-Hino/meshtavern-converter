@@ -4,7 +4,14 @@ import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { checkFits, memoryBudgetBytes } from './pipeline/memory';
-import { UP_AXES, type UpAxis } from './pipeline/orient';
+import { UP_AXES, type Orientation, type OrientationOptions, type UpAxis } from './pipeline/orient';
+import {
+  fromAxisAngle,
+  IDENTITY,
+  multiply,
+  turnAngleDeg,
+  type Rotation,
+} from './pipeline/rotation';
 import { toProblem, type ProblemCode } from './pipeline/problems';
 import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
 import {
@@ -71,6 +78,12 @@ interface AppState {
     tableAreaMm2: number;
   } | null;
   showingBaked: boolean;
+  /**
+   * A turn the user is trying out (issue #72): scene axes, applied after the last result's
+   * rotation (`stats.orientation`). Shown in the viewer only; `applyTurn()` and
+   * `setDown()` convert with it.
+   */
+  orientation: { turn: Rotation | null; turnDeg: number };
 }
 
 declare global {
@@ -101,6 +114,14 @@ declare global {
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
+      /** Turns the shown mini by `deg` about the scene's x (pitch) or z (roll) axis: a preview, nothing is converted. */
+      turn: (axis: TurnAxis, deg: number) => void;
+      /** Converts the last file again, turned exactly as previewed. */
+      applyTurn: () => Promise<void>;
+      /** Converts the last file again, turned as previewed and set down on its lowest points. */
+      setDown: () => Promise<void>;
+      /** Drops the previewed turn. */
+      resetTurn: () => void;
       /**
        * Converts the last file again with changed sizing choices (units, size, scale to a
        * base diameter, plain base), merged into the ones made so far. `undefined` drops a choice.
@@ -128,6 +149,11 @@ const levelButtons = document.querySelector<HTMLElement>('#levels')!;
 const stressButtons = document.querySelector<HTMLElement>('#stress')!;
 const upSelect = document.querySelector<HTMLSelectElement>('#up')!;
 const upLabel = document.querySelector<HTMLElement>('#up-label')!;
+const turnPanel = document.querySelector<HTMLElement>('#turn')!;
+const turnByHand = document.querySelector<HTMLInputElement>('#turn-by-hand')!;
+const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
+const turnReset = document.querySelector<HTMLButtonElement>('#turn-reset')!;
+const turnApply = document.querySelector<HTMLButtonElement>('#turn-apply')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
 const sizingPanel = document.querySelector<HTMLElement>('#sizing')!;
 const sizingInputs = {
@@ -167,6 +193,7 @@ const state: AppState = {
   imported: null,
   baked: null,
   showingBaked: false,
+  orientation: { turn: null, turnDeg: 0 },
 };
 /** The baked table level of the converted mini; null when it has the per-vertex look. */
 let baked: BakedMini | null = null;
@@ -186,13 +213,16 @@ let levels: IndexedMesh[] = [];
 /** Re-reads the last source, because its buffer moves to the worker on every conversion. */
 let lastSource: { name: string; read: () => Promise<ArrayBuffer> } | null = null;
 /** What the user chose for the last source; a new file starts without choices. */
-let choices: { up?: UpAxis; sizing: SizingOptions } = { sizing: {} };
+let choices: { orientation: OrientationOptions; sizing: SizingOptions } = {
+  orientation: {},
+  sizing: {},
+};
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 
 function showStats(stats: ConversionStats): void {
   const rows: [string, string][] = [
-    ['Up', `${stats.up} (${stats.upMethod})`],
+    ['Up', describeOrientation(stats.orientation)],
     ['Size', describeSize(stats.sizing)],
     ['Units', describeUnits(stats.sizing)],
     ['Dimensions', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
@@ -396,7 +426,54 @@ setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
   if (!lastSource || state.busy) return;
-  choices.up = up;
+  choices.orientation = { up };
+  await convert(await lastSource.read(), lastSource.name);
+}
+
+/** The steps of the turn buttons. _(proposal, #72)_ */
+const TURN_STEP_DEG = 15;
+type TurnAxis = 'pitch' | 'roll';
+/** Pitch tips the mini towards the camera's default view (about scene x), roll to the side (about z). */
+const TURN_AXES: Record<TurnAxis, [number, number, number]> = {
+  pitch: [1, 0, 0],
+  roll: [0, 0, 1],
+};
+
+/** "+z (manual, set down 4°)": the six-way axis, how it was decided, and any turn beyond it. */
+function describeOrientation(orientation: Orientation): string {
+  const parts: string[] = [orientation.method];
+  if (orientation.method === 'base') parts.push(orientation.confidence.toFixed(2));
+  if (orientation.tiltDeg > 0) parts.push(`tilted ${Math.round(orientation.tiltDeg)}°`);
+  if (orientation.setDownDeg > 0) parts.push(`set down ${Math.round(orientation.setDownDeg)}°`);
+  return `${orientation.up} (${parts.join(', ')})`;
+}
+
+/** Shows a turn being tried out, in the viewer and in words; null drops it. */
+function showTurn(turn: Rotation | null): void {
+  const deg = turn ? turnAngleDeg(turn) : 0;
+  state.orientation = { turn: deg > 0 ? turn : null, turnDeg: deg };
+  viewer.setTurn(state.orientation.turn);
+  turnPending.hidden = state.orientation.turn === null;
+  turnPending.textContent = `Turned ${Math.round(deg)}°, not set down yet`;
+  turnReset.disabled = state.orientation.turn === null;
+  turnApply.disabled = state.orientation.turn === null;
+}
+
+function turn(axis: TurnAxis, deg: number): void {
+  if (!state.stats || state.busy) return;
+  showTurn(multiply(fromAxisAngle(TURN_AXES[axis], deg), state.orientation.turn ?? IDENTITY));
+}
+
+/**
+ * Converts the last file again, turned as previewed. Apply keeps exactly that turn: the
+ * user's placement is final. Set down also levels the mini on its lowest points (PM
+ * decision on PR #79, 2026-09-25: only on request).
+ */
+async function applyTurn(setDown: boolean): Promise<void> {
+  if (!lastSource || state.busy || !state.stats) return;
+  const last = state.stats.orientation.rotation;
+  const turned = state.orientation.turn;
+  choices.orientation = { rotation: turned ? multiply(turned, last) : last, setDown };
   await convert(await lastSource.read(), lastSource.name);
 }
 
@@ -508,6 +585,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
   stressButtons.hidden = true;
   lookPanel.hidden = true;
   sizingPanel.hidden = true;
+  turnPanel.hidden = true;
   exportPanel.hidden = true;
   progressBar.hidden = false;
   cancelButton.hidden = false;
@@ -524,7 +602,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
         status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%${within}`;
       },
       {
-        up: choices.up,
+        orientation: choices.orientation,
         sizing: choices.sizing,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
@@ -572,6 +650,8 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     state.imported = null;
     upSelect.value = stats.up;
     upLabel.hidden = false;
+    turnPanel.hidden = false;
+    showTurn(null);
     showSizing(stats.sizing);
     // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
@@ -630,6 +710,7 @@ async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> 
     look: state.look,
     compact,
     sizing: state.stats?.sizing,
+    orientation: state.stats?.orientation,
   });
 }
 
@@ -640,6 +721,7 @@ async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
     stressButtons,
     lookPanel,
     upLabel,
+    turnPanel,
     sizingPanel,
     exportPanel,
   ]) {
@@ -702,7 +784,7 @@ async function loadFile(file: File | undefined): Promise<void> {
     return showProblem(file.name, error);
   }
   lastSource = { name: file.name, read: () => file.arrayBuffer() };
-  choices = { sizing: {} };
+  choices = { orientation: {}, sizing: {} };
   await convert(stl, file.name);
 }
 
@@ -728,6 +810,17 @@ upSelect.replaceChildren(
   }),
 );
 upSelect.addEventListener('change', () => void setUp(upSelect.value as UpAxis));
+for (const button of turnPanel.querySelectorAll<HTMLButtonElement>('[data-turn]')) {
+  button.addEventListener('click', () =>
+    turn(button.dataset.turn as TurnAxis, Number(button.dataset.deg ?? TURN_STEP_DEG)),
+  );
+}
+turnByHand.addEventListener('change', () =>
+  viewer.setTurnGizmo(turnByHand.checked ? (turned) => showTurn(turned) : null),
+);
+turnApply.addEventListener('click', () => void applyTurn(false));
+document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
+turnReset.addEventListener('click', () => showTurn(null));
 document.body.addEventListener('dragover', (event) => event.preventDefault());
 document.body.addEventListener('drop', (event) => {
   event.preventDefault();
@@ -738,17 +831,21 @@ window.__mt = {
   state,
   loadDemo: () => {
     lastSource = { name: 'demo.stl', read: async () => demoStl() };
-    choices = { sizing: {} };
+    choices = { orientation: {}, sizing: {} };
     return convert(demoStl(), 'demo.stl');
   },
   loadGenerated: (quadsPerSide, sizing = {}) => {
     const read = async (): Promise<ArrayBuffer> =>
       encodeBinaryStl(generateBumpySheet(quadsPerSide));
     lastSource = { name: `generated-${quadsPerSide}.stl`, read };
-    choices = { sizing };
+    choices = { orientation: {}, sizing };
     return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
   },
   setUp,
+  turn,
+  applyTurn: () => applyTurn(false),
+  setDown: () => applyTurn(true),
+  resetTurn: () => showTurn(null),
   setSizing,
   showLevel: (level) => showLevel(level),
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
