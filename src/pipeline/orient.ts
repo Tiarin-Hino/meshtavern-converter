@@ -2,6 +2,20 @@ import { FLAT_ANGLE_COS, measureBase, MIN_BASE_COVERAGE, RESTING_BAND } from './
 import type { IndexedMesh } from './mesh';
 import type { BaseMeasurement } from './size';
 import type { Vec3 } from './base';
+import {
+  angleDeg,
+  apply,
+  AXIS_ROTATION,
+  axisVector,
+  fileUp,
+  fromTo,
+  multiply,
+  nearestAxis,
+  nearestUpAxis,
+  toMatrix,
+  type Rotation,
+} from './rotation';
+import { setDown } from './stance';
 
 /** The direction in the source file that points up. */
 export type UpAxis = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
@@ -18,17 +32,49 @@ export const OPEN_SHELL_SHARE = 0.02;
 /** Slicers and most print files are Z-up. */
 export const DEFAULT_UP: UpAxis = '+z';
 
-export interface UpDetection {
+/**
+ * A mini whose resting plane lies within this angle of a file axis stands on that axis:
+ * it is turned by the quarter turn alone, so a mini that rests flat is not moved. The
+ * issue's number (#72). _(proposal)_
+ */
+export const LEVEL_TOLERANCE_DEG = 2;
+
+/** How a mini stands: the result of the orient step (issue #72). */
+export interface Orientation {
+  /** The six-way direction taken as up in the file: the coarse step, the nearest axis of `rotation`. */
   up: UpAxis;
   /**
-   * `base`: a flat underside was found, which is reliable. `tallest`: no base, so the
-   * taller of the two common conventions (Y-up from sculpting tools, Z-up from slicers)
-   * was picked. That is right for standing figures and wrong for long, low creatures,
-   * so the user must be able to override it.
+   * `base`: a flat underside decided, which is reliable. `tallest`: no base, so the taller
+   * of the two common conventions (Y-up from sculpting tools, Z-up from slicers) was taken:
+   * right for standing figures, wrong for long, low creatures. `manual`: the user's choice.
+   * A detection for minis without a base is open (#72, PR #79).
    */
-  method: 'base' | 'tallest';
-  /** Flat resting area as a share of the footprint, for the chosen axis. 0–1, roughly. */
-  coverage: number;
+  method: 'base' | 'tallest' | 'manual';
+  /** base: coverage of the footprint. tallest: 0. manual: 1. */
+  confidence: number;
+  /** File coordinates → scene coordinates (Y-up), before the shift to the base centre and before any scale. */
+  rotation: Rotation;
+  /** Angle between the final up direction and the axis `up`: how far the mini was turned beyond a quarter turn. 0 when it rested flat, or stands on a base. */
+  tiltDeg: number;
+  /** The angle by which setting down turned the mini. 0 when it was not set down, or already rested level. */
+  setDownDeg: number;
+}
+
+/** What the user chose about orientation; everything left out is detected. */
+export interface OrientationOptions {
+  /** The coarse step: which file axis is up. Overrides the detection. */
+  up?: UpAxis;
+  /** A full rotation, file → scene, from the page's free turn. Overrides `up`. */
+  rotation?: Rotation;
+  /**
+   * Set the mini down on its lowest points after the turn. Default true. False keeps
+   * exactly the rotation given; the page never sends false, tests and the library may.
+   */
+  setDown?: boolean;
+}
+
+export interface UpDetection {
+  orientation: Orientation;
   /** Resting-area coverage per candidate axis, indexed like UP_AXES: what a forced axis reads its base from. */
   coverageByAxis: number[];
   /** What the stance search needs, kept so that nothing is measured twice. */
@@ -212,7 +258,7 @@ function sumTriangles(
  * No allocation and no `Math.hypot` per triangle: this runs over 5.6 M triangles on the
  * largest corpus file.
  */
-export function detectUpAxis(mesh: IndexedMesh): UpDetection {
+function scanMesh(mesh: IndexedMesh): Omit<UpDetection, 'orientation'> {
   const bounds = boundsOf(mesh.positions);
   const sums = sumTriangles(mesh.positions, mesh.indices, bounds);
   const min: Vec3 = [bounds[0]!, bounds[1]!, bounds[2]!];
@@ -241,27 +287,110 @@ export function detectUpAxis(mesh: IndexedMesh): UpDetection {
         ? o + sums[Sum.Surface + axis]! / (3 * area2)
         : o,
   ) as Vec3;
-  const scan: MeshScan = { min, max, centroid, volume: usable ? volume : 0 };
+  return { coverageByAxis, scan: { min, max, centroid, volume: usable ? volume : 0 } };
+}
 
-  let best = -1;
-  let bestCoverage = 0;
-  for (let candidate = 0; candidate < 6; candidate++) {
-    if (coverageByAxis[candidate]! > bestCoverage) {
-      best = candidate;
-      bestCoverage = coverageByAxis[candidate]!;
-    }
-  }
-
-  if (best < 0 || bestCoverage < MIN_BASE_COVERAGE) {
-    const up = extent[1]! > extent[2]! ? '+y' : DEFAULT_UP;
-    return { up, method: 'tallest', coverage: bestCoverage, coverageByAxis, scan };
-  }
-  return { up: UP_AXES[best]!, method: 'base', coverage: bestCoverage, coverageByAxis, scan };
+/**
+ * Finds how a mini stands: on a base when the one pass finds a flat underside on an axis
+ * (never levelled), otherwise on the taller of Y-up and Z-up (see `Orientation.method`).
+ */
+export function detectUpAxis(mesh: IndexedMesh): UpDetection {
+  return resolveOrientation(mesh, {});
 }
 
 /** The resting-area coverage the pass found for one axis. */
-export const coverageFor = (detection: UpDetection, up: UpAxis): number =>
+export const coverageFor = (detection: Omit<UpDetection, 'orientation'>, up: UpAxis): number =>
   detection.coverageByAxis[UP_AXES.indexOf(up)]!;
+
+/** A quarter turn: how a mini on a base, or one that rests flat, is turned. */
+function quarterTurn(up: UpAxis, method: Orientation['method'], confidence: number): Orientation {
+  return { up, method, confidence, rotation: AXIS_ROTATION[up], tiltDeg: 0, setDownDeg: 0 };
+}
+
+const Y_UP: Vec3 = [0, 1, 0];
+
+/**
+ * Sets the mini down on its lowest points, starting from the up direction `from` (file
+ * coordinates), and builds the rotation that levels it: `base` followed by the smallest turn
+ * that takes the resting plane's normal to +y. Within `LEVEL_TOLERANCE_DEG` of an axis
+ * the plain quarter turn is kept instead, so a mini that rests flat is not moved.
+ *
+ * @param base The rotation to level: the user's, or null for the quarter turn of the axis
+ *   nearest to the resting plane's normal (which fixes the yaw the six-way way).
+ */
+function levelled(
+  positions: Float32Array,
+  from: Vec3,
+  base: Rotation | null,
+  method: Orientation['method'],
+  confidence: number,
+): Orientation {
+  const n = setDown(positions, [0 - from[0], 0 - from[1], 0 - from[2]]);
+  const up = nearestAxis(n);
+  const tiltDeg = angleDeg(n, axisVector(up));
+  if (tiltDeg <= LEVEL_TOLERANCE_DEG) {
+    return { ...quarterTurn(up, method, confidence), setDownDeg: angleDeg(from, axisVector(up)) };
+  }
+  const start = base ?? AXIS_ROTATION[up];
+  const rotation = multiply(fromTo(apply(start, n), Y_UP), start);
+  return {
+    up: nearestUpAxis(rotation),
+    method,
+    confidence,
+    rotation,
+    tiltDeg,
+    setDownDeg: angleDeg(from, n),
+  };
+}
+
+/**
+ * The orient step's decision (design note §3): the detection, or what the user chose.
+ * A forced axis with a base on it is not levelled; otherwise a forced axis or rotation is
+ * set down unless `setDown` is false.
+ */
+export function resolveOrientation(
+  mesh: IndexedMesh,
+  options: OrientationOptions = {},
+): UpDetection {
+  const pass = scanMesh(mesh);
+  const { positions } = mesh;
+  const hasBase = (up: UpAxis): boolean => coverageFor(pass, up) >= MIN_BASE_COVERAGE;
+  const setsDown = options.setDown !== false && positions.length > 0;
+
+  let orientation: Orientation;
+  if (options.rotation) {
+    const from = fileUp(options.rotation);
+    const up = nearestUpAxis(options.rotation);
+    orientation = setsDown
+      ? levelled(positions, from, options.rotation, 'manual', 1)
+      : {
+          up,
+          method: 'manual',
+          confidence: 1,
+          rotation: options.rotation,
+          tiltDeg: angleDeg(from, axisVector(up)),
+          setDownDeg: 0,
+        };
+  } else if (options.up) {
+    orientation =
+      hasBase(options.up) || !setsDown
+        ? quarterTurn(options.up, 'manual', 1)
+        : levelled(positions, axisVector(options.up), AXIS_ROTATION[options.up], 'manual', 1);
+  } else {
+    let best = 0;
+    for (let candidate = 1; candidate < 6; candidate++)
+      if (pass.coverageByAxis[candidate]! > pass.coverageByAxis[best]!) best = candidate;
+    const coverage = pass.coverageByAxis[best]!;
+    if (coverage >= MIN_BASE_COVERAGE) {
+      orientation = quarterTurn(UP_AXES[best]!, 'base', coverage);
+    } else {
+      const { min, max } = pass.scan;
+      const up = max[1] - min[1] > max[2] - min[2] ? '+y' : DEFAULT_UP;
+      orientation = quarterTurn(up, 'tallest', 0);
+    }
+  }
+  return { orientation, ...pass };
+}
 
 /**
  * Rotations taking the source up direction to scene +y. All are proper rotations, so
@@ -279,29 +408,65 @@ export const TO_Y_UP: Record<
   '-x': (x, y, z) => [y, 0 - x, z],
 };
 
+/** The axis whose quarter turn `rotation` is exactly (either sign of the quaternion), or null. */
+export function quarterTurnAxis(rotation: Rotation): UpAxis | null {
+  for (const up of UP_AXES) {
+    const q = AXIS_ROTATION[up];
+    if (q.every((value, i) => value === rotation[i])) return up;
+    if (q.every((value, i) => value === 0 - rotation[i]!)) return up;
+  }
+  return null;
+}
+
 /**
  * Converts a mesh to the scene convention: Y-up, standing on y = 0, with the origin at
  * the centre of its base in x and z (the centre of its bounding box when it has no base),
- * so the table can centre it in its footprint. Units are never changed. Returns a new mesh; the input is left
- * untouched.
+ * so the table can centre it in its footprint. Units are never changed. Returns a new mesh;
+ * the input is left untouched.
  *
- * @param coverage The resting-area coverage of `sourceUp` from `detectUpAxis`
- *   (`coverageFor`): whether there is a base to measure. A quarter turn keeps every
- *   coordinate, so the coverage found before the turn is the coverage after it.
+ * A quarter turn swaps and negates coordinates, so every coordinate keeps its bits; any
+ * other rotation multiplies by its matrix and cannot stand on a base.
+ *
+ * @param orientation The rotation (`Orientation.rotation`), or a file axis for its quarter turn.
+ * @param coverage The resting-area coverage of the rotation's axis (`coverageFor`): whether
+ *   there is a base to measure. A quarter turn keeps every coordinate, so the coverage found
+ *   before the turn is the coverage after it. Ignored for any other rotation.
  */
-export function orientAndPlace(mesh: IndexedMesh, sourceUp: UpAxis, coverage: number): PlacedMesh {
-  const rotate = TO_Y_UP[sourceUp];
-  const positions = new Float32Array(mesh.positions.length);
+export function orientAndPlace(
+  mesh: IndexedMesh,
+  orientation: Rotation | UpAxis,
+  coverage: number,
+): PlacedMesh {
+  const axis = typeof orientation === 'string' ? orientation : quarterTurnAxis(orientation);
+  const source = mesh.positions;
+  const positions = new Float32Array(source.length);
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
 
+  if (axis) {
+    const rotate = TO_Y_UP[axis];
+    for (let i = 0; i < positions.length; i += 3) {
+      const rotated = rotate(source[i]!, source[i + 1]!, source[i + 2]!);
+      positions[i] = rotated[0];
+      positions[i + 1] = rotated[1];
+      positions[i + 2] = rotated[2];
+    }
+  } else {
+    const m = toMatrix(orientation as Rotation);
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = source[i]!;
+      const y = source[i + 1]!;
+      const z = source[i + 2]!;
+      positions[i] = m[0]! * x + m[1]! * y + m[2]! * z;
+      positions[i + 1] = m[3]! * x + m[4]! * y + m[5]! * z;
+      positions[i + 2] = m[6]! * x + m[7]! * y + m[8]! * z;
+    }
+  }
   for (let i = 0; i < positions.length; i += 3) {
-    const rotated = rotate(mesh.positions[i]!, mesh.positions[i + 1]!, mesh.positions[i + 2]!);
-    for (let axis = 0; axis < 3; axis++) {
-      const value = rotated[axis]!;
-      positions[i + axis] = value;
-      if (value < min[axis]!) min[axis] = value;
-      if (value > max[axis]!) max[axis] = value;
+    for (let k = 0; k < 3; k++) {
+      const value = positions[i + k]!;
+      if (value < min[k]!) min[k] = value;
+      if (value > max[k]!) max[k] = value;
     }
   }
 
@@ -318,7 +483,7 @@ export function orientAndPlace(mesh: IndexedMesh, sourceUp: UpAxis, coverage: nu
   }
 
   const placed = { positions, indices: mesh.indices };
-  const measured = measureBase(placed, coverage);
+  const measured = axis ? measureBase(placed, coverage) : null;
   if (measured && (measured.centre[0] !== 0 || measured.centre[1] !== 0)) {
     const [baseX, baseZ] = measured.centre;
     for (let i = 0; i < positions.length; i += 3) {

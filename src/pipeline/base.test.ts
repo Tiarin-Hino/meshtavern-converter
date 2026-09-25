@@ -13,8 +13,9 @@ import { coverageFor, detectUpAxis, orientAndPlace } from './orient';
 /** A Z-up soup as the pipeline places it: welded, oriented, standing on y = 0. */
 function placed(soup: Float32Array): IndexedMesh {
   const mesh = weldVertices(soup).mesh;
-  const { up } = detectUpAxis(mesh);
-  return orientAndPlace(mesh, up, coverageFor(detectUpAxis(mesh), up)).mesh;
+  const detection = detectUpAxis(mesh);
+  const { up, rotation } = detection.orientation;
+  return orientAndPlace(mesh, rotation, coverageFor(detection, up)).mesh;
 }
 
 /** The base of a mesh standing Y-up, with the coverage the up detection finds for +y. */

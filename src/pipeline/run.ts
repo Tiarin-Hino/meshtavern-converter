@@ -4,7 +4,13 @@ import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
 import { checkFits } from './memory';
-import { coverageFor, detectUpAxis, orientAndPlace, type UpAxis, type UpDetection } from './orient';
+import {
+  coverageFor,
+  orientAndPlace,
+  resolveOrientation,
+  type Orientation,
+  type UpAxis,
+} from './orient';
 import { shade } from './shade';
 import { sizeMini, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
@@ -58,9 +64,11 @@ export interface ConversionStats {
   sizeMm: [number, number, number];
   /** Units, base, creature size and footprint: what the table needs to place the mini. */
   sizing: Sizing;
-  /** Which way was taken as up in the file, and how that was decided. */
+  /** Which way was taken as up in the file, and how that was decided: `orientation.up` and `.method`. */
   up: UpAxis;
-  upMethod: UpDetection['method'] | 'manual';
+  upMethod: Orientation['method'];
+  /** How the mini stands: the rotation, the tilt and how it was decided (issue #72). */
+  orientation: Orientation;
   lods: LodStats[];
   timings: StepTiming[];
   totalMs: number;
@@ -104,6 +112,8 @@ export interface ConversionResult {
   baked?: Baked;
   /** The same object as `stats.sizing`. */
   sizing: Sizing;
+  /** The same object as `stats.orientation`. */
+  orientation: Orientation;
   stats: ConversionStats;
 }
 
@@ -206,9 +216,10 @@ export async function runPipeline(
   const oriented = run(
     'orient',
     () => {
-      const detection = detectUpAxis(welded.mesh);
-      const up = forcedUp ?? detection.up;
-      return { ...orientAndPlace(welded.mesh, up, coverageFor(detection, up)), up, detection };
+      const detection = resolveOrientation(welded.mesh, forcedUp ? { up: forcedUp } : {});
+      const { orientation } = detection;
+      const coverage = coverageFor(detection, orientation.up);
+      return { ...orientAndPlace(welded.mesh, orientation.rotation, coverage), orientation };
     },
     (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
   );
@@ -305,6 +316,7 @@ export async function runPipeline(
     lods,
     baked,
     sizing: placed.sizing,
+    orientation: oriented.orientation,
     stats: {
       format,
       sourceTriangles: soup.length / 9 + invalidTriangles,
@@ -315,8 +327,9 @@ export async function runPipeline(
       invalidTriangles,
       sizeMm: placed.sizeMm,
       sizing: placed.sizing,
-      up: oriented.up,
-      upMethod: forcedUp ? 'manual' : oriented.detection.method,
+      up: oriented.orientation.up,
+      upMethod: oriented.orientation.method,
+      orientation: oriented.orientation,
       lods: lods.map((lod) => ({
         name: lod.name,
         decidedBy: lod.decidedBy,

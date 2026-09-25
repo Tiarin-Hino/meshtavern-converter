@@ -61,11 +61,16 @@ describe('generated shapes', () => {
 
   it('has a base the pipeline finds, in both file conventions', () => {
     const figure = generateFigure(true);
-    expect(detectUpAxis(weldVertices(figure).mesh)).toMatchObject({ up: '+z', method: 'base' });
-    expect(detectUpAxis(weldVertices(toYUp(figure)).mesh)).toMatchObject({
+    expect(detectUpAxis(weldVertices(figure).mesh).orientation).toMatchObject({
+      up: '+z',
+      method: 'base',
+    });
+    expect(detectUpAxis(weldVertices(toYUp(figure)).mesh).orientation).toMatchObject({
       up: '+y',
       method: 'base',
     });
-    expect(detectUpAxis(weldVertices(generateFigure(false)).mesh).method).toBe('tallest');
+    expect(detectUpAxis(weldVertices(generateFigure(false)).mesh).orientation.method).toBe(
+      'tallest',
+    );
   });
 });

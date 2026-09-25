@@ -118,3 +118,17 @@ export function toYUp(soupZUp: Float32Array): Float32Array {
   }
   return out;
 }
+
+/**
+ * A long, low creature on four legs without a base, Z-up: body, head and four legs, about
+ * 36 mm long and 18 mm tall. The paws stand in one plane. About 38,000 triangles.
+ */
+export function generateQuadruped(): Float32Array {
+  const soup: number[] = [];
+  addBlob(soup, [0, 0, 11], [15, 5, 5], 40, 0.08);
+  addBlob(soup, [17, 0, 14.5], [4, 3.5, 3.5], 24, 0.08);
+  for (const x of [-10, 10]) {
+    for (const y of [-3.5, 3.5]) addBlob(soup, [x, y, 4.5], [1.8, 1.8, 4.5], 16, 0);
+  }
+  return new Float32Array(soup);
+}
