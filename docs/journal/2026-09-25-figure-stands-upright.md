@@ -48,7 +48,7 @@ Plain Node 20.19.2 on the development PC, median of 7 calls:
 `npm run corpus -- --no-bake`, Chrome 153 on the development PC, started unattended. Untouched steps ran 10–50 % slower than on 2026-09-24, so these times are upper bounds:
 
 - **Orient step:** largest file 1953 → 760 ms; ordinary minis 95–183 → 62–114 ms.
-- **Up direction:** 23 of 28 indexed minis match. The 5 misses are the fallen baseless minis; two flyers await the PM.
+- **Up direction:** 24 of 30 minis match the index (the PM confirmed the last two flyers). The 6 misses are fallen baseless minis; one of them, the largest file, is also tilted 45° in the file.
 
 The design's stance score, not shipped: 200–300 ms per ordinary baseless mini, 832 ms on the largest file (Node).
 
@@ -61,7 +61,7 @@ The PM decided on the PR (2026-09-25): detection is a help and leaves Phase 1's 
 ## Still open
 
 - Better detection of minis without a base, and levelling rounded feet: after Phase 1, if wanted.
-- The up direction of two flyers, to confirm; a clean timed corpus run from the PM's session.
+- A clean timed corpus run from the PM's session.
 
 ## Story angle
 

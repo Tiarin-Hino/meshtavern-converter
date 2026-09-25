@@ -7,7 +7,7 @@
   "flying/flying-02": {
     "size": "large",
     "note": "SRD wyvern is Large",
-    "upNote": "up not confirmed: a winged creature in a flying pose, possibly tilted; PM to confirm on the sheet"
+    "up": "+z"
   },
   "flying/flying-03": {
     "size": "tiny",
@@ -58,7 +58,8 @@
   "large-creature/large-01": {
     "size": "gargantuan",
     "note": "ancient dragon",
-    "upNote": "up not confirmed: a winged serpent in a flying pose, possibly tilted; PM to confirm on the sheet"
+    "upNote": "stands on -z, then turned 45° to the right as seen from the front (PM, 2026-09-25): tilted in the file, so a manual turn; the index holds the axis only",
+    "up": "-z"
   },
   "large-creature/large-02": {
     "size": "huge",
