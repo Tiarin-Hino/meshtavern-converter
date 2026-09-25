@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { weldVertices } from '../pipeline/mesh';
 import { detectUpAxis } from '../pipeline/orient';
 import { addRoundBase } from '../pipeline/base';
-import { addBlob, generateFigure, generateSwarm, toYUp } from './shapes';
+import {
+  addBlob,
+  generateFigure,
+  generateQuadruped,
+  generateSwarm,
+  generateTiltedFigure,
+  toYUp,
+} from './shapes';
 
 /** Every edge of a closed surface is shared by exactly two triangles, once in each direction. */
 function openEdges(indices: Uint32Array, vertexCount: number): number {
@@ -72,5 +79,26 @@ describe('generated shapes', () => {
     expect(detectUpAxis(weldVertices(generateFigure(false)).mesh).orientation.method).toBe(
       'tallest',
     );
+  });
+
+  it('makes a quadruped of closed parts that stands on its paws, with no base', () => {
+    const soup = generateQuadruped();
+    expect(soup.length / 9).toBe(12 * (40 * 40 + 24 * 24 + 4 * 16 * 16));
+    expect(signedVolume(soup)).toBeGreaterThan(0);
+    let minZ = Infinity;
+    for (let i = 2; i < soup.length; i += 3) minZ = Math.min(minZ, soup[i]!);
+    expect(Math.abs(minZ)).toBeLessThan(0.01);
+    expect(detectUpAxis(weldVertices(soup).mesh).orientation.method).not.toBe('base');
+  });
+
+  it('tilts the figure by the 3-4-5 turn, the same bits every time', () => {
+    const tilted = generateTiltedFigure();
+    const upright = generateFigure(false);
+    expect(tilted.length).toBe(upright.length);
+    // The turn keeps lengths: the first corner is as far from the x axis as before.
+    const r = (s: Float32Array): number => Math.hypot(s[1]!, s[2]!);
+    expect(r(tilted)).toBeCloseTo(r(upright), 4);
+    const bytes = (soup: Float32Array): Buffer => Buffer.from(soup.buffer);
+    expect(bytes(generateTiltedFigure()).equals(bytes(tilted))).toBe(true);
   });
 });

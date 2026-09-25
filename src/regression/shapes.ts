@@ -132,3 +132,19 @@ export function generateQuadruped(): Float32Array {
   }
   return new Float32Array(soup);
 }
+
+/**
+ * The figure without a base, stored tilted about the file's x axis by the 3-4-5 turn
+ * (cos 0.8, sin 0.6, about 36.9°): a print file that is not in any convention. A rational
+ * turn keeps the bits the same on every machine.
+ */
+export function generateTiltedFigure(): Float32Array {
+  const soup = generateFigure(false);
+  for (let i = 0; i < soup.length; i += 3) {
+    const y = soup[i + 1]!;
+    const z = soup[i + 2]!;
+    soup[i + 1] = 0.8 * y - 0.6 * z;
+    soup[i + 2] = 0.6 * y + 0.8 * z;
+  }
+  return soup;
+}
