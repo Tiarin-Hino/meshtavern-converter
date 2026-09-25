@@ -6,6 +6,8 @@ import { encodeGlb, glbEncoderReady } from './glb';
 import { DEFAULT_LOOK, vertexColours } from './look';
 import { computeVertexNormals, weldVertices, type IndexedMesh } from './mesh';
 import { shade } from './shade';
+import type { Orientation } from './orient';
+import { AXIS_ROTATION, fromAxisAngle, multiply } from './rotation';
 import type { Sizing } from './size';
 
 // 40 × 40 quads: 3,200 triangles, 1,681 vertices, 50 mm wide, shaded like a converted mini.
@@ -129,6 +131,22 @@ describe('encodeGlb, with the sizing', () => {
       expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
     },
   );
+
+  it('records the rotation from the file, which the validator accepts', async () => {
+    const orientation: Orientation = {
+      up: '+z',
+      method: 'manual',
+      confidence: 1,
+      rotation: multiply(fromAxisAngle([1, 0, 0], 12), AXIS_ROTATION['+z']),
+      tiltDeg: 12,
+      setDownDeg: 12,
+    };
+    const glb = encodeGlb(sheet, { ...options, compact: true, sizing, orientation });
+    const block = parse(glb).json.extras.meshtavern!;
+    expect(block.rotation).toEqual(orientation.rotation);
+    expect(block).toMatchObject({ size: 'large', footprintSquares: 2 });
+    expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+  });
 
   it('writes no block without a sizing', () => {
     const glb = encodeGlb(sheet, { ...options, compact: false });

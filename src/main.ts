@@ -700,6 +700,7 @@ async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> 
     look: state.look,
     compact,
     sizing: state.stats?.sizing,
+    orientation: state.stats?.orientation,
   });
 }
 

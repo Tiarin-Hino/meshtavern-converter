@@ -2,6 +2,7 @@ import { MeshoptEncoder } from 'meshoptimizer';
 import { vertexColours, type Look } from './look';
 import { computeVertexNormals, type IndexedMesh } from './mesh';
 import { GRID_SQUARE_MM, type Sizing } from './size';
+import type { Orientation } from './orient';
 
 /**
  * Writes one mesh as a binary glTF 2.0 file (GLB). Two variants:
@@ -29,6 +30,11 @@ export interface GlbOptions {
    * and the units and scale the file was read with.
    */
   sizing?: Sizing;
+  /**
+   * How the mini was turned from the file (issue #72). With a sizing, `extras.meshtavern`
+   * carries its rotation, so the table can reproduce the orientation or offer it as a choice.
+   */
+  orientation?: Orientation;
 }
 
 const MM_TO_M = 0.001;
@@ -175,6 +181,9 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
           baseDiameterMm: Number(options.sizing.baseDiameterMm.toFixed(3)),
           units: options.sizing.units,
           scale: options.sizing.scale,
+          // File coordinates → the vertex data's Y-up frame, x y z w: the vertices are
+          // already turned by it.
+          ...(options.orientation && { rotation: options.orientation.rotation }),
         },
       }),
     },
