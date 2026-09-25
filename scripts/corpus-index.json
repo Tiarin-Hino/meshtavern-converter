@@ -1,112 +1,142 @@
 {
   "flying/flying-01": {
     "size": "large",
-    "note": "SRD giant bat is Large"
+    "note": "SRD giant bat is Large",
+    "up": "+y"
   },
   "flying/flying-02": {
     "size": "large",
-    "note": "SRD wyvern is Large"
+    "note": "SRD wyvern is Large",
+    "upNote": "up not confirmed: a winged creature in a flying pose, possibly tilted; PM to confirm on the sheet"
   },
   "flying/flying-03": {
     "size": "tiny",
-    "note": "pixie; Tiny is never suggested"
+    "note": "pixie; Tiny is never suggested",
+    "up": "+y"
   },
   "flying/flying-04": {
-    "size": "medium"
+    "size": "medium",
+    "up": "-y"
   },
   "humanoid/M-001a": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+z"
   },
   "humanoid/MINI-001": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+z"
   },
   "humanoid/MINI-004": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+z"
   },
   "humanoid/MINI-012": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+z"
   },
   "humanoid/MINI-014": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+z"
   },
   "humanoid/humanoid-01": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+y"
   },
   "humanoid/humanoid-02": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+y"
   },
   "humanoid/humanoid-03": {
-    "size": "medium"
+    "size": "medium",
+    "up": "+y"
   },
   "large-creature/M-100": {
     "size": "huge",
-    "note": "PM's own"
+    "note": "PM's own",
+    "up": "+z"
   },
   "large-creature/large-01": {
     "size": "gargantuan",
-    "note": "ancient dragon"
+    "note": "ancient dragon",
+    "upNote": "up not confirmed: a winged serpent in a flying pose, possibly tilted; PM to confirm on the sheet"
   },
   "large-creature/large-02": {
     "size": "huge",
-    "note": "SRD hill giant is Huge"
+    "note": "SRD hill giant is Huge",
+    "up": "+y"
   },
   "large-creature/large-03": {
     "size": "huge",
-    "note": "a giant"
+    "note": "a giant",
+    "up": "+y"
   },
   "mounted/mounted-01": {
     "size": "large",
-    "note": "goblin on a giant bat; the file may be the mount only"
+    "note": "goblin on a giant bat; the file may be the mount only",
+    "up": "+y"
   },
   "mounted/mounted-02": {
     "size": "large",
-    "note": "rider on a horse"
+    "note": "rider on a horse",
+    "up": "+y"
   },
   "mounted/mounted-03": {
     "size": "large",
-    "note": "rider on a horse"
+    "note": "rider on a horse",
+    "up": "+y"
   },
   "quadruped/B-001": {
     "size": "large",
-    "note": "PM's own, 50 mm base"
+    "note": "PM's own, 50 mm base",
+    "up": "+z"
   },
   "quadruped/quadruped-01": {
     "size": "large",
-    "note": "SRD giant boar is Large"
+    "note": "SRD giant boar is Large",
+    "up": "+y"
   },
   "quadruped/quadruped-02": {
     "size": "medium",
-    "note": "a hound, like the SRD wolf"
+    "note": "a hound, like the SRD wolf",
+    "up": "+y"
   },
   "quadruped/quadruped-03": {
     "size": "tiny",
-    "note": "SRD cat is Tiny; never suggested"
+    "note": "SRD cat is Tiny; never suggested",
+    "up": "+y"
   },
   "swarm/swarm-01": {
     "size": "large",
-    "note": "swarm on a 50 mm base"
+    "note": "swarm on a 50 mm base",
+    "up": "+y"
   },
   "swarm/swarm-02": {
-    "size": "large"
+    "size": "large",
+    "up": "+z"
   },
   "swarm/swarm-03": {
     "size": "medium",
-    "note": "SRD swarm of bats is Medium"
+    "note": "SRD swarm of bats is Medium",
+    "up": "+y"
   },
   "terrain/T-001": {
     "size": "huge",
-    "note": "terrain: by footprint only"
+    "note": "terrain: by footprint only",
+    "up": "+z"
   },
   "terrain/terrain-01": {
     "size": "huge",
-    "note": "terrain: by footprint only"
+    "note": "terrain: by footprint only",
+    "up": "+y"
   },
   "terrain/terrain-02": {
     "size": "large",
-    "note": "terrain: by footprint only"
+    "note": "terrain: by footprint only",
+    "up": "+y"
   },
   "terrain/terrain-03": {
     "size": "medium",
-    "note": "terrain: by footprint only"
+    "note": "terrain: by footprint only",
+    "up": "+y"
   }
 }

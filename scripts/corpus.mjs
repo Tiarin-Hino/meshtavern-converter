@@ -1,8 +1,9 @@
 // The regression run over the local corpus (issue #46). Converts every STL in corpus/ in
 // real Chrome (GPU on) and writes to out/corpus/:
 //   results.json     triangles, error, sizes and times per level for every mini
-//   results.md       the same as tables, the corpus coverage, the size suggestions checked
-//                    against scripts/corpus-index.json, and what changed since the last run
+//   results.md       the same as tables, the corpus coverage, the size suggestions and the
+//                    up directions checked against scripts/corpus-index.json, and what
+//                    changed since the last run
 //   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels
 // Sort the corpus into folders named after the kind of mini (see KINDS); files directly in
 // corpus/ count as "unsorted".
@@ -18,8 +19,8 @@ import { CORPUS, corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4179;
 /**
- * The expected creature size per corpus mini, keyed like results.json (issue #44). Committed;
- * the corpus itself is not. Fields other than `size` (a `note`, later `up` for #72) are left alone.
+ * The expected creature size (issue #44) and up direction in the file (issue #72) per corpus
+ * mini, keyed like results.json. Committed; the corpus itself is not. The script only reads it.
  */
 const INDEX = 'scripts/corpus-index.json';
 /** The kinds the Phase 1 spec asks the corpus to cover; each is a folder under corpus/. */
@@ -126,6 +127,12 @@ try {
       sizeMm: stats.sizeMm.map((mm) => round(mm, 2)),
       up: stats.up,
       upMethod: stats.upMethod,
+      orientation: {
+        confidence: round(stats.orientation.confidence, 3),
+        tiltDeg: round(stats.orientation.tiltDeg, 1),
+        setDownDeg: round(stats.orientation.setDownDeg, 1),
+        rotation: stats.orientation.rotation.map((value) => round(value, 5)),
+      },
       sizing: {
         units: stats.sizing.units,
         size: stats.sizing.size,
@@ -204,7 +211,7 @@ try {
       viewport: { width: 380 * columns.length + 20, height: 100 },
     });
     await sheet.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
-      <h3 style="margin:0 0 8px">${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod}), ${stats.sizing.size} (${stats.sizing.footprintSquares}×${stats.sizing.footprintSquares})</h3>
+      <h3 style="margin:0 0 8px">${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod}${stats.orientation.tiltDeg > 0 ? `, tilted ${round(stats.orientation.tiltDeg, 1)}°` : ''}), ${stats.sizing.size} (${stats.sizing.footprintSquares}×${stats.sizing.footprintSquares})</h3>
       <div style="display:grid;grid-template-columns:repeat(${columns.length},1fr);gap:6px">
       ${shots.map((s) => `<figure style="margin:0"><img src="data:image/png;base64,${s.data}" style="width:100%;display:block"><figcaption>${s.caption}</figcaption></figure>`).join('')}
       </div></body>`);
@@ -300,6 +307,23 @@ function sizeReport() {
     ),
   ].join('\n\n');
 }
+/** The up directions against the committed index (issue #72): every mismatch and every tilt. */
+function orientationReport() {
+  if (!existsSync(INDEX)) return `No ${INDEX}: nothing to check the up directions against.`;
+  const index = JSON.parse(readFileSync(INDEX, 'utf8'));
+  const listed = converted.filter(([key]) => index[key]?.up);
+  const mismatches = listed.filter(([key, m]) => m.up !== index[key].up);
+  const unlisted = converted.filter(([key]) => !index[key]?.up).map(([key]) => key);
+  const row = ([key, m]) =>
+    `| ${key} | ${m.up} | ${index[key]?.up ?? '?'} | ${m.upMethod} | ${m.orientation.confidence} | ${m.orientation.tiltDeg}° | ${m.orientation.setDownDeg}° | ${index[key]?.upNote ?? ''} |`;
+  const head = ['Mini', 'Up', 'Expected', 'Method', 'Confidence', 'Tilt', 'Set down', 'Note'];
+  return [
+    `${listed.length - mismatches.length} of ${listed.length} minis stand on the up direction in ${INDEX}.`,
+    mismatches.length === 0 ? 'No mismatches.' : table(head, mismatches.map(row)),
+    `Minis without an expected up direction: ${unlisted.join(', ') || 'none'}.`,
+    table(head, converted.map(row)),
+  ].join('\n\n');
+}
 const missing = KINDS.filter((kind) => !kinds.includes(kind));
 
 const md = `# Corpus results
@@ -314,6 +338,10 @@ ${results.machine.gpu} · ${results.machine.cpu} · ${results.machine.memoryGb} 
 - Kinds still missing: ${missing.join(', ') || 'none'}.
 - Up direction taken from the file: ${count(converted.map(([, mini]) => mini.up))}.
 - Flat base found: ${count(converted.map(([, mini]) => (mini.upMethod === 'base' ? 'yes' : 'no')))}.
+
+## Orientation
+
+${orientationReport()}
 
 ## Size suggestions
 
