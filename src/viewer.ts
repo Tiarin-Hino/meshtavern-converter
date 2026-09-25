@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   bakedTextureBytes,
@@ -14,6 +15,7 @@ import {
 import { compressedTextureBytes, ownCopy } from './compressed-texture';
 import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
+import type { Rotation } from './pipeline/rotation';
 import { GRID_SQUARE_MM } from './pipeline/size';
 
 /** Squares the grid shows along each side. */
@@ -81,6 +83,12 @@ export class Viewer {
   private bakedMaterials: THREE.MeshStandardMaterial[] = [];
   private textureBytes = 0;
   private readonly size = new THREE.Vector3(1, 1, 1);
+  /** A turn the user is trying out (issue #72): shown on the mini, not converted. */
+  private readonly turn = new THREE.Quaternion();
+  /** Holds the single mini at half its height, so a turn pivots about its middle, not its feet. */
+  private readonly pivot = new THREE.Group();
+  private gizmo: TransformControls | null = null;
+  private onTurn: ((turn: Rotation) => void) | null = null;
   private look: Look = { ...DEFAULT_LOOK };
   private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
@@ -134,9 +142,63 @@ export class Viewer {
   showMesh(mesh: IndexedMesh, sizeMm: [number, number, number], reframe = true): void {
     this.clear();
     this.mesh = new THREE.Mesh(this.toGeometry(mesh), this.material);
-    this.scene.add(this.mesh);
+    this.showSingle(sizeMm, reframe);
+  }
+
+  /** Adds the single mini to the scene, with the turn being tried out and the gizmo if shown. */
+  private showSingle(sizeMm: [number, number, number], reframe: boolean): void {
+    this.pivot.position.set(0, sizeMm[1] / 2, 0);
+    this.pivot.quaternion.copy(this.turn);
+    this.mesh!.position.set(0, -sizeMm[1] / 2, 0);
+    this.pivot.add(this.mesh!);
+    this.scene.add(this.pivot);
+    this.gizmo?.attach(this.pivot);
     this.size.set(...sizeMm);
     if (reframe) this.setCamera(34, 22, 1);
+  }
+
+  /**
+   * Turns the shown mini by `turn` (scene axes, about the middle of its height) to preview
+   * a correction: nothing is converted. Null turns it back.
+   */
+  setTurn(turn: Rotation | null): void {
+    if (turn) this.turn.set(...turn);
+    else this.turn.identity();
+    this.pivot.quaternion.copy(this.turn);
+  }
+
+  /**
+   * Shows a rotate gizmo on the mini, without the ring that turns it about the vertical:
+   * which way it faces is the table's job. `onTurn` hears every change; null hides it.
+   * The camera stays still while the gizmo is dragged.
+   */
+  setTurnGizmo(onTurn: ((turn: Rotation) => void) | null): void {
+    this.onTurn = onTurn;
+    if (!onTurn) {
+      if (this.gizmo) {
+        this.gizmo.detach();
+        this.scene.remove(this.gizmo.getHelper());
+        this.gizmo.dispose();
+        this.gizmo = null;
+      }
+      return;
+    }
+    if (!this.gizmo) {
+      const gizmo = new TransformControls(this.camera, this.canvas);
+      gizmo.setMode('rotate');
+      gizmo.showY = false;
+      gizmo.size = 1.6;
+      gizmo.addEventListener('dragging-changed', (event) => {
+        this.controls.enabled = !event.value;
+      });
+      gizmo.addEventListener('objectChange', () => {
+        this.turn.copy(this.pivot.quaternion);
+        this.onTurn?.(this.turn.toArray() as Rotation);
+      });
+      this.scene.add(gizmo.getHelper());
+      this.gizmo = gizmo;
+    }
+    if (this.mesh) this.gizmo.attach(this.pivot);
   }
 
   /**
@@ -260,9 +322,7 @@ export class Viewer {
   showBaked(mini: BakedMini, sizeMm: [number, number, number], reframe = false): void {
     this.clear();
     this.mesh = new THREE.Mesh(createBakedGeometry(mini.mesh), this.addBakedMaterial(mini, false));
-    this.scene.add(this.mesh);
-    this.size.set(...sizeMm);
-    if (reframe) this.setCamera(34, 22, 1);
+    this.showSingle(sizeMm, reframe);
   }
 
   /** The renderer, for code that has to ask it which compressed formats the GPU supports. */
@@ -353,8 +413,10 @@ export class Viewer {
   }
 
   private clear(): void {
+    this.gizmo?.detach();
     if (this.mesh) {
-      this.scene.remove(this.mesh);
+      this.pivot.remove(this.mesh);
+      this.scene.remove(this.pivot);
       this.mesh.geometry.dispose();
       this.mesh = null;
     }

@@ -13,6 +13,7 @@ import {
   nearestUpAxis,
   normalise,
   toMatrix,
+  turnAngleDeg,
 } from './rotation';
 
 const SAMPLES: Vec3[] = [
@@ -104,5 +105,14 @@ describe('angleDeg', () => {
     expect(angleDeg([1, 0, 0], [0, 2, 0])).toBeCloseTo(90, 12);
     expect(angleDeg([0, 3, 0], [0, 1, 0])).toBe(0);
     expect(angleDeg([0, 1, 0], [0, -1, 0])).toBeCloseTo(180, 12);
+  });
+});
+
+describe('turnAngleDeg', () => {
+  it('measures how far a rotation turns, whichever sign the quaternion has', () => {
+    const q = fromAxisAngle(normalise([1, 2, 3]), 30);
+    expect(turnAngleDeg(q)).toBeCloseTo(30, 9);
+    expect(turnAngleDeg([0 - q[0], 0 - q[1], 0 - q[2], 0 - q[3]])).toBeCloseTo(30, 9);
+    expect(turnAngleDeg([0, 0, 0, 1])).toBe(0);
   });
 });

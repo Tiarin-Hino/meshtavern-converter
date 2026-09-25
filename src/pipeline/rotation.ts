@@ -159,6 +159,11 @@ export const fileUp = (q: Rotation): Vec3 => apply(invert(q), [0, 1, 0]);
 /** The file axis nearest to what a rotation takes as up: the coarse, six-way step. */
 export const nearestUpAxis = (q: Rotation): UpAxis => nearestAxis(fileUp(q));
 
+/** How far a rotation turns, in degrees, 0–180. For reports only. */
+export function turnAngleDeg(q: Rotation): number {
+  return (2 * Math.acos(Math.min(1, Math.abs(q[3]))) * 180) / Math.PI;
+}
+
 /** The angle between two directions in degrees. For reports only. */
 export function angleDeg(a: Vec3, b: Vec3): number {
   const cos = dot(normalise(a), normalise(b));

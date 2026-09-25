@@ -4,7 +4,14 @@ import { encodeGlb, glbEncoderReady } from './pipeline/glb';
 import { DEFAULT_LOOK, type Look } from './pipeline/look';
 import type { IndexedMesh } from './pipeline/mesh';
 import { checkFits, memoryBudgetBytes } from './pipeline/memory';
-import { UP_AXES, type OrientationOptions, type UpAxis } from './pipeline/orient';
+import { UP_AXES, type Orientation, type OrientationOptions, type UpAxis } from './pipeline/orient';
+import {
+  fromAxisAngle,
+  IDENTITY,
+  multiply,
+  turnAngleDeg,
+  type Rotation,
+} from './pipeline/rotation';
 import { toProblem, type ProblemCode } from './pipeline/problems';
 import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
 import {
@@ -71,6 +78,11 @@ interface AppState {
     tableAreaMm2: number;
   } | null;
   showingBaked: boolean;
+  /**
+   * A turn the user is trying out (issue #72): scene axes, applied after the last result's
+   * rotation (`stats.orientation`). Shown in the viewer only; `setDown()` converts with it.
+   */
+  orientation: { turn: Rotation | null; turnDeg: number };
 }
 
 declare global {
@@ -101,6 +113,12 @@ declare global {
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
+      /** Turns the shown mini by `deg` about the scene's x (pitch) or z (roll) axis: a preview, nothing is converted. */
+      turn: (axis: TurnAxis, deg: number) => void;
+      /** Converts the last file again, turned as previewed and set down on its lowest points. */
+      setDown: () => Promise<void>;
+      /** Drops the previewed turn. */
+      resetTurn: () => void;
       /**
        * Converts the last file again with changed sizing choices (units, size, scale to a
        * base diameter, plain base), merged into the ones made so far. `undefined` drops a choice.
@@ -128,6 +146,10 @@ const levelButtons = document.querySelector<HTMLElement>('#levels')!;
 const stressButtons = document.querySelector<HTMLElement>('#stress')!;
 const upSelect = document.querySelector<HTMLSelectElement>('#up')!;
 const upLabel = document.querySelector<HTMLElement>('#up-label')!;
+const turnPanel = document.querySelector<HTMLElement>('#turn')!;
+const turnByHand = document.querySelector<HTMLInputElement>('#turn-by-hand')!;
+const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
+const turnReset = document.querySelector<HTMLButtonElement>('#turn-reset')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
 const sizingPanel = document.querySelector<HTMLElement>('#sizing')!;
 const sizingInputs = {
@@ -167,6 +189,7 @@ const state: AppState = {
   imported: null,
   baked: null,
   showingBaked: false,
+  orientation: { turn: null, turnDeg: 0 },
 };
 /** The baked table level of the converted mini; null when it has the per-vertex look. */
 let baked: BakedMini | null = null;
@@ -195,7 +218,7 @@ const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)
 
 function showStats(stats: ConversionStats): void {
   const rows: [string, string][] = [
-    ['Up', `${stats.up} (${stats.upMethod})`],
+    ['Up', describeOrientation(stats.orientation)],
     ['Size', describeSize(stats.sizing)],
     ['Units', describeUnits(stats.sizing)],
     ['Dimensions', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
@@ -403,6 +426,47 @@ async function setUp(up: UpAxis): Promise<void> {
   await convert(await lastSource.read(), lastSource.name);
 }
 
+/** The steps of the turn buttons. _(proposal, #72)_ */
+const TURN_STEP_DEG = 15;
+type TurnAxis = 'pitch' | 'roll';
+/** Pitch tips the mini towards the camera's default view (about scene x), roll to the side (about z). */
+const TURN_AXES: Record<TurnAxis, [number, number, number]> = {
+  pitch: [1, 0, 0],
+  roll: [0, 0, 1],
+};
+
+/** "+z (manual, set down 4°)": the six-way axis, how it was decided, and any turn beyond it. */
+function describeOrientation(orientation: Orientation): string {
+  const parts: string[] = [orientation.method];
+  if (orientation.method === 'base') parts.push(orientation.confidence.toFixed(2));
+  if (orientation.tiltDeg > 0) parts.push(`tilted ${Math.round(orientation.tiltDeg)}°`);
+  if (orientation.setDownDeg > 0) parts.push(`set down ${Math.round(orientation.setDownDeg)}°`);
+  return `${orientation.up} (${parts.join(', ')})`;
+}
+
+/** Shows a turn being tried out, in the viewer and in words; null drops it. */
+function showTurn(turn: Rotation | null): void {
+  const deg = turn ? turnAngleDeg(turn) : 0;
+  state.orientation = { turn: deg > 0 ? turn : null, turnDeg: deg };
+  viewer.setTurn(state.orientation.turn);
+  turnPending.hidden = state.orientation.turn === null;
+  turnPending.textContent = `Turned ${Math.round(deg)}°, not set down yet`;
+  turnReset.disabled = state.orientation.turn === null;
+}
+
+function turn(axis: TurnAxis, deg: number): void {
+  if (!state.stats || state.busy) return;
+  showTurn(multiply(fromAxisAngle(TURN_AXES[axis], deg), state.orientation.turn ?? IDENTITY));
+}
+
+async function setDown(): Promise<void> {
+  if (!lastSource || state.busy || !state.stats) return;
+  const last = state.stats.orientation.rotation;
+  const turned = state.orientation.turn;
+  choices.orientation = { rotation: turned ? multiply(turned, last) : last };
+  await convert(await lastSource.read(), lastSource.name);
+}
+
 const stressPool: {
   lods: IndexedMesh[];
   share: number;
@@ -511,6 +575,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
   stressButtons.hidden = true;
   lookPanel.hidden = true;
   sizingPanel.hidden = true;
+  turnPanel.hidden = true;
   exportPanel.hidden = true;
   progressBar.hidden = false;
   cancelButton.hidden = false;
@@ -575,6 +640,8 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     state.imported = null;
     upSelect.value = stats.up;
     upLabel.hidden = false;
+    turnPanel.hidden = false;
+    showTurn(null);
     showSizing(stats.sizing);
     // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
@@ -643,6 +710,7 @@ async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
     stressButtons,
     lookPanel,
     upLabel,
+    turnPanel,
     sizingPanel,
     exportPanel,
   ]) {
@@ -731,6 +799,16 @@ upSelect.replaceChildren(
   }),
 );
 upSelect.addEventListener('change', () => void setUp(upSelect.value as UpAxis));
+for (const button of turnPanel.querySelectorAll<HTMLButtonElement>('[data-turn]')) {
+  button.addEventListener('click', () =>
+    turn(button.dataset.turn as TurnAxis, Number(button.dataset.deg ?? TURN_STEP_DEG)),
+  );
+}
+turnByHand.addEventListener('change', () =>
+  viewer.setTurnGizmo(turnByHand.checked ? (turned) => showTurn(turned) : null),
+);
+document.querySelector('#set-down')!.addEventListener('click', () => void setDown());
+turnReset.addEventListener('click', () => showTurn(null));
 document.body.addEventListener('dragover', (event) => event.preventDefault());
 document.body.addEventListener('drop', (event) => {
   event.preventDefault();
@@ -752,6 +830,9 @@ window.__mt = {
     return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
   },
   setUp,
+  turn,
+  setDown,
+  resetTurn: () => showTurn(null),
   setSizing,
   showLevel: (level) => showLevel(level),
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),

@@ -79,7 +79,8 @@ h1 {
 }
 
 #look,
-#sizing {
+#sizing,
+#turn {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -92,7 +93,8 @@ h1 {
 }
 
 #look legend,
-#sizing legend {
+#sizing legend,
+#turn legend {
   padding: 0 4px;
   color: #a9afb8;
 }
