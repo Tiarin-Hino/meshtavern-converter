@@ -60,3 +60,5 @@ Review jobs time out after 20 minutes and cancel the review of an older push of 
 ## Story angle
 
 A reviewer is independent when it never sees how the code was built, whoever makes the model. Post title: "What makes an AI reviewer independent: fresh context, not a second vendor".
+
+Later: see 2026-09-23-handover-commands.md. `/implement` on Fable now does a design pass and hands the build to Opus through `/continue-pr` instead of continuing itself.
