@@ -276,6 +276,27 @@ test('turns the mini by hand, shows the turn before converting, and sets it down
   await page.locator('#viewport').screenshot({ path: setDownShot });
   await testInfo.attach('turn-set-down', { path: setDownShot, contentType: 'image/png' });
 
+  // Apply keeps exactly what the user turned: the placement is theirs, nothing is levelled.
+  await page.evaluate(() => window.__mt.turn('roll', 15));
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__mt.state.stats?.orientation.method))
+    .toBe('manual');
+  await page.waitForFunction(() => !window.__mt.state.busy);
+  const applied = (await stats()).orientation;
+  expect(applied).toMatchObject({ up: '+z', setDownDeg: 0 });
+  expect(applied.tiltDeg).toBeCloseTo(15, 3);
+  await expect(page.locator('#stats')).toContainText('+z (manual, tilted 15°)');
+
+  // The six-way select takes the axis as chosen, without setting the mini down.
+  await page.evaluate(() => window.__mt.setUp('+x'));
+  expect((await stats()).orientation).toMatchObject({
+    up: '+x',
+    method: 'manual',
+    tiltDeg: 0,
+    setDownDeg: 0,
+  });
+
   // A turn can be dropped again without converting.
   await page.getByRole('button', { name: 'Roll +15°' }).click();
   await expect(page.locator('#turn-pending')).toHaveText('Turned 15°, not set down yet');

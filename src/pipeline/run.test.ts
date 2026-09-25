@@ -155,7 +155,7 @@ describe('runPipeline', () => {
   it('sets a tilted mini down when the user picks its axis, and puts a plain base under it', async () => {
     const { orientation, stats, mesh } = await runPipeline(tiltedTable(), {
       bake: 0,
-      orientation: { up: '+z' },
+      orientation: { up: '+z', setDown: true },
       sizing: { plainBase: true },
     });
     expect(orientation).toMatchObject({ up: '+z', method: 'manual' });

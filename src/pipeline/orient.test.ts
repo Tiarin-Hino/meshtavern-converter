@@ -236,7 +236,7 @@ describe('resolveOrientation', () => {
     ['+y', 10],
     ['+y', 30],
   ] as const)('sets a %s table tilted by %d° down level on its pads', (up, tilt) => {
-    const { orientation } = resolveOrientation(table(up, tilt), { up });
+    const { orientation } = resolveOrientation(table(up, tilt), { up, setDown: true });
     expect(orientation.method).toBe('manual');
     expect(leftTilt(orientation, trueUp(up, tilt))).toBeLessThan(LEVEL_TOLERANCE_DEG);
     expect(orientation.tiltDeg).toBeGreaterThan(tilt - LEVEL_TOLERANCE_DEG);
@@ -245,19 +245,19 @@ describe('resolveOrientation', () => {
 
   it('brings a mini turned 30° by hand back level and says by how much', () => {
     const turned = multiply(fromAxisAngle([1, 0, 0], 30), AXIS_ROTATION['+z']);
-    const { orientation } = resolveOrientation(table('+z', 0), { rotation: turned });
+    const { orientation } = resolveOrientation(table('+z', 0), {
+      rotation: turned,
+      setDown: true,
+    });
     // It rests flat again, so it gets the plain quarter turn.
     expect(orientation).toMatchObject({ up: '+z', method: 'manual', tiltDeg: 0 });
     expect(orientation.rotation).toBe(AXIS_ROTATION['+z']);
     expect(Math.abs(orientation.setDownDeg - 30)).toBeLessThan(LEVEL_TOLERANCE_DEG);
   });
 
-  it('keeps a rotation exactly when it is not to be set down', () => {
+  it('keeps a rotation exactly unless asked to set it down', () => {
     const turned: Rotation = multiply(fromAxisAngle([1, 0, 0], 30), AXIS_ROTATION['+z']);
-    const { orientation } = resolveOrientation(table('+z', 0), {
-      rotation: turned,
-      setDown: false,
-    });
+    const { orientation } = resolveOrientation(table('+z', 0), { rotation: turned });
     expect(orientation).toMatchObject({ up: '+z', method: 'manual', setDownDeg: 0 });
     expect(orientation.rotation).toBe(turned);
     expect(orientation.tiltDeg).toBeCloseTo(30, 9);
@@ -265,7 +265,7 @@ describe('resolveOrientation', () => {
 
   it('does not move a mini that already rests flat: the same bits as the quarter turn', () => {
     const mesh = table('+z', 0);
-    const { orientation } = resolveOrientation(mesh, { up: '+z' });
+    const { orientation } = resolveOrientation(mesh, { up: '+z', setDown: true });
     expect(orientation).toMatchObject({ tiltDeg: 0, rotation: AXIS_ROTATION['+z'] });
     const placed = orientAndPlace(mesh, orientation.rotation, 0).mesh.positions;
     const quarter = orientAndPlace(mesh, '+z', 0).mesh.positions;
@@ -273,13 +273,13 @@ describe('resolveOrientation', () => {
   });
 
   it('never levels a mini on a base, even when the user picks its axis', () => {
-    const { orientation } = resolveOrientation(pillarOnBase('+x'), { up: '+x' });
+    const { orientation } = resolveOrientation(pillarOnBase('+x'), { up: '+x', setDown: true });
     expect(orientation).toMatchObject({ up: '+x', method: 'manual', tiltDeg: 0, setDownDeg: 0 });
     expect(orientation.rotation).toBe(AXIS_ROTATION['+x']);
   });
 
-  it('keeps the axis the user picked when asked not to set down', () => {
-    const { orientation } = resolveOrientation(table('+z', 30), { up: '+z', setDown: false });
+  it('keeps the axis the user picked unless asked to set it down', () => {
+    const { orientation } = resolveOrientation(table('+z', 30), { up: '+z' });
     expect(orientation).toMatchObject({ up: '+z', tiltDeg: 0, setDownDeg: 0 });
   });
 });
@@ -287,7 +287,7 @@ describe('resolveOrientation', () => {
 describe('orientAndPlace with a rotation', () => {
   it('stands a levelled mini on y = 0 without mirroring it, with no base', () => {
     const mesh = table('+z', 30);
-    const detection = resolveOrientation(mesh, { up: '+z' });
+    const detection = resolveOrientation(mesh, { up: '+z', setDown: true });
     const placed = orientAndPlace(mesh, detection.orientation.rotation, 1);
     const { min } = bounds(placed.mesh.positions);
     expect(min[1]).toBe(0);

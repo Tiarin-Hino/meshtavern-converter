@@ -9,7 +9,7 @@ topics: [orientation, regression, performance, ui]
 
 ## What we did
 
-The page now lets you turn a mini freely, in 15° steps or with a rotate gizmo, and set it down on its lowest points. Nothing converts until you press Set down. The converter records how it turned a mini as a rotation, and the exported file carries it for the table. Finding which way is up got faster. The story's main aim, standing up minis without a base by themselves, was built as designed and did not work on the corpus. It was taken out again, and those minis keep the old guess until the PM decides what next.
+The page now lets you turn a mini freely, in 15° steps or with a rotate gizmo, and apply the turn or set the mini down on its lowest points. Nothing converts until you press Apply or Set down. The converter records how it turned a mini as a rotation, and the exported file carries it for the table. Finding which way is up got faster. The story's main aim, standing up minis without a base by themselves, was built as designed and did not work on the corpus. It was taken out again, and those minis keep the old guess until the PM decides what next.
 
 ## Why
 
@@ -54,11 +54,14 @@ The design's stance score, not shipped: 200–300 ms per ordinary baseless mini,
 
 Unit tests 225 → 280; e2e 17 → 18.
 
+## Decisions
+
+The PM decided on the PR (2026-09-25): detection is a help and leaves Phase 1's acceptance, and the user's placement is final. The detection budget scales with the mesh: 150 ms per million triangles, at least 200 ms _(proposal)_; the largest file's 538 ms is inside its 840 ms. Setting down happens only on request: the six-way select and a new Apply button keep exactly what the user chose, and Set down levels.
+
 ## Still open
 
-- Detecting minis without a base, and levelling rounded feet: the PM's decision on PR #79.
-- Whether the six-way select should set the mini down: the design says yes, the corpus says it tilts minis that were right.
-- The up direction of two flyers, to confirm on the sheets; the 200 ms budget on the largest file; a clean timed corpus run from the PM's session.
+- Better detection of minis without a base, and levelling rounded feet: after Phase 1, if wanted.
+- The up direction of two flyers, to confirm; a clean timed corpus run from the PM's session.
 
 ## Story angle
 

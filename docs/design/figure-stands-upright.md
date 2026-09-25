@@ -233,3 +233,11 @@ Ask on the PR, label the issue `needs-human` when the answer is the PM's, and co
 ## 9. Out of this note
 
 `NO_BASE_SIZE` (a baseless mini is suggested Medium, PM decision on PR #74) is to be revisited after this story, not in it. A restart of the pipeline from the orient step after a correction, instead of a full conversion, is a follow-up like the size step's. The recess matching of #70 builds on `restingPoints`.
+
+## 10. PM decisions
+
+On PR #79, 2026-09-25, after the build stopped on §8 (evidence in the PR's comments):
+
+1. **Detection is a help, not an acceptance criterion.** The user's placement is final. A mini without a base keeps the guess (the taller of Y-up and Z-up), shown as such. Standing baseless minis up by detection leaves Phase 1's acceptance.
+2. **The detection budget scales with the mesh** instead of a fixed 200 ms on the largest file.
+3. **Setting down happens only on request.** The six-way select and the free turn's Apply keep exactly what the user chose (`OrientationOptions.setDown` defaults to false); the page's Set down button asks for it.

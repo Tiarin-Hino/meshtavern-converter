@@ -80,7 +80,8 @@ interface AppState {
   showingBaked: boolean;
   /**
    * A turn the user is trying out (issue #72): scene axes, applied after the last result's
-   * rotation (`stats.orientation`). Shown in the viewer only; `setDown()` converts with it.
+   * rotation (`stats.orientation`). Shown in the viewer only; `applyTurn()` and
+   * `setDown()` convert with it.
    */
   orientation: { turn: Rotation | null; turnDeg: number };
 }
@@ -115,6 +116,8 @@ declare global {
       setUp: (up: UpAxis) => Promise<void>;
       /** Turns the shown mini by `deg` about the scene's x (pitch) or z (roll) axis: a preview, nothing is converted. */
       turn: (axis: TurnAxis, deg: number) => void;
+      /** Converts the last file again, turned exactly as previewed. */
+      applyTurn: () => Promise<void>;
       /** Converts the last file again, turned as previewed and set down on its lowest points. */
       setDown: () => Promise<void>;
       /** Drops the previewed turn. */
@@ -150,6 +153,7 @@ const turnPanel = document.querySelector<HTMLElement>('#turn')!;
 const turnByHand = document.querySelector<HTMLInputElement>('#turn-by-hand')!;
 const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
 const turnReset = document.querySelector<HTMLButtonElement>('#turn-reset')!;
+const turnApply = document.querySelector<HTMLButtonElement>('#turn-apply')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
 const sizingPanel = document.querySelector<HTMLElement>('#sizing')!;
 const sizingInputs = {
@@ -452,6 +456,7 @@ function showTurn(turn: Rotation | null): void {
   turnPending.hidden = state.orientation.turn === null;
   turnPending.textContent = `Turned ${Math.round(deg)}°, not set down yet`;
   turnReset.disabled = state.orientation.turn === null;
+  turnApply.disabled = state.orientation.turn === null;
 }
 
 function turn(axis: TurnAxis, deg: number): void {
@@ -459,11 +464,16 @@ function turn(axis: TurnAxis, deg: number): void {
   showTurn(multiply(fromAxisAngle(TURN_AXES[axis], deg), state.orientation.turn ?? IDENTITY));
 }
 
-async function setDown(): Promise<void> {
+/**
+ * Converts the last file again, turned as previewed. Apply keeps exactly that turn: the
+ * user's placement is final. Set down also levels the mini on its lowest points (PM
+ * decision on PR #79, 2026-09-25: only on request).
+ */
+async function applyTurn(setDown: boolean): Promise<void> {
   if (!lastSource || state.busy || !state.stats) return;
   const last = state.stats.orientation.rotation;
   const turned = state.orientation.turn;
-  choices.orientation = { rotation: turned ? multiply(turned, last) : last };
+  choices.orientation = { rotation: turned ? multiply(turned, last) : last, setDown };
   await convert(await lastSource.read(), lastSource.name);
 }
 
@@ -808,7 +818,8 @@ for (const button of turnPanel.querySelectorAll<HTMLButtonElement>('[data-turn]'
 turnByHand.addEventListener('change', () =>
   viewer.setTurnGizmo(turnByHand.checked ? (turned) => showTurn(turned) : null),
 );
-document.querySelector('#set-down')!.addEventListener('click', () => void setDown());
+turnApply.addEventListener('click', () => void applyTurn(false));
+document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
 turnReset.addEventListener('click', () => showTurn(null));
 document.body.addEventListener('dragover', (event) => event.preventDefault());
 document.body.addEventListener('drop', (event) => {
@@ -832,7 +843,8 @@ window.__mt = {
   },
   setUp,
   turn,
-  setDown,
+  applyTurn: () => applyTurn(false),
+  setDown: () => applyTurn(true),
   resetTurn: () => showTurn(null),
   setSizing,
   showLevel: (level) => showLevel(level),

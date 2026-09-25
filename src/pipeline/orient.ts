@@ -67,8 +67,9 @@ export interface OrientationOptions {
   /** A full rotation, file → scene, from the page's free turn. Overrides `up`. */
   rotation?: Rotation;
   /**
-   * Set the mini down on its lowest points after the turn. Default true. False keeps
-   * exactly the rotation given; the page never sends false, tests and the library may.
+   * Set the mini down on its lowest points after the turn. Default false: the axis or
+   * rotation given is kept exactly, because the user's placement is final (PM decision on
+   * PR #79, 2026-09-25). The page's Set down button sends true.
    */
   setDown?: boolean;
 }
@@ -345,8 +346,8 @@ function levelled(
 
 /**
  * The orient step's decision (design note §3): the detection, or what the user chose.
- * A forced axis with a base on it is not levelled; otherwise a forced axis or rotation is
- * set down unless `setDown` is false.
+ * A forced axis or rotation is kept as given, and set down only when `setDown` asks for
+ * it; a forced axis with a base on it is never levelled.
  */
 export function resolveOrientation(
   mesh: IndexedMesh,
@@ -355,7 +356,7 @@ export function resolveOrientation(
   const pass = scanMesh(mesh);
   const { positions } = mesh;
   const hasBase = (up: UpAxis): boolean => coverageFor(pass, up) >= MIN_BASE_COVERAGE;
-  const setsDown = options.setDown !== false && positions.length > 0;
+  const setsDown = options.setDown === true && positions.length > 0;
 
   let orientation: Orientation;
   if (options.rotation) {
