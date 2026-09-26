@@ -18,6 +18,10 @@ This project is built by a small team together with the Claude Code agent. Human
 4. Open a PR with `Closes #<issue>` and fill in the checklist.
 5. CI must be green. A human reviews and squash-merges. Nobody pushes to `main`.
 
+## WebAssembly we build ourselves
+
+`wasm/xatlas/xatlas.wasm` (the unwrapper) is built by this project from pinned sources and committed, so `npm ci && npm run dev` needs no toolchain. Rebuilding it or bumping xatlas or Emscripten needs Docker: `npm run xatlas:build` (from Git Bash or WSL on Windows); how to bump is in `wasm/xatlas/README.md`. The `xatlas build` workflow rebuilds it on every PR that touches `wasm/xatlas/` and fails if one byte differs from the committed file.
+
 ## Automatic reviews
 
 On PRs from branches of this repo (not forks, not drafts), Claude (Fable 5.1) reviews the change: one pass looks for bugs, another checks that the solution is as simple as the problem and fits the rest of the codebase (instructions in `.github/pr-review.md`, read from `main`). When a maintainer adds the `astra-review` label, GPT Astra reviews with the same instructions too. If no reviewer finds anything blocking, the PR gets `ready-for-human-review`. If one does, the PR gets `changes-requested`, Claude fixes the findings on the branch and the next push is reviewed again; after three rounds the PR gets `needs-human`, which a later pass removes. The labels are advice: a human still reviews and merges.

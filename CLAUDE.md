@@ -15,6 +15,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `npm run bench` — pipeline benchmark on a generated 2M-triangle mesh
 - `npm run corpus` — builds, converts every mini in the local `corpus/` in real Chrome and writes figures and comparison sheets to `out/corpus/` (add `-- --no-bake` for a quick run)
 - `npm run baseline:update` — records new figures in `src/regression/baseline.json` after an intended pipeline change
+- `npm run xatlas:build` — rebuilds `wasm/xatlas/xatlas.wasm` in the pinned Emscripten image (needs Docker; `-- --check` compares with the committed file, `-- --variant <name>` builds an experiment into `out/xatlas/`)
 - `npm run format` — Prettier
 
 ## Layout
@@ -22,7 +23,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `src/pipeline/` — mesh processing. Pure functions on ArrayBuffers/typed arrays: no DOM, no three.js scene objects, must run in a Web Worker and in Node. Every function gets unit tests.
 - `src/pipeline/shade.ts` measures per vertex how buried (occlusion) and how creased or edgy (cavity) the surface is; `src/pipeline/look.ts` turns those numbers into colours. Both are used by the viewer and by exports, so they must stay free of three.js.
 - `src/pipeline/glb.ts` writes a level as a GLB file, plain or compressed (quantised + meshopt). Vertex data stays in mm; the node scale converts to glTF metres. Tests run the Khronos validator on both variants.
-- `src/pipeline/unwrap.ts`, `bake.ts` and `compress.ts` — the normal path for the table level: xatlas texture coordinates (the level cut into `SLAB_COUNT` slabs by `slabs.ts` and unwrapped as meshes of one atlas, because xatlas's time grows with the square of the mesh; below `WHOLE_UNWRAP_BELOW` triangles it is unwrapped whole), detail maps baked from the sculpt, and the texture encoded to KTX2 (UASTC effort 0, Zstandard). The raw texture is dropped inside the pipeline; the KTX2 file is the only copy that reaches the page. When one of these steps fails, or the texture is larger than the device's limit, the mini keeps the per-vertex look and `stats.bakeSkipped` says why: that is not an error.
+- `src/pipeline/unwrap.ts`, `bake.ts` and `compress.ts` — the normal path for the table level: xatlas texture coordinates (our own WebAssembly build: `wasm/xatlas/` holds the pinned build and the committed module, `src/pipeline/xatlas.ts` the typed wrapper that loads it; the level cut into `SLAB_COUNT` slabs by `slabs.ts` and unwrapped as meshes of one atlas, because xatlas's time grows with the square of the mesh; below `WHOLE_UNWRAP_BELOW` triangles it is unwrapped whole), detail maps baked from the sculpt, and the texture encoded to KTX2 (UASTC effort 0, Zstandard). The raw texture is dropped inside the pipeline; the KTX2 file is the only copy that reaches the page. When one of these steps fails, or the texture is larger than the device's limit, the mini keeps the per-vertex look and `stats.bakeSkipped` says why: that is not an error.
 - `src/pipeline/bake-policy.ts` picks the detail texture size from the surface area. `src/baked-material.ts` draws a baked mini from one packed texture (normal + cavity) and computes the look in the shader; its GLSL must stay in step with `pointColour` in `look.ts`. `src/compressed-texture.ts` is the page's side: three.js transcodes the KTX2 file to the GPU's block format in its own workers.
 - `src/benchmark.ts` — the "Benchmark this device" panel: converts a generated mesh, runs three table scenes, returns Markdown. Hook `runBenchmark(size)`; `?settle=1` shortens the scenes for tests.
 - `src/pipeline/bvh.ts` — closest-point-on-surface queries over a mesh's triangles; the bake uses it to sample the sculpt.
@@ -39,6 +40,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `scripts/compare-bake.mjs` — sculpt vs per-vertex look vs baked maps, into `out/bake/`.
 - `scripts/measure-baked.mjs` — a full table of baked minis at given texture sizes, uncompressed unless `KTX=0` (an effort) is in the environment.
 - `scripts/measure-memory.mjs` — peak memory of the page's process in real Chrome while it converts given STL files (Windows and Linux): the figures behind `memory.ts`.
+- `scripts/measure-xatlas.mjs` — times one build of the xatlas module, cold and warm, on the generated figure and the slowest corpus unwraps, in Node.
 - `scripts/measure-stress.mjs` — measures the 100/400-mini stress scene in real Chrome, with and without the frame-rate cap.
 - `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (SVG or Excalidraw JSON, each with a PNG export), renders and screenshots from `verify-3d`, and design notes from a design pass (`<name>.md`, one per hand-over PR).
 - `docs/journal/` — one entry per piece of work: what was done, why, problems and their fixes, dead ends, numbers. Format and rules in its `README.md`. Read the entries of the area you are about to change.
