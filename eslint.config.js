@@ -30,7 +30,7 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ['**/lib/pipeline/*', '**/lib/worker/*', '**/lib/three/*'],
+              group: ['**/lib/pipeline/*', '**/lib/worker/*', '**/lib/three/*', '**/lib/read-file'],
               message:
                 'import from src/lib/index.ts, three.ts or dev.ts: the page uses the library like any other consumer',
             },

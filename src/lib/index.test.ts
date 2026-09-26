@@ -79,16 +79,16 @@ describe('the library entries', () => {
 
   it('index.ts and everything it re-exports stay free of three.js', () => {
     // A consumer without three.js (a Node script, a server writing GLBs) must be able to
-    // load index.ts; three.js is only behind three.ts. Reading the sources is enough: the
-    // pipeline and the worker import nothing outside their folders but npm packages.
+    // load index.ts; three.js is only behind three.ts. Reading the sources is enough: what
+    // index.ts re-exports imports nothing outside these files but npm packages.
     const importsThree = /from '(three|three\/[^']*)'|\/three\//;
     const url = new URL('.', import.meta.url);
-    expect(readFileSync(new URL('index.ts', url), 'utf8')).not.toMatch(importsThree);
+    const sources = ['index.ts', 'read-file.ts'];
     for (const folder of ['pipeline', 'worker']) {
-      for (const file of readdirSync(new URL(`${folder}/`, url))) {
-        const source = readFileSync(new URL(`${folder}/${file}`, url), 'utf8');
-        expect(source, `${folder}/${file}`).not.toMatch(importsThree);
-      }
+      for (const file of readdirSync(new URL(`${folder}/`, url))) sources.push(`${folder}/${file}`);
+    }
+    for (const file of sources) {
+      expect(readFileSync(new URL(file, url), 'utf8'), file).not.toMatch(importsThree);
     }
   });
 });
