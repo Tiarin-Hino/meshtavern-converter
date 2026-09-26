@@ -4,6 +4,11 @@
   "version": "0.0.0",
   "license": "MIT",
   "type": "module",
+  "exports": {
+    ".": "./src/lib/index.ts",
+    "./three": "./src/lib/three.ts",
+    "./dev": "./src/lib/dev.ts"
+  },
   "engines": {
     "node": ">=20.19"
   },

@@ -4,7 +4,7 @@
  * Every mesh is generated: no real minis in the repo.
  */
 import { describe, expect, it } from 'vitest';
-import { addBlob, generateFigure } from '../regression/shapes';
+import { addBlob, generateFigure } from '../../regression/shapes';
 import { generateBumpySheet } from './generate';
 import { estimateConversionBytes } from './memory';
 import { ConversionProblem, PROBLEM_MESSAGES, type ProblemCode } from './problems';

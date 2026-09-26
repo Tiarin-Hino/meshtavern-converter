@@ -7,8 +7,7 @@ import {
   pageStateOf,
   STEP_LABELS,
 } from './page-state';
-import { BAKE_STEPS, STEPS } from './pipeline/run';
-import type { Sizing } from './pipeline/size';
+import { BAKE_STEPS, STEPS, type Sizing } from '../lib';
 
 const idle = { busy: false, stats: null, imported: null, error: null };
 

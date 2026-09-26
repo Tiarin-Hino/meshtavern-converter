@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { COPY } from '../src/page-state';
-import { generateBumpySheet } from '../src/pipeline/generate';
-import { encodeBinaryStl } from '../src/pipeline/stl';
+import { COPY } from '../src/page/page-state';
+import { generateBumpySheet, encodeBinaryStl } from '../src/lib/dev';
 
 /**
  * "Your file never leaves your computer." is on the page, so it must be true (#41). This

@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { COPY, STEP_LABELS } from '../src/page-state';
-import { PROBLEM_MESSAGES } from '../src/pipeline/problems';
+import { COPY, STEP_LABELS } from '../src/page/page-state';
+import { PROBLEM_MESSAGES } from '../src/lib';
 
 /**
  * The product page (#41): the four states a person sees, as the page opens without options.
