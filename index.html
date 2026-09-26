@@ -3,105 +3,158 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MeshTavern Converter</title>
+    <title data-copy="title"></title>
   </head>
-  <body>
-    <header>
-      <h1>MeshTavern Converter</h1>
-      <label>Open an STL (or a GLB) <input id="file" type="file" accept=".stl,.glb" /></label>
-      <p id="status">Drop an STL anywhere on the page. The file stays on your computer.</p>
-      <progress id="progress" max="100" value="0" hidden></progress>
-      <button id="cancel" type="button" hidden>Cancel</button>
-      <label id="up-label" hidden
-        >Up axis in file
-        <select id="up"></select
-      ></label>
-      <fieldset id="turn" hidden>
-        <legend>Turn</legend>
-        <button type="button" data-turn="pitch" data-deg="-15">Pitch −15°</button>
-        <button type="button" data-turn="pitch" data-deg="15">Pitch +15°</button>
-        <button type="button" data-turn="roll" data-deg="-15">Roll −15°</button>
-        <button type="button" data-turn="roll" data-deg="15">Roll +15°</button>
-        <label><input id="turn-by-hand" type="checkbox" /> Turn by hand</label>
-        <span id="turn-pending" hidden></span>
-        <button id="turn-apply" type="button" disabled>Apply</button>
-        <button id="set-down" type="button">Set down</button>
-        <button id="turn-reset" type="button" disabled>Reset</button>
-      </fieldset>
-      <fieldset id="sizing" hidden>
-        <legend>Size</legend>
-        <label
-          >Units in file
-          <select id="units">
-            <option value="mm">millimetres</option>
-            <option value="in">inches</option>
-            <option value="m">metres</option>
-          </select></label
-        >
-        <label
-          >Creature size
-          <select id="size"></select
-        ></label>
-        <label
-          >Scale so the base is
-          <input
-            id="scale-to"
-            type="number"
-            min="1"
-            max="1000"
-            step="0.5"
-            placeholder="as measured"
-          />
-          mm</label
-        >
-        <button id="scale-apply" type="button">Scale</button>
-        <label><input id="plain-base" type="checkbox" /> Add a plain base</label>
-        <p id="sizing-warning" hidden>
-          <span></span> <button id="scale-fit" type="button">Scale to fit</button>
-        </p>
-      </fieldset>
-      <div id="levels" role="group" aria-label="Detail level" hidden></div>
-      <div id="stress" role="group" aria-label="Stress test" hidden>
-        <button type="button" data-count="100">100 minis</button>
-        <button type="button" data-count="400">400 minis</button>
-        <button type="button" data-count="100" data-lod="0">100 minis, all 50k</button>
-        <button type="button" data-count="0">Single mini</button>
-      </div>
-      <div id="export" hidden>
-        <button id="download" type="button">Download GLB</button>
-        <label><input id="compact" type="checkbox" /> Compressed (smaller; not for Blender)</label>
-      </div>
-      <fieldset id="look" hidden>
-        <legend>Look</legend>
-        <label><input id="look-enabled" type="checkbox" checked /> Primed and washed</label>
-        <label>Base coat <input id="look-base" type="color" value="#9aa0a8" /></label>
-        <label
-          >Shadows <input id="look-occlusion" type="range" min="0" max="1" step="0.05"
-        /></label>
-        <label>Wash <input id="look-wash" type="range" min="0" max="1" step="0.05" /></label>
-        <label>Edges <input id="look-edges" type="range" min="0" max="1" step="0.05" /></label>
-      </fieldset>
-      <dl id="stats" hidden></dl>
-      <p id="perf"></p>
+  <!--
+    The page has four states (empty, converting, done, error) set on body[data-state] by
+    render() in main.ts; elements say in which states they show with data-in. Elements with
+    data-dev are the team's tools and are removed from the page unless the address has ?dev.
+    The product's wording lives in COPY in src/page-state.ts: data-copy names the key that
+    start-up writes into an element, and render() fills the heading and the panel's button.
+  -->
+  <body data-state="empty">
+    <header id="top">
+      <h1 data-copy="title"></h1>
+      <span id="dev-badge" data-dev>dev</span>
+      <p id="promise-short" data-copy="promiseShort"></p>
+      <button id="choose" type="button" data-copy="openStl"></button>
+      <input
+        id="file"
+        class="visually-hidden"
+        type="file"
+        accept=".stl"
+        tabindex="-1"
+        aria-label="STL file"
+      />
     </header>
-    <canvas id="viewport"></canvas>
-    <details id="bench">
-      <summary>Benchmark this device</summary>
-      <p>
-        Converts a generated mesh (or uses the mini you loaded) and runs three table scenes and a
-        ramp that adds minis until the frame rate drops, about a minute. Nothing is uploaded. Paste
-        the result into the measurements issue.
-      </p>
-      <p>
-        Mode: <a href="?">baked minis, compressed (the normal path)</a> ·
-        <a href="?ktx=off">baked minis, uncompressed</a> · <a href="?bake=off">per-vertex look</a>.
-        Switching reloads the page, so load your mini afterwards.
-      </p>
-      <button id="bench-light" type="button">Run, light (phones)</button>
-      <button id="bench-full" type="button">Run, full (100 MB mesh)</button>
-      <button id="bench-copy" type="button" disabled>Copy result</button>
-      <textarea id="bench-result" readonly rows="12" aria-label="Benchmark result"></textarea>
-    </details>
+    <main id="stage">
+      <div id="view">
+        <canvas id="viewport"></canvas>
+        <div id="levels" role="group" aria-label="Detail level" data-in="done" data-mini></div>
+      </div>
+      <section id="panel" aria-labelledby="heading">
+        <h2 id="heading"></h2>
+        <p id="file-name" data-in="error"></p>
+        <p id="status" role="status" data-copy="dropHint"></p>
+        <progress id="progress" max="100" value="0" data-in="converting"></progress>
+        <button id="cancel" type="button" data-in="converting" data-copy="cancel"></button>
+        <button id="choose-again" class="primary" type="button" data-in="empty error"></button>
+        <p class="promise" data-in="empty error" data-copy="promise"></p>
+        <p id="mini-size" data-in="done" data-mini></p>
+        <section id="export" aria-labelledby="export-heading" data-in="done" data-mini>
+          <h3 id="export-heading" data-copy="downloads"></h3>
+          <!-- Only the levels the PM allowed out of the browser (2026-09-20): table and far. -->
+          <button
+            id="download-table"
+            class="primary"
+            type="button"
+            data-level="2"
+            data-copy="downloadTable"
+          ></button>
+          <button id="download-far" type="button" data-level="3" data-copy="downloadFar"></button>
+          <label data-dev
+            ><input id="compact" type="checkbox" /> Compressed (smaller; not for Blender)</label
+          >
+        </section>
+        <details id="adjust" open data-in="done" data-mini>
+          <summary>
+            <span data-copy="adjust"></span>
+            <span class="summary-hint" data-copy="adjustHint"></span>
+          </summary>
+          <fieldset id="orient">
+            <legend>Up and turn</legend>
+            <label id="up-label"
+              >Up axis in file
+              <select id="up"></select
+            ></label>
+            <div id="turn" role="group" aria-label="Turn">
+              <button type="button" data-turn="pitch" data-deg="-15">Pitch −15°</button>
+              <button type="button" data-turn="pitch" data-deg="15">Pitch +15°</button>
+              <button type="button" data-turn="roll" data-deg="-15">Roll −15°</button>
+              <button type="button" data-turn="roll" data-deg="15">Roll +15°</button>
+              <label class="check"><input id="turn-by-hand" type="checkbox" /> Turn by hand</label>
+              <span id="turn-pending" hidden></span>
+              <button id="turn-apply" type="button" disabled>Apply</button>
+              <button id="set-down" type="button">Set down</button>
+              <button id="turn-reset" type="button" disabled>Reset</button>
+            </div>
+          </fieldset>
+          <fieldset id="sizing">
+            <legend>Size</legend>
+            <label
+              >Units in file
+              <select id="units">
+                <option value="mm">millimetres</option>
+                <option value="in">inches</option>
+                <option value="m">metres</option>
+              </select></label
+            >
+            <label
+              >Creature size
+              <select id="size"></select
+            ></label>
+            <label class="scale-to"
+              >Scale so the base is
+              <input
+                id="scale-to"
+                type="number"
+                min="1"
+                max="1000"
+                step="0.5"
+                placeholder="as measured"
+              />
+              mm</label
+            >
+            <button id="scale-apply" type="button">Scale</button>
+            <label class="check"><input id="plain-base" type="checkbox" /> Add a plain base</label>
+            <p id="sizing-warning" hidden>
+              <span></span> <button id="scale-fit" type="button">Scale to fit</button>
+            </p>
+          </fieldset>
+          <fieldset id="look">
+            <legend>Look</legend>
+            <label class="check"
+              ><input id="look-enabled" type="checkbox" checked /> Primed and washed</label
+            >
+            <label>Base coat <input id="look-base" type="color" value="#9aa0a8" /></label>
+            <label
+              >Shadows <input id="look-occlusion" type="range" min="0" max="1" step="0.05"
+            /></label>
+            <label>Wash <input id="look-wash" type="range" min="0" max="1" step="0.05" /></label>
+            <label>Edges <input id="look-edges" type="range" min="0" max="1" step="0.05" /></label>
+          </fieldset>
+        </details>
+        <dl id="stats" data-in="done" data-mini data-dev></dl>
+        <div id="stress" role="group" aria-label="Stress test" data-in="done" data-mini data-dev>
+          <button type="button" data-count="100">100 minis</button>
+          <button type="button" data-count="400">400 minis</button>
+          <button type="button" data-count="100" data-lod="0">100 minis, all 50k</button>
+          <button type="button" data-count="0">Single mini</button>
+        </div>
+      </section>
+      <div id="drop-frame" aria-hidden="true" data-copy="dropOverlay"></div>
+    </main>
+    <footer id="dev-tools" data-dev>
+      <p id="perf"></p>
+      <details id="bench">
+        <summary>Benchmark this device</summary>
+        <p>
+          Converts a generated mesh (or uses the mini you loaded) and runs three table scenes and a
+          ramp that adds minis until the frame rate drops, about a minute. Nothing is uploaded.
+          Paste the result into the measurements issue.
+        </p>
+        <p>
+          Mode: <a href="?dev">baked minis, compressed (the normal path)</a> ·
+          <a href="?dev&amp;ktx=off">baked minis, uncompressed</a> ·
+          <a href="?dev&amp;bake=off">per-vertex look</a>. Switching reloads the page, so load your
+          mini afterwards.
+        </p>
+        <button id="bench-light" type="button">Run, light (phones)</button>
+        <button id="bench-full" type="button">Run, full (100 MB mesh)</button>
+        <button id="bench-copy" type="button" disabled>Copy result</button>
+        <textarea id="bench-result" readonly rows="12" aria-label="Benchmark result"></textarea>
+      </details>
+    </footer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

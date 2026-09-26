@@ -57,11 +57,14 @@ const round = (value, digits = 0) => Number(value.toFixed(digits));
 const MAX_STALL_MS = 100;
 const minis = {};
 let machine;
+const HIDE_OVERLAY = '#panel, #levels { display: none }';
 const browser = await chromium.launch({ channel: 'chrome', headless: false });
 try {
   const page = await browser.newPage({ viewport: { width: 760, height: 900 } });
   await page.goto(address);
   await page.waitForFunction(() => window.__mt?.state.ready === true);
+  // The panel and the level chips lie over the canvas: hidden, so the sheets show the mini alone.
+  await page.addStyleTag({ content: HIDE_OVERLAY });
   machine = await page.evaluate(() => {
     const gl = document.createElement('canvas').getContext('webgl2');
     const info = gl?.getExtension('WEBGL_debug_renderer_info');
@@ -92,6 +95,7 @@ try {
       // The page is still converting; start over with a fresh one for the next mini.
       await page.goto(address);
       await page.waitForFunction(() => window.__mt?.state.ready === true);
+      await page.addStyleTag({ content: HIDE_OVERLAY });
       continue;
     }
     const { stats, baked, error, longestFrameGapMs } = await page.evaluate(() => window.__mt.state);

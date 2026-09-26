@@ -47,6 +47,8 @@ try {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1000 } });
     await page.goto(`http://localhost:${PORT}/?bake=${resolution}&ktx=${process.env.KTX ?? 'off'}`);
     await page.waitForFunction(() => window.__mt?.state.ready === true);
+    // The panel and the level chips lie over the canvas: hidden, so the pictures show the minis alone.
+    await page.addStyleTag({ content: '#panel, #levels { display: none }' });
     for (const mini of minis) {
       await page.evaluate(() => (window.__mt.state.stats = null));
       await page.setInputFiles('#file', join('corpus', mini.file));

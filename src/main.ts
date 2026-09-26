@@ -27,11 +27,23 @@ import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from './pipeline/stl';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { transcodeDetail } from './compressed-texture';
 import { parsePageOptions } from './options';
+import {
+  COPY,
+  describeMini,
+  describeProgress,
+  describeReady,
+  describeWrongFile,
+  LEVEL_LABELS,
+  pageStateOf,
+  type PageState,
+} from './page-state';
 import { Viewer, type BakedMini, type Perf } from './viewer';
 import { ConversionCancelled, Converter } from './worker/client';
 
 interface AppState {
   ready: boolean;
+  /** Which of the four states the page shows; follows from the rest, see `render()`. */
+  page: PageState;
   busy: boolean;
   fileName: string | null;
   progress: Progress | null;
@@ -140,6 +152,12 @@ declare global {
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>('#viewport')!;
+const heading = document.querySelector<HTMLElement>('#heading')!;
+const fileNameLine = document.querySelector<HTMLElement>('#file-name')!;
+const chooseButton = document.querySelector<HTMLButtonElement>('#choose')!;
+const chooseAgain = document.querySelector<HTMLButtonElement>('#choose-again')!;
+const miniSize = document.querySelector<HTMLElement>('#mini-size')!;
+const adjust = document.querySelector<HTMLDetailsElement>('#adjust')!;
 const status = document.querySelector<HTMLElement>('#status')!;
 const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
 const cancelButton = document.querySelector<HTMLButtonElement>('#cancel')!;
@@ -148,14 +166,12 @@ const fileInput = document.querySelector<HTMLInputElement>('#file')!;
 const levelButtons = document.querySelector<HTMLElement>('#levels')!;
 const stressButtons = document.querySelector<HTMLElement>('#stress')!;
 const upSelect = document.querySelector<HTMLSelectElement>('#up')!;
-const upLabel = document.querySelector<HTMLElement>('#up-label')!;
 const turnPanel = document.querySelector<HTMLElement>('#turn')!;
 const turnByHand = document.querySelector<HTMLInputElement>('#turn-by-hand')!;
 const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
 const turnReset = document.querySelector<HTMLButtonElement>('#turn-reset')!;
 const turnApply = document.querySelector<HTMLButtonElement>('#turn-apply')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
-const sizingPanel = document.querySelector<HTMLElement>('#sizing')!;
 const sizingInputs = {
   units: document.querySelector<HTMLSelectElement>('#units')!,
   size: document.querySelector<HTMLSelectElement>('#size')!,
@@ -174,6 +190,7 @@ const memoryBudget = memoryBudgetBytes(
 );
 const state: AppState = {
   ready: false,
+  page: 'empty',
   busy: false,
   fileName: null,
   progress: null,
@@ -217,6 +234,31 @@ let choices: { orientation: OrientationOptions; sizing: SizingOptions } = {
   orientation: {},
   sizing: {},
 };
+/** Name of the GLB on screen (`?dev`); null when the page shows a converted mini or none. */
+let importedName: string | null = null;
+
+/**
+ * Puts the page into the state that follows from `state`: the CSS shows and hides by
+ * `body[data-state]`. Called after every change of the app state.
+ */
+function render(): void {
+  state.page = pageStateOf(state);
+  document.body.dataset.state = state.page;
+  if (state.imported) document.body.dataset.kind = 'glb';
+  else delete document.body.dataset.kind;
+  const name = state.fileName ?? '';
+  heading.textContent =
+    state.page === 'empty'
+      ? COPY.dropHeading
+      : state.page === 'error'
+        ? COPY.errorHeading
+        : state.page === 'done'
+          ? (importedName ?? name.replace(/\.stl$/i, ''))
+          : name;
+  fileNameLine.textContent = name;
+  chooseAgain.textContent = state.page === 'error' ? COPY.chooseAnother : COPY.chooseFile;
+  chooseButton.disabled = state.busy;
+}
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 
@@ -265,7 +307,6 @@ function showStats(stats: ConversionStats): void {
       return row;
     }),
   );
-  statsList.hidden = false;
 }
 
 const UNIT_NAMES: Record<Units, string> = { mm: 'mm', in: 'inches', m: 'metres' };
@@ -322,7 +363,6 @@ function showSizing(sizing: Sizing): void {
           ? `${base} is small for ${sizeLabel(sizing.size)}: the mini may be printed small.`
           : `The mini measures ${warning.baseMm.toFixed(0)} mm across, more than Gargantuan: are the units right?`;
   }
-  sizingPanel.hidden = false;
 }
 
 async function setSizing(changes: Partial<SizingOptions>): Promise<void> {
@@ -376,23 +416,19 @@ function showLevel(level: number, reframe = false, preferBaked = true): void {
 }
 
 function showLevelButtons(stats: ConversionStats): void {
-  const labels = [
-    'Full',
-    ...stats.lods.map((lod) => `${lod.name} ${Math.round(lod.triangles / 1000)}k`),
-  ];
+  const triangles = [stats.triangles, ...stats.lods.map((lod) => lod.triangles)];
   levelButtons.replaceChildren(
-    ...labels.map((label, level) => {
+    ...triangles.map((count, level) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = label;
+      button.textContent = LEVEL_LABELS[level] ?? `Level ${level}`;
+      button.title = `${count.toLocaleString()} triangles`;
       button.addEventListener('click', () => showLevel(level));
       return button;
     }),
   );
-  levelButtons.hidden = false;
 }
 
-const lookPanel = document.querySelector<HTMLElement>('#look')!;
 const lookInputs = {
   enabled: document.querySelector<HTMLInputElement>('#look-enabled')!,
   base: document.querySelector<HTMLInputElement>('#look-base')!,
@@ -580,15 +616,9 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     progressLog: [],
   });
   status.classList.remove('problem');
-  statsList.hidden = true;
-  levelButtons.hidden = true;
-  stressButtons.hidden = true;
-  lookPanel.hidden = true;
-  sizingPanel.hidden = true;
-  turnPanel.hidden = true;
-  exportPanel.hidden = true;
-  progressBar.hidden = false;
-  cancelButton.hidden = false;
+  status.textContent = '';
+  progressBar.value = 0;
+  render();
   const stopWatching = watchFrames();
   try {
     const result = await converter.convert(
@@ -597,9 +627,8 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
         state.progress = progress;
         if (progress.stepPercent === undefined) state.progressLog.push(progress);
         progressBar.value = progress.percent;
-        const within =
-          progress.stepPercent === undefined ? '' : ` (${progress.stepPercent}% of this step)`;
-        status.textContent = `${fileName}: ${progress.step}… ${progress.percent}%${within}`;
+        progressBar.toggleAttribute('data-silent', progress.stepPercent === undefined);
+        status.textContent = describeProgress(progress);
       },
       {
         orientation: choices.orientation,
@@ -611,7 +640,7 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
       },
     );
     // From here on the mini exists; cancelling would only stop it from being shown.
-    cancelButton.hidden = true;
+    cancelButton.disabled = true;
     const stats = result.stats;
     baked = null;
     detailKtx2 = null;
@@ -644,15 +673,13 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = stats;
     showLevelButtons(stats);
-    stressButtons.hidden = false;
-    lookPanel.hidden = false;
-    exportPanel.hidden = false;
     state.imported = null;
+    importedName = null;
     upSelect.value = stats.up;
-    upLabel.hidden = false;
-    turnPanel.hidden = false;
     showTurn(null);
     showSizing(stats.sizing);
+    // A size warning is never hidden behind a closed Adjust.
+    if (stats.sizing.warnings.length > 0) adjust.open = true;
     // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
     showLevel(TABLE_LEVEL, true);
@@ -664,21 +691,23 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
       setTimeout(resolve, FRAME_WAIT_MS);
     });
     stopWatching();
-    status.textContent = `${fileName} (${stats.format} STL, ${stats.sourceTriangles.toLocaleString()} triangles)`;
+    status.textContent = describeReady(stats);
+    miniSize.textContent = describeMini(stats);
     showStats(stats);
   } catch (error) {
     if (error instanceof ConversionCancelled) {
       state.cancelled = true;
-      status.textContent = `${fileName}: cancelled.`;
+      status.textContent = COPY.cancelled;
     } else {
       showProblem(fileName, error);
     }
   } finally {
     stopWatching();
-    progressBar.hidden = true;
-    cancelButton.hidden = true;
+    cancelButton.disabled = false;
+    progressBar.removeAttribute('data-silent');
     state.progress = null;
     state.busy = false;
+    render();
   }
 }
 cancelButton.addEventListener('click', () => converter.cancel());
@@ -698,7 +727,6 @@ function demoStl(): ArrayBuffer {
   ]);
 }
 
-const exportPanel = document.querySelector<HTMLElement>('#export')!;
 const compactBox = document.querySelector<HTMLInputElement>('#compact')!;
 
 async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> {
@@ -715,20 +743,11 @@ async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> 
 }
 
 async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
-  for (const panel of [
-    statsList,
-    levelButtons,
-    stressButtons,
-    lookPanel,
-    upLabel,
-    turnPanel,
-    sizingPanel,
-    exportPanel,
-  ]) {
-    panel.hidden = true;
-  }
+  status.classList.remove('problem');
   try {
+    state.error = null;
     state.imported = await viewer.showGlb(glb);
+    importedName = name;
     state.stressCount = 0;
     const size = state.imported.sizeMm.map((mm) => mm.toFixed(1)).join(' × ');
     status.textContent = `${name}: ${state.imported.triangles.toLocaleString()} triangles, ${size} mm, ${(glb.byteLength / 1024).toFixed(0)} KB`;
@@ -736,19 +755,23 @@ async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
     state.error = error instanceof Error ? error.message : String(error);
     status.textContent = `${name} could not be opened: ${state.error}`;
   }
+  render();
 }
 
-document.querySelector<HTMLButtonElement>('#download')!.addEventListener('click', () => {
-  // The full-detail level is never exported; fall back to the close level.
-  const level = Math.max(1, state.shownLevel);
-  void exportGlb(level, compactBox.checked).then((glb) => {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-    link.download = `${state.fileName!.replace(/.stl$/i, '')}-${state.stats!.lods[level - 1]!.name}.glb`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+// Each button writes its own level, whatever chip is pressed: looking at the close level
+// cannot change what a download contains. The close and full levels are never exported.
+for (const button of document.querySelectorAll<HTMLButtonElement>('#export [data-level]')) {
+  button.addEventListener('click', () => {
+    const level = Number(button.dataset.level);
+    void exportGlb(level, compactBox.checked).then((glb) => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+      link.download = `${state.fileName!.replace(/.stl$/i, '')}-${state.stats!.lods[level - 1]!.name}.glb`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
   });
-});
+}
 
 /** Shows why a file did not become a mini, in words for the user; the technical detail goes to `state` and the console. */
 function showProblem(fileName: string, error: unknown): void {
@@ -758,17 +781,30 @@ function showProblem(fileName: string, error: unknown): void {
     errorCode: problem.code,
     errorDetail: problem.detail ?? null,
   });
-  status.textContent = `${fileName} could not be converted. ${problem.message}`;
+  status.textContent = problem.message;
   status.classList.add('problem');
   if (problem.detail) console.warn(`${fileName}: ${problem.code}: ${problem.detail}`);
+  render();
 }
 
 async function loadFile(file: File | undefined): Promise<void> {
   if (!file || state.busy) return;
   status.classList.remove('problem');
-  if (file.name.toLowerCase().endsWith('.glb')) return loadGlb(await file.arrayBuffer(), file.name);
+  // Opening a GLB checks the export's round trip: a tool for the team, under ?dev.
+  if (pageOptions.dev && file.name.toLowerCase().endsWith('.glb')) {
+    return loadGlb(await file.arrayBuffer(), file.name);
+  }
   if (!file.name.toLowerCase().endsWith('.stl')) {
-    status.textContent = `${file.name} is neither an STL nor a GLB file.`;
+    // The error card, like the refusals below, so the page state matches what is on screen.
+    Object.assign(state, {
+      fileName: file.name,
+      error: describeWrongFile(file.name, pageOptions.dev),
+      errorCode: 'not-stl',
+      errorDetail: null,
+    });
+    status.textContent = state.error;
+    status.classList.add('problem');
+    render();
     return;
   }
   // The file is read locally and handed to a worker in this tab. It is never sent anywhere.
@@ -821,9 +857,29 @@ turnByHand.addEventListener('change', () =>
 turnApply.addEventListener('click', () => void applyTurn(false));
 document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
 turnReset.addEventListener('click', () => showTurn(null));
+for (const button of [chooseButton, chooseAgain]) {
+  button.addEventListener('click', () => fileInput.click());
+}
+// Dropping works in every state; while a file is dragged over the page, a frame says so.
+// dragenter and dragleave fire for every child element too, so they are counted.
+let dragDepth = 0;
+const setDragging = (on: boolean): void => {
+  document.body.toggleAttribute('data-dragging', on);
+};
+document.body.addEventListener('dragenter', (event) => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  dragDepth++;
+  setDragging(true);
+});
+document.body.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) setDragging(false);
+});
 document.body.addEventListener('dragover', (event) => event.preventDefault());
 document.body.addEventListener('drop', (event) => {
   event.preventDefault();
+  dragDepth = 0;
+  setDragging(false);
   void loadFile(event.dataTransfer?.files[0]);
 });
 
@@ -901,8 +957,24 @@ benchCopy.addEventListener('click', () => {
   benchResult.select();
 });
 
+// The wording is in COPY (page-state.ts); data-copy names the string an element shows.
+for (const element of document.querySelectorAll<HTMLElement>('[data-copy]')) {
+  element.textContent = COPY[element.dataset.copy as keyof typeof COPY];
+}
+/** Screens up to this width get the phone layout; the same number is in the media query of style.css. _(proposal)_ */
+const PHONE_MAX_WIDTH_PX = 600;
+// On a phone the sheet starts with the size line and the downloads; Adjust is one tap away.
+if (matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).matches) adjust.open = false;
+// The team's tools exist only under ?dev. Removed rather than hidden: a product page has no
+// benchmark button to find. References taken above stay valid, and the hooks keep working.
+if (!pageOptions.dev) {
+  for (const element of document.querySelectorAll('[data-dev]')) element.remove();
+} else {
+  fileInput.accept = '.stl,.glb';
+}
 if (pageOptions.problems.length > 0) {
   status.textContent = `Check the address: ${pageOptions.problems.join('; ')}.`;
   status.classList.add('problem');
 }
+render();
 state.ready = true;

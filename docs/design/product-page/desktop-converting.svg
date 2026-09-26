@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <style>
+    .fill { fill: #f5f5f5; stroke: #2b2b2b; stroke-width: 1.5; }
+    .card { fill: #fff; stroke: #2b2b2b; stroke-width: 1.5; }
+    .btn2 { fill: #fff; stroke: #2b2b2b; stroke-width: 1.5; }
+    .btn2-text { fill: #2b2b2b; font-size: 15px; font-weight: 600; text-anchor: middle; }
+    .h1 { font-size: 18px; font-weight: 700; fill: #2b2b2b; }
+    .h2 { font-size: 22px; font-weight: 700; fill: #2b2b2b; text-anchor: middle; }
+    .tc { font-size: 16px; fill: #2b2b2b; text-anchor: middle; }
+    .m { font-size: 14px; fill: #666; }
+    .mc { font-size: 14px; fill: #666; text-anchor: middle; }
+    .note { font-size: 12px; fill: #b3541e; font-style: italic; }
+  </style>
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#e2e2e2" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="800" fill="#fff"/>
+  <rect x="0" y="56" width="1280" height="744" fill="#fafafa"/>
+  <rect x="0" y="56" width="1280" height="744" fill="url(#grid)"/>
+  <!-- top bar -->
+  <rect class="fill" x="0" y="0" width="1280" height="56"/>
+  <text class="h1" x="24" y="35">MeshTavern Converter</text>
+  <text class="m" x="250" y="34">Runs in your browser. Your file never leaves your computer.</text>
+  <rect class="btn2" x="1112" y="12" width="144" height="32" rx="6" opacity="0.4"/>
+  <text class="btn2-text" x="1184" y="33" opacity="0.4">Open an STL</text>
+  <!-- progress card -->
+  <rect class="card" x="380" y="290" width="520" height="260" rx="12"/>
+  <text class="h2" x="640" y="346">goblin-32mm.stl</text>
+  <text class="tc" x="640" y="392">Unwrapping the surface · 40 %</text>
+  <rect x="440" y="416" width="400" height="10" rx="5" fill="#e6e6e6" stroke="#2b2b2b" stroke-width="1"/>
+  <rect x="440" y="416" width="280" height="10" rx="5" fill="#2b2b2b"/>
+  <rect class="btn2" x="588" y="466" width="104" height="40" rx="8"/>
+  <text class="btn2-text" x="640" y="491">Cancel</text>
+  <!-- annotations -->
+  <text class="note" x="24" y="80">Converting state, desktop. The bar is the share of steps finished (7 of 10 here); the line names the step and adds its own progress when it reports one.</text>
+  <text class="note" x="24" y="98">While a step runs silently (the bake takes about 10 s on the reference laptop) the fill shimmers. The mini appears when the conversion ends. The top-bar button is disabled while converting.</text>
+</svg>

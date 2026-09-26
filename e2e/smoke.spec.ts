@@ -10,7 +10,7 @@ const MAX_STALL_MS = process.env.STALL_LIMIT === 'strict' ? 100 : 400;
 // Most tests are about something other than baking and switch it off (a development option)
 // to stay quick on CI runners; the tests of the normal path open the page without options.
 test.beforeEach(async ({ page }) => {
-  await page.goto('/?bake=off');
+  await page.goto('/?dev&bake=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 });
 
@@ -63,9 +63,9 @@ test('keeps the page responsive while a large mesh converts', async ({ page }) =
 
 test('switches between detail levels without moving the camera', async ({ page }, testInfo) => {
   await page.evaluate(() => window.__mt.loadGenerated(200));
-  await page.getByRole('button', { name: /^far/ }).click();
+  await page.getByRole('button', { name: /^Far/ }).click();
   expect(await page.evaluate(() => window.__mt.state.shownLevel)).toBe(3);
-  await expect(page.getByRole('button', { name: /^far/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /^Far/ })).toHaveAttribute('aria-pressed', 'true');
 
   await page.evaluate(() => window.__mt.setWireframe(true));
   await page.waitForTimeout(300);
@@ -193,7 +193,7 @@ test('suggests a creature size and lets the user change units, size, scale and b
   ]);
   await expect(page.locator('#sizing-warning')).toBeVisible();
   await testInfo.attach('sizing-warning', {
-    body: await page.locator('header').screenshot(),
+    body: await page.locator('#panel').screenshot(),
     contentType: 'image/png',
   });
   await page.getByRole('button', { name: 'Scale to fit' }).click();
@@ -371,12 +371,17 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     contentType: 'image/png',
   });
 
-  // The download button offers a file named after the mini and the level.
+  // The two download buttons offer files named after the mini and their own level, whatever
+  // level is on screen; the close level is shown but never offered (PM decision, 2026-09-20).
   await page.evaluate(() => window.__mt.loadGenerated(50));
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download GLB' }).click();
-  // A converted mini opens on its table level.
+  await page.getByRole('button', { name: /^Close/ }).click();
+  let download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download table level' }).click();
   expect((await download).suggestedFilename()).toBe('generated-50-table.glb');
+  download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download far level' }).click();
+  expect((await download).suggestedFilename()).toBe('generated-50-far.glb');
+  await expect(page.getByRole('button', { name: /download close/i })).toHaveCount(0);
 });
 
 test('bakes and compresses a mini without being asked to, and shows it that way', async ({
@@ -384,7 +389,7 @@ test('bakes and compresses a mini without being asked to, and shows it that way'
 }, testInfo) => {
   // Loading and warming up the unwrapper, unwrapping, baking and encoding are slow on CI runners.
   test.setTimeout(240_000);
-  await page.goto('/');
+  await page.goto('/?dev');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.evaluate(() => window.__mt.loadGenerated(300));
   const state = await page.evaluate(() => window.__mt.state);
@@ -468,7 +473,7 @@ test('a running conversion can be cancelled, and the next one works', async ({ p
 
   const state = await page.evaluate(() => window.__mt.state);
   expect(state).toMatchObject({ cancelled: true, busy: false, error: null, stats: null });
-  await expect(page.locator('#status')).toContainText('cancelled');
+  await expect(page.locator('#status')).toContainText(/cancelled/i);
   await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
 
   await page.evaluate(() => window.__mt.loadDemo());
@@ -490,7 +495,7 @@ test('development options switch compression off', async ({ page }) => {
 
 test('runs the device benchmark and offers the result as text', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto('/?settle=1');
+  await page.goto('/?dev&settle=1');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.getByText('Benchmark this device').click();
 
