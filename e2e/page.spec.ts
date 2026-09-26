@@ -53,7 +53,8 @@ test('shows the empty, converting, done and error states', async ({ page }, test
   await expect(page.locator('#heading')).toHaveText('generated-300');
   await expect(page.locator('#status')).toContainText('Ready. Converted from');
   await expect(page.locator('#mini-size')).toHaveText('50 mm tall · Medium, 1 square · no base');
-  await expect(page.locator('#export')).toBeVisible();
+  await expect(page.getByRole('button', { name: COPY.downloadTable })).toBeVisible();
+  await expect(page.getByRole('button', { name: COPY.downloadFar })).toBeVisible();
   await expect(page.locator('#levels button')).toHaveCount(4);
   await expect(page.locator('#stats')).toHaveCount(0);
   await page.waitForTimeout(500);

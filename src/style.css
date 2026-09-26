@@ -315,6 +315,17 @@ body[data-state='done'] #heading {
   gap: 8px;
 }
 
+#export h3,
+#adjust legend {
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 #export label,
 .check {
   display: flex;
@@ -344,12 +355,6 @@ body[data-state='done'] #heading {
 
 #adjust legend {
   margin-bottom: 8px;
-  padding: 0;
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 #adjust label {

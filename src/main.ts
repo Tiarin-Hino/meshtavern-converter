@@ -756,17 +756,20 @@ async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
   render();
 }
 
-document.querySelector<HTMLButtonElement>('#download')!.addEventListener('click', () => {
-  // The full-detail level is never exported; fall back to the close level.
-  const level = Math.max(1, state.shownLevel);
-  void exportGlb(level, compactBox.checked).then((glb) => {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-    link.download = `${state.fileName!.replace(/.stl$/i, '')}-${state.stats!.lods[level - 1]!.name}.glb`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+// Each button writes its own level, whatever chip is pressed: looking at the close level
+// cannot change what a download contains. The close and full levels are never exported.
+for (const button of document.querySelectorAll<HTMLButtonElement>('#export [data-level]')) {
+  button.addEventListener('click', () => {
+    const level = Number(button.dataset.level);
+    void exportGlb(level, compactBox.checked).then((glb) => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+      link.download = `${state.fileName!.replace(/.stl$/i, '')}-${state.stats!.lods[level - 1]!.name}.glb`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
   });
-});
+}
 
 /** Shows why a file did not become a mini, in words for the user; the technical detail goes to `state` and the console. */
 function showProblem(fileName: string, error: unknown): void {

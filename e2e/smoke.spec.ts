@@ -371,12 +371,17 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     contentType: 'image/png',
   });
 
-  // The download button offers a file named after the mini and the level.
+  // The two download buttons offer files named after the mini and their own level, whatever
+  // level is on screen; the close level is shown but never offered (PM decision, 2026-09-20).
   await page.evaluate(() => window.__mt.loadGenerated(50));
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download GLB' }).click();
-  // A converted mini opens on its table level.
+  await page.getByRole('button', { name: /^Close|^close/ }).click();
+  let download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download table level' }).click();
   expect((await download).suggestedFilename()).toBe('generated-50-table.glb');
+  download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download far level' }).click();
+  expect((await download).suggestedFilename()).toBe('generated-50-far.glb');
+  await expect(page.getByRole('button', { name: /download close/i })).toHaveCount(0);
 });
 
 test('bakes and compresses a mini without being asked to, and shows it that way', async ({

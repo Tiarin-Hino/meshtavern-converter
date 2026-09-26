@@ -43,8 +43,13 @@
         </button>
         <p class="promise" data-in="empty error">Your file never leaves your computer.</p>
         <p id="mini-size" data-in="done" data-mini></p>
-        <section id="export" aria-label="Download" data-in="done" data-mini>
-          <button id="download" type="button">Download GLB</button>
+        <section id="export" aria-labelledby="export-heading" data-in="done" data-mini>
+          <h3 id="export-heading">Download as GLB</h3>
+          <!-- Only the levels the PM allowed out of the browser (2026-09-20): table and far. -->
+          <button id="download-table" class="primary" type="button" data-level="2">
+            Download table level
+          </button>
+          <button id="download-far" type="button" data-level="3">Download far level</button>
           <label data-dev
             ><input id="compact" type="checkbox" /> Compressed (smaller; not for Blender)</label
           >
