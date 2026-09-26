@@ -5,7 +5,6 @@ import {
   DEFAULT_LOOK,
   type Look,
   type IndexedMesh,
-  checkFits,
   memoryBudgetBytes,
   UP_AXES,
   type Orientation,
@@ -28,8 +27,7 @@ import {
   type SizingOptions,
   type Units,
   UNIT_FACTORS,
-  SNIFF_BYTES,
-  sniffStl,
+  readStlFile,
   ConversionCancelled,
   Converter,
 } from '../lib';
@@ -821,9 +819,7 @@ async function loadFile(file: File | undefined): Promise<void> {
   try {
     // Look at the start and the size first: a file that is empty, not an STL or too large
     // for this device is refused before all of it is read into memory.
-    const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
-    checkFits(file.size, sniffStl(head, file.size), memoryBudget);
-    stl = await file.arrayBuffer();
+    stl = await readStlFile(file, memoryBudget);
   } catch (error) {
     state.fileName = file.name;
     return showProblem(file.name, error);

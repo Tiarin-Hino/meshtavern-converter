@@ -36,6 +36,7 @@ describe('the library entries', () => {
       'memoryBudgetBytes',
       'multiply',
       'readKtx2Header',
+      'readStlFile',
       'sizeLabel',
       'sniffStl',
       'toProblem',
