@@ -3,19 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MeshTavern Converter</title>
+    <title data-copy="title"></title>
   </head>
   <!--
     The page has four states (empty, converting, done, error) set on body[data-state] by
     render() in main.ts; elements say in which states they show with data-in. Elements with
     data-dev are the team's tools and are removed from the page unless the address has ?dev.
+    The product's wording lives in COPY in src/page-state.ts: data-copy names the key that
+    start-up writes into an element, and render() fills the heading and the panel's button.
   -->
   <body data-state="empty">
     <header id="top">
-      <h1>MeshTavern Converter</h1>
+      <h1 data-copy="title"></h1>
       <span id="dev-badge" data-dev>dev</span>
-      <p id="promise-short">Runs in your browser. Your file never leaves your computer.</p>
-      <button id="choose" type="button">Open an STL</button>
+      <p id="promise-short" data-copy="promiseShort"></p>
+      <button id="choose" type="button" data-copy="openStl"></button>
       <input
         id="file"
         class="visually-hidden"
@@ -31,31 +33,34 @@
         <div id="levels" role="group" aria-label="Detail level" data-in="done" data-mini></div>
       </div>
       <section id="panel" aria-labelledby="heading">
-        <h2 id="heading">Drop an STL here</h2>
+        <h2 id="heading"></h2>
         <p id="file-name" data-in="error"></p>
-        <p id="status" role="status">
-          You get a game-ready mini in seconds. Everything runs in this tab.
-        </p>
+        <p id="status" role="status" data-copy="dropHint"></p>
         <progress id="progress" max="100" value="0" data-in="converting"></progress>
         <button id="cancel" type="button" data-in="converting">Cancel</button>
-        <button id="choose-again" class="primary" type="button" data-in="empty error">
-          Choose a file
-        </button>
-        <p class="promise" data-in="empty error">Your file never leaves your computer.</p>
+        <button id="choose-again" class="primary" type="button" data-in="empty error"></button>
+        <p class="promise" data-in="empty error" data-copy="promise"></p>
         <p id="mini-size" data-in="done" data-mini></p>
         <section id="export" aria-labelledby="export-heading" data-in="done" data-mini>
-          <h3 id="export-heading">Download as GLB</h3>
+          <h3 id="export-heading" data-copy="downloads"></h3>
           <!-- Only the levels the PM allowed out of the browser (2026-09-20): table and far. -->
-          <button id="download-table" class="primary" type="button" data-level="2">
-            Download table level
-          </button>
-          <button id="download-far" type="button" data-level="3">Download far level</button>
+          <button
+            id="download-table"
+            class="primary"
+            type="button"
+            data-level="2"
+            data-copy="downloadTable"
+          ></button>
+          <button id="download-far" type="button" data-level="3" data-copy="downloadFar"></button>
           <label data-dev
             ><input id="compact" type="checkbox" /> Compressed (smaller; not for Blender)</label
           >
         </section>
         <details id="adjust" open data-in="done" data-mini>
-          <summary>Adjust <span class="summary-hint">Up and turn · Size · Look</span></summary>
+          <summary>
+            <span data-copy="adjust"></span>
+            <span class="summary-hint">Up and turn · Size · Look</span>
+          </summary>
           <fieldset id="orient">
             <legend>Up and turn</legend>
             <label id="up-label"
@@ -127,7 +132,7 @@
           <button type="button" data-count="0">Single mini</button>
         </div>
       </section>
-      <div id="drop-frame" aria-hidden="true">Drop to convert</div>
+      <div id="drop-frame" aria-hidden="true" data-copy="dropOverlay"></div>
     </main>
     <footer id="dev-tools" data-dev>
       <p id="perf"></p>

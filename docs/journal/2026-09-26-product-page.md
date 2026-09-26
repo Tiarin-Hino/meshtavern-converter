@@ -30,6 +30,9 @@ Story 6 of the Phase 1 spec (#41): one obvious thing to do, clear feedback while
 - **The promise test passed alone and failed in the suite.** It waited until the page was "not converting", which was already true in the moment between picking the file and the page starting to read it. **Fix:** it waits for the done or the error state.
 - **Old tests ran against an old page.** The e2e tests reuse a server on port 4173 outside CI. An `npm run lan` left running since 2026-09-23 served the old build, so the first run of the new test failed with `state.page` undefined. **Fix:** build before running e2e locally; the old server serves the new `dist/`.
 - **"Keeps the page responsive" timed out twice locally.** It converts 500k triangles and took over 30 s instead of 3 s when the Playwright workers ran the new page tests (which bake) at the same time. **Cause:** CPU contention between parallel workers on the development PC. Run alone six times in a row it took 3.0 to 3.4 s. CI runs one worker. Not changed; noted here in case it shows up again.
+- **The team's pictures showed the panel over the mini** (review). `corpus.mjs`, `compare-look.mjs`, `compare-bake.mjs`, `measure-baked.mjs` and `measure-stress.mjs` screenshot `#viewport`, and the done panel and the level chips now lie over it. **Fix:** each script hides `#panel` and `#levels` with a style tag after loading the page. Not run here (no Chrome in the review environment).
+- **The wording lived in two places** (review). `index.html` carried the same sentences as `COPY`, so changing `COPY` changed only the tests. **Fix:** elements name their string with `data-copy` and start-up writes `COPY[key]` into them; the HTML has no product wording left.
+- **A dropped `.obj` did not show the error card** (review): it wrote the refusal into the status line and left the state as it was. It now goes to the error state like the other refusals.
 
 ## Dead ends
 

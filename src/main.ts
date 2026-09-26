@@ -795,7 +795,16 @@ async function loadFile(file: File | undefined): Promise<void> {
     return loadGlb(await file.arrayBuffer(), file.name);
   }
   if (!file.name.toLowerCase().endsWith('.stl')) {
-    status.textContent = describeWrongFile(file.name, pageOptions.dev);
+    // The error card, like the refusals below, so the page state matches what is on screen.
+    Object.assign(state, {
+      fileName: file.name,
+      error: describeWrongFile(file.name, pageOptions.dev),
+      errorCode: 'not-stl',
+      errorDetail: null,
+    });
+    status.textContent = state.error;
+    status.classList.add('problem');
+    render();
     return;
   }
   // The file is read locally and handed to a worker in this tab. It is never sent anywhere.
@@ -948,6 +957,10 @@ benchCopy.addEventListener('click', () => {
   benchResult.select();
 });
 
+// The wording is in COPY (page-state.ts); data-copy names the string an element shows.
+for (const element of document.querySelectorAll<HTMLElement>('[data-copy]')) {
+  element.textContent = COPY[element.dataset.copy as keyof typeof COPY];
+}
 /** Screens up to this width get the phone layout; the same number is in the media query of style.css. _(proposal)_ */
 const PHONE_MAX_WIDTH_PX = 600;
 // On a phone the sheet starts with the size line and the downloads; Adjust is one tap away.
