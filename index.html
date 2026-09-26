@@ -37,7 +37,7 @@
         <p id="file-name" data-in="error"></p>
         <p id="status" role="status" data-copy="dropHint"></p>
         <progress id="progress" max="100" value="0" data-in="converting"></progress>
-        <button id="cancel" type="button" data-in="converting">Cancel</button>
+        <button id="cancel" type="button" data-in="converting" data-copy="cancel"></button>
         <button id="choose-again" class="primary" type="button" data-in="empty error"></button>
         <p class="promise" data-in="empty error" data-copy="promise"></p>
         <p id="mini-size" data-in="done" data-mini></p>
@@ -59,7 +59,7 @@
         <details id="adjust" open data-in="done" data-mini>
           <summary>
             <span data-copy="adjust"></span>
-            <span class="summary-hint">Up and turn · Size · Look</span>
+            <span class="summary-hint" data-copy="adjustHint"></span>
           </summary>
           <fieldset id="orient">
             <legend>Up and turn</legend>

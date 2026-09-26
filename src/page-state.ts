@@ -33,11 +33,13 @@ export const COPY = {
   dropHint: 'You get a game-ready mini in seconds. Everything runs in this tab.',
   dropOverlay: 'Drop to convert',
   errorHeading: 'This file did not become a mini',
+  cancel: 'Cancel',
   cancelled: 'Cancelled.',
   downloads: 'Download as GLB',
   downloadTable: 'Download table level',
   downloadFar: 'Download far level',
   adjust: 'Adjust',
+  adjustHint: 'Up and turn · Size · Look',
 } as const;
 
 /** The level chips, in the order of the levels: full detail, then close, table, far. */
