@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePageOptions } from './options';
-import { DETAIL_EFFORT } from '../lib/pipeline/compress';
+import { DETAIL_EFFORT } from '../lib/dev';
 
 describe('parsePageOptions', () => {
   it('bakes at the policy size and compresses when the address says nothing', () => {

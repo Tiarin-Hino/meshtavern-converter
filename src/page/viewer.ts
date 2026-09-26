@@ -4,6 +4,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
+  DEFAULT_LOOK,
+  vertexColours,
+  type Look,
+  type IndexedMesh,
+  type Rotation,
+  GRID_SQUARE_MM,
+} from '../lib';
+import {
   bakedTextureBytes,
   createBakedGeometry,
   createBakedMaterial,
@@ -11,12 +19,9 @@ import {
   createLookUniforms,
   disposeBakedMaterial,
   updateLookUniforms,
-} from '../lib/three/baked-material';
-import { compressedTextureBytes, ownCopy } from '../lib/three/compressed-texture';
-import { DEFAULT_LOOK, vertexColours, type Look } from '../lib/pipeline/look';
-import type { IndexedMesh } from '../lib/pipeline/mesh';
-import type { Rotation } from '../lib/pipeline/rotation';
-import { GRID_SQUARE_MM } from '../lib/pipeline/size';
+  compressedTextureBytes,
+  ownCopy,
+} from '../lib/three';
 
 /** Squares the grid shows along each side. */
 const GRID_SQUARES = 40;

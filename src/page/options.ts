@@ -1,4 +1,4 @@
-import { DETAIL_EFFORT, DETAIL_EFFORTS } from '../lib/pipeline/compress';
+import { DETAIL_EFFORT, DETAIL_EFFORTS } from '../lib/dev';
 
 /**
  * Options from the page address, for development only: without any, a mini is baked at the

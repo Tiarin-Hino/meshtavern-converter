@@ -7,17 +7,25 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
  * its own.
  */
 
-/** Where the build serves three.js's Basis transcoder (see vite.config.ts). */
-const TRANSCODER_PATH = `${import.meta.env.BASE_URL}basis/`;
-
 let loader: KTX2Loader | null = null;
+let loaderPath = '';
 
-/** One transcode; the result can be duplicated with `ownCopy` for minis that must each own their texture. */
+/**
+ * One transcode; the result can be duplicated with `ownCopy` for minis that must each own their texture.
+ * `transcoderPath` is where three.js's `basis_transcoder.{js,wasm}` are served; by default where
+ * this page's build serves them (see vite.config.ts).
+ */
 export function transcodeDetail(
   ktx2: Uint8Array,
   renderer: THREE.WebGLRenderer,
+  transcoderPath = `${import.meta.env.BASE_URL}basis/`,
 ): Promise<THREE.CompressedTexture> {
-  loader ??= new KTX2Loader().setTranscoderPath(TRANSCODER_PATH).detectSupport(renderer);
+  if (loader && loaderPath !== transcoderPath) {
+    loader.dispose();
+    loader = null;
+  }
+  loader ??= new KTX2Loader().setTranscoderPath(transcoderPath).detectSupport(renderer);
+  loaderPath = transcoderPath;
   const copy = ktx2.slice();
   return new Promise((resolve, reject) => {
     loader!.parse(

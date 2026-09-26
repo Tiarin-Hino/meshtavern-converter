@@ -1,36 +1,41 @@
 import './style.css';
-import { generateBumpySheet } from '../lib/pipeline/generate';
-import { encodeGlb, glbEncoderReady } from '../lib/pipeline/glb';
-import { DEFAULT_LOOK, type Look } from '../lib/pipeline/look';
-import type { IndexedMesh } from '../lib/pipeline/mesh';
-import { checkFits, memoryBudgetBytes } from '../lib/pipeline/memory';
 import {
+  encodeGlb,
+  glbEncoderReady,
+  DEFAULT_LOOK,
+  type Look,
+  type IndexedMesh,
+  checkFits,
+  memoryBudgetBytes,
   UP_AXES,
   type Orientation,
   type OrientationOptions,
   type UpAxis,
-} from '../lib/pipeline/orient';
-import {
   fromAxisAngle,
   IDENTITY,
   multiply,
   turnAngleDeg,
   type Rotation,
-} from '../lib/pipeline/rotation';
-import { toProblem, type ProblemCode } from '../lib/pipeline/problems';
-import { BAKED_LEVEL, type ConversionStats, type Progress } from '../lib/pipeline/run';
-import {
+  toProblem,
+  type ProblemCode,
+  BAKED_LEVEL,
+  type ConversionStats,
+  type Progress,
   CREATURE_SIZES,
   sizeLabel,
   type CreatureSize,
   type Sizing,
   type SizingOptions,
   type Units,
-} from '../lib/pipeline/size';
-import { UNIT_FACTORS } from '../lib/pipeline/units';
-import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from '../lib/pipeline/stl';
+  UNIT_FACTORS,
+  SNIFF_BYTES,
+  sniffStl,
+  ConversionCancelled,
+  Converter,
+} from '../lib';
+import { transcodeDetail } from '../lib/three';
+import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
-import { transcodeDetail } from '../lib/three/compressed-texture';
 import { parsePageOptions } from './options';
 import {
   COPY,
@@ -43,7 +48,6 @@ import {
   type PageState,
 } from './page-state';
 import { Viewer, type BakedMini, type Perf } from './viewer';
-import { ConversionCancelled, Converter } from '../lib/worker/client';
 
 interface AppState {
   ready: boolean;

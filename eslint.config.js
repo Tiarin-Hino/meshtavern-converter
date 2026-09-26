@@ -20,4 +20,23 @@ export default tseslint.config(
       },
     },
   },
+  {
+    // The page, the regression net and the e2e tests use the library like any other consumer:
+    // through src/lib/index.ts, three.ts and dev.ts, never its inside (issue #50).
+    files: ['src/page/**', 'src/regression/**', 'e2e/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/lib/pipeline/*', '**/lib/worker/*', '**/lib/three/*'],
+              message:
+                'import from src/lib/index.ts, three.ts or dev.ts: the page uses the library like any other consumer',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
