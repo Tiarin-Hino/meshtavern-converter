@@ -1,0 +1,30 @@
+name: xatlas build
+
+# Proves that wasm/xatlas/xatlas.wasm is exactly what the pinned sources and the pinned
+# Emscripten image produce. Runs only when the build changes, so other PRs skip the compile.
+on:
+  pull_request:
+    paths:
+      - 'wasm/xatlas/**'
+      - '.github/workflows/xatlas.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'wasm/xatlas/**'
+      - '.github/workflows/xatlas.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: xatlas-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash wasm/xatlas/build.sh --check
