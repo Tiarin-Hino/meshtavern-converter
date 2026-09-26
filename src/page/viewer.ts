@@ -11,12 +11,12 @@ import {
   createLookUniforms,
   disposeBakedMaterial,
   updateLookUniforms,
-} from './baked-material';
-import { compressedTextureBytes, ownCopy } from './compressed-texture';
-import { DEFAULT_LOOK, vertexColours, type Look } from './lib/pipeline/look';
-import type { IndexedMesh } from './lib/pipeline/mesh';
-import type { Rotation } from './lib/pipeline/rotation';
-import { GRID_SQUARE_MM } from './lib/pipeline/size';
+} from '../lib/three/baked-material';
+import { compressedTextureBytes, ownCopy } from '../lib/three/compressed-texture';
+import { DEFAULT_LOOK, vertexColours, type Look } from '../lib/pipeline/look';
+import type { IndexedMesh } from '../lib/pipeline/mesh';
+import type { Rotation } from '../lib/pipeline/rotation';
+import { GRID_SQUARE_MM } from '../lib/pipeline/size';
 
 /** Squares the grid shows along each side. */
 const GRID_SQUARES = 40;

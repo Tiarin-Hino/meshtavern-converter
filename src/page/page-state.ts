@@ -1,5 +1,5 @@
-import type { ConversionStats, Progress, StepName } from './lib/pipeline/run';
-import type { CreatureSize, Units } from './lib/pipeline/size';
+import type { ConversionStats, Progress, StepName } from '../lib/pipeline/run';
+import type { CreatureSize, Units } from '../lib/pipeline/size';
 
 /**
  * What the page says and which of its four states it is in (issue #41, design note

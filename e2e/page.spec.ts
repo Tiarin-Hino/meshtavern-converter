@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { COPY, STEP_LABELS } from '../src/page-state';
+import { COPY, STEP_LABELS } from '../src/page/page-state';
 import { PROBLEM_MESSAGES } from '../src/lib/pipeline/problems';
 
 /**

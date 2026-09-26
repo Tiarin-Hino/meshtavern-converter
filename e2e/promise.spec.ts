@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { COPY } from '../src/page-state';
+import { COPY } from '../src/page/page-state';
 import { generateBumpySheet } from '../src/lib/pipeline/generate';
 import { encodeBinaryStl } from '../src/lib/pipeline/stl';
 
