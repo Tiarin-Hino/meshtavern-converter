@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <style>
+    .fill { fill: #f5f5f5; stroke: #2b2b2b; stroke-width: 1.5; }
+    .panel { fill: #fff; stroke: #2b2b2b; stroke-width: 1.5; }
+    .btn { fill: #2b2b2b; }
+    .btn-text { fill: #fff; font-size: 15px; font-weight: 600; text-anchor: middle; }
+    .btn2 { fill: #fff; stroke: #2b2b2b; stroke-width: 1.5; }
+    .btn2-text { fill: #2b2b2b; font-size: 15px; font-weight: 600; text-anchor: middle; }
+    .sm { fill: #fff; stroke: #2b2b2b; stroke-width: 1.2; }
+    .sm-text { fill: #2b2b2b; font-size: 12px; text-anchor: middle; }
+    .chip { fill: #fff; stroke: #2b2b2b; stroke-width: 1.2; }
+    .chip-on { fill: #2b2b2b; stroke: #2b2b2b; stroke-width: 1.2; }
+    .chip-text { fill: #2b2b2b; font-size: 13px; text-anchor: middle; }
+    .chip-text-on { fill: #fff; font-size: 13px; text-anchor: middle; }
+    .h1 { font-size: 18px; font-weight: 700; fill: #2b2b2b; }
+    .sec { font-size: 12px; font-weight: 700; fill: #666; letter-spacing: 0.08em; }
+    .t { font-size: 15px; fill: #2b2b2b; }
+    .s { font-size: 13px; fill: #2b2b2b; }
+    .m { font-size: 14px; fill: #666; }
+    .note { font-size: 12px; fill: #b3541e; font-style: italic; }
+    .slider { stroke: #2b2b2b; stroke-width: 2; }
+  </style>
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#e2e2e2" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="800" fill="#fff"/>
+  <rect x="0" y="56" width="1280" height="744" fill="#fafafa"/>
+  <rect x="0" y="56" width="1280" height="744" fill="url(#grid)"/>
+  <!-- top bar -->
+  <rect class="fill" x="0" y="0" width="1280" height="56"/>
+  <text class="h1" x="24" y="35">MeshTavern Converter</text>
+  <text class="m" x="250" y="34">Runs in your browser. Your file never leaves your computer.</text>
+  <rect class="btn2" x="1112" y="12" width="144" height="32" rx="6"/>
+  <text class="btn2-text" x="1184" y="33">Open an STL</text>
+  <!-- the mini, a placeholder silhouette on the grid -->
+  <ellipse cx="460" cy="560" rx="70" ry="16" fill="#d9dce1" stroke="#2b2b2b" stroke-width="1.5"/>
+  <path d="M438 552 C428 500, 446 462, 460 440 C474 462, 492 500, 482 552 Z" fill="#c8ccd2" stroke="#2b2b2b" stroke-width="1.5"/>
+  <circle cx="460" cy="424" r="15" fill="#c8ccd2" stroke="#2b2b2b" stroke-width="1.5"/>
+  <!-- level chips, bottom-left of the viewport -->
+  <rect class="chip" x="16" y="752" width="84" height="30" rx="15"/>
+  <text class="chip-text" x="58" y="772">Original</text>
+  <rect class="chip" x="106" y="752" width="84" height="30" rx="15"/>
+  <text class="chip-text" x="148" y="772">Close</text>
+  <rect class="chip-on" x="196" y="752" width="84" height="30" rx="15"/>
+  <text class="chip-text-on" x="238" y="772">Table</text>
+  <rect class="chip" x="286" y="752" width="84" height="30" rx="15"/>
+  <text class="chip-text" x="328" y="772">Far</text>
+  <!-- panel -->
+  <rect class="panel" x="904" y="72" width="360" height="712" rx="12"/>
+  <text class="h1" x="924" y="104">goblin-32mm</text>
+  <text class="m" x="924" y="128">Ready. Converted from 1,250,000 triangles.</text>
+  <text class="t" x="924" y="162">38 mm tall · Medium, 1 square · 25 mm round base</text>
+  <text class="sec" x="924" y="196">DOWNLOAD AS GLB</text>
+  <rect class="btn" x="924" y="206" width="320" height="40" rx="8"/>
+  <text class="btn-text" x="1084" y="231">Download table level</text>
+  <rect class="btn2" x="924" y="254" width="320" height="40" rx="8"/>
+  <text class="btn2-text" x="1084" y="279">Download far level</text>
+  <!-- adjust -->
+  <line x1="924" y1="314" x2="1244" y2="314" stroke="#ddd"/>
+  <text class="t" x="924" y="340" font-weight="700">▾ Adjust</text>
+  <!-- up and turn -->
+  <text class="sec" x="924" y="368">UP AND TURN</text>
+  <text class="s" x="924" y="392">Up axis in file</text>
+  <rect class="sm" x="1024" y="378" width="90" height="26" rx="4"/>
+  <text class="sm-text" x="1069" y="396">+z ▾</text>
+  <rect class="sm" x="924" y="414" width="76" height="28" rx="4"/>
+  <text class="sm-text" x="962" y="433">Pitch −15°</text>
+  <rect class="sm" x="1006" y="414" width="76" height="28" rx="4"/>
+  <text class="sm-text" x="1044" y="433">Pitch +15°</text>
+  <rect class="sm" x="1088" y="414" width="76" height="28" rx="4"/>
+  <text class="sm-text" x="1126" y="433">Roll −15°</text>
+  <rect class="sm" x="1170" y="414" width="74" height="28" rx="4"/>
+  <text class="sm-text" x="1207" y="433">Roll +15°</text>
+  <rect class="sm" x="924" y="454" width="14" height="14" rx="2"/>
+  <text class="s" x="946" y="466">Turn by hand</text>
+  <text class="m" x="1064" y="466" font-size="12">Turned 30°, not set down yet</text>
+  <rect class="sm" x="924" y="480" width="100" height="30" rx="4"/>
+  <text class="sm-text" x="974" y="500">Apply</text>
+  <rect class="sm" x="1034" y="480" width="100" height="30" rx="4"/>
+  <text class="sm-text" x="1084" y="500">Set down</text>
+  <rect class="sm" x="1144" y="480" width="100" height="30" rx="4"/>
+  <text class="sm-text" x="1194" y="500">Reset</text>
+  <!-- size -->
+  <text class="sec" x="924" y="540">SIZE</text>
+  <text class="s" x="924" y="562">Units in file</text>
+  <rect class="sm" x="924" y="568" width="150" height="26" rx="4"/>
+  <text class="sm-text" x="999" y="586">millimetres ▾</text>
+  <text class="s" x="1094" y="562">Creature size</text>
+  <rect class="sm" x="1094" y="568" width="150" height="26" rx="4"/>
+  <text class="sm-text" x="1169" y="586">Medium (1×1) ▾</text>
+  <text class="s" x="924" y="620">Scale so the base is</text>
+  <rect class="sm" x="1062" y="604" width="70" height="26" rx="4"/>
+  <text class="sm-text" x="1097" y="622" fill="#999">25</text>
+  <text class="s" x="1140" y="620">mm</text>
+  <rect class="sm" x="1174" y="604" width="70" height="26" rx="4"/>
+  <text class="sm-text" x="1209" y="622">Scale</text>
+  <rect class="sm" x="924" y="640" width="14" height="14" rx="2"/>
+  <text class="s" x="946" y="652" fill="#999">Add a plain base (this mini has one)</text>
+  <!-- look -->
+  <text class="sec" x="924" y="690">LOOK</text>
+  <rect class="sm" x="924" y="702" width="14" height="14" rx="2" fill="#2b2b2b"/>
+  <text class="s" x="946" y="714">Primed and washed</text>
+  <text class="s" x="1094" y="714">Base coat</text>
+  <rect x="1164" y="700" width="30" height="18" fill="#9aa0a8" stroke="#2b2b2b" stroke-width="1.2"/>
+  <text class="s" x="924" y="748">Shadows</text>
+  <line class="slider" x1="988" y1="744" x2="1054" y2="744"/>
+  <circle cx="1026" cy="744" r="5" fill="#2b2b2b"/>
+  <text class="s" x="1070" y="748">Wash</text>
+  <line class="slider" x1="1112" y1="744" x2="1160" y2="744"/>
+  <circle cx="1136" cy="744" r="5" fill="#2b2b2b"/>
+  <text class="s" x="1174" y="748">Edges</text>
+  <line class="slider" x1="1216" y1="744" x2="1244" y2="744"/>
+  <circle cx="1232" cy="744" r="5" fill="#2b2b2b"/>
+  <text class="note" x="924" y="774">Under ?dev only: Figures (#stats) and the stress buttons follow here.</text>
+  <!-- annotations -->
+  <text class="note" x="24" y="80">Done state, desktop. The table level is shown, baked where it could be. The chips switch the level for a look; the downloads always write their own level.</text>
+  <text class="note" x="24" y="98">Adjust is open on a desktop. The size line is the one figure a hobbyist needs; everything else is under ?dev. Look presets (#45) go at the top of Look.</text>
+</svg>

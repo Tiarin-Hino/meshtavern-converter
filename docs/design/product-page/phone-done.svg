@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <style>
+    .fill { fill: #f5f5f5; stroke: #2b2b2b; stroke-width: 1.5; }
+    .sheet { fill: #fff; stroke: #2b2b2b; stroke-width: 1.5; }
+    .btn { fill: #2b2b2b; }
+    .btn-text { fill: #fff; font-size: 16px; font-weight: 600; text-anchor: middle; }
+    .btn2 { fill: #fff; stroke: #2b2b2b; stroke-width: 1.5; }
+    .btn2-text { fill: #2b2b2b; font-size: 14px; font-weight: 600; text-anchor: middle; }
+    .chip { fill: #fff; stroke: #2b2b2b; stroke-width: 1.2; }
+    .chip-on { fill: #2b2b2b; stroke: #2b2b2b; stroke-width: 1.2; }
+    .chip-text { fill: #2b2b2b; font-size: 12px; text-anchor: middle; }
+    .chip-text-on { fill: #fff; font-size: 12px; text-anchor: middle; }
+    .h1 { font-size: 16px; font-weight: 700; fill: #2b2b2b; }
+    .title { font-size: 18px; font-weight: 700; fill: #2b2b2b; }
+    .sec { font-size: 11px; font-weight: 700; fill: #666; letter-spacing: 0.08em; }
+    .t { font-size: 14px; fill: #2b2b2b; }
+    .m { font-size: 13px; fill: #666; }
+    .note { font-size: 11px; fill: #b3541e; font-style: italic; }
+  </style>
+  <defs>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#e2e2e2" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="390" height="844" fill="#fff"/>
+  <rect x="0" y="56" width="390" height="788" fill="#fafafa"/>
+  <rect x="0" y="56" width="390" height="788" fill="url(#grid)"/>
+  <!-- top bar -->
+  <rect class="fill" x="0" y="0" width="390" height="56"/>
+  <text class="h1" x="16" y="34">MeshTavern Converter</text>
+  <rect class="btn2" x="298" y="12" width="76" height="32" rx="6"/>
+  <text class="btn2-text" x="336" y="33">Open</text>
+  <!-- the mini -->
+  <ellipse cx="195" cy="380" rx="60" ry="14" fill="#d9dce1" stroke="#2b2b2b" stroke-width="1.5"/>
+  <path d="M176 373 C168 326, 183 292, 195 272 C207 292, 222 326, 214 373 Z" fill="#c8ccd2" stroke="#2b2b2b" stroke-width="1.5"/>
+  <circle cx="195" cy="258" r="13" fill="#c8ccd2" stroke="#2b2b2b" stroke-width="1.5"/>
+  <!-- level chips above the sheet -->
+  <rect class="chip" x="12" y="468" width="70" height="28" rx="14"/>
+  <text class="chip-text" x="47" y="487">Original</text>
+  <rect class="chip" x="86" y="468" width="60" height="28" rx="14"/>
+  <text class="chip-text" x="116" y="487">Close</text>
+  <rect class="chip-on" x="150" y="468" width="60" height="28" rx="14"/>
+  <text class="chip-text-on" x="180" y="487">Table</text>
+  <rect class="chip" x="214" y="468" width="52" height="28" rx="14"/>
+  <text class="chip-text" x="240" y="487">Far</text>
+  <!-- bottom sheet, 40vh = 338 px -->
+  <path class="sheet" d="M0 522 Q0 506 16 506 H374 Q390 506 390 522 V844 H0 Z"/>
+  <rect x="175" y="514" width="40" height="4" rx="2" fill="#999"/>
+  <text class="title" x="16" y="550">goblin-32mm</text>
+  <text class="m" x="16" y="572">Ready. Converted from 1,250,000 triangles.</text>
+  <text class="t" x="16" y="600">38 mm tall · Medium, 1 square · 25 mm round base</text>
+  <text class="sec" x="16" y="630">DOWNLOAD AS GLB</text>
+  <rect class="btn" x="16" y="640" width="358" height="44" rx="8"/>
+  <text class="btn-text" x="195" y="668">Download table level</text>
+  <rect class="btn2" x="16" y="692" width="358" height="44" rx="8"/>
+  <text class="btn2-text" x="195" y="720">Download far level</text>
+  <line x1="16" y1="754" x2="374" y2="754" stroke="#ddd"/>
+  <text class="t" x="16" y="782" font-weight="700">▸ Adjust</text>
+  <text class="m" x="100" y="782">Up and turn · Size · Look</text>
+  <!-- annotations -->
+  <text class="note" x="16" y="76">Done state, phone. The sheet takes at most 40vh (338 px), scrolls inside;</text>
+  <text class="note" x="16" y="92">the viewport keeps the rest, here 450 px: 53 %. Size line and both</text>
+  <text class="note" x="16" y="108">downloads fit without scrolling; Adjust starts closed and opens when</text>
+  <text class="note" x="16" y="124">a conversion ends with a size warning. Buttons 44 px high.</text>
+</svg>
