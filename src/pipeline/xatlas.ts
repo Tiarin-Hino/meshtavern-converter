@@ -108,6 +108,11 @@ export function loadXatlas(): Promise<Xatlas> {
   return (loaded ??= compile().then((module) => new Instance(module)));
 }
 
+/** A fresh, uncached instance of a given build: for measuring variants (scripts/measure-xatlas.mjs). */
+export async function instantiateXatlas(wasm: BufferSource): Promise<Xatlas> {
+  return new Instance(await WebAssembly.compile(wasm));
+}
+
 async function compile(): Promise<WebAssembly.Module> {
   if (WASM_URL.protocol === 'file:') {
     // Node (Vitest, benchmarks, scripts). A variable specifier keeps the bundler away from it.

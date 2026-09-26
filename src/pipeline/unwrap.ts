@@ -92,9 +92,11 @@ export async function unwrap(
   resolution: number,
   /** Called with 0..100 as the unwrap advances. Finding the islands is nearly all of the time. */
   onProgress: (percent: number) => void = () => {},
+  /** Another instance than the warmed-up one of the worker: for measuring builds. */
+  instance?: Xatlas,
 ): Promise<Unwrapped> {
   const parts = partsToUnwrap(source);
-  const xatlas = await unwrapperReady();
+  const xatlas = instance ?? (await unwrapperReady());
   const atlas = xatlas.createAtlas();
   try {
     for (const part of parts) atlas.addMesh(part.mesh, parts.length);
