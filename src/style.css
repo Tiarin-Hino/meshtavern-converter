@@ -1,8 +1,27 @@
+/*
+ * The product page (#41, docs/design/product-page.md). Which element shows is decided by
+ * body[data-state] and data-in, not by flipping hidden panel by panel.
+ */
+
 :root {
   color-scheme: dark;
+  --bg: #1b1d22;
+  --panel: #22252b;
+  --control: #252830;
+  --line: #3a3f49;
+  --rule: #2c3038;
+  --text: #e6e8eb;
+  --muted: #a9afb8;
+  --accent: #7aa2f7;
+  --accent-soft: #2f3b57;
+  --warn: #f0b35e;
+  /* Sizes of the layout (proposals of the design note). */
+  --top-bar-height: 56px;
+  --card-width: 520px;
+  --panel-width: 360px;
   font-family: system-ui, sans-serif;
-  color: #e6e8eb;
-  background: #1b1d22;
+  color: var(--text);
+  background: var(--bg);
 }
 
 html,
@@ -13,138 +32,389 @@ body {
 
 body {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: var(--top-bar-height) minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
-header {
+[hidden] {
+  display: none !important;
+}
+
+/* Every element that names states shows only in those. */
+body[data-state='empty'] [data-in]:not([data-in~='empty']),
+body[data-state='converting'] [data-in]:not([data-in~='converting']),
+body[data-state='done'] [data-in]:not([data-in~='done']),
+body[data-state='error'] [data-in]:not([data-in~='error']),
+/* An opened GLB (dev) has nothing to size, adjust or export. */
+body[data-kind='glb'] [data-mini] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+button,
+select,
+input[type='number'] {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control);
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #10131a;
+  font-weight: 600;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Top bar */
+
+#top {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 12px 24px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #2c3038;
+  gap: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--rule);
 }
 
 h1 {
   margin: 0;
   font-size: 1.1rem;
+  white-space: nowrap;
 }
 
-#status {
+#dev-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  color: var(--warn);
+  font-size: 0.75rem;
+}
+
+#promise-short {
+  flex: 1;
   margin: 0;
-  color: #a9afb8;
+  color: var(--muted);
   font-size: 0.9rem;
+}
+
+#choose {
+  margin-left: auto;
+}
+
+/* Viewport, with the level chips in its corner */
+
+#stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+#view {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 #viewport {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 0;
 }
 
-#progress {
-  width: 160px;
-}
-
-#levels,
-#stress,
-#export {
+#levels {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-#levels button,
-#stress button,
-#export button {
-  padding: 3px 10px;
-  border: 1px solid #3a3f49;
-  border-radius: 4px;
-  background: #252830;
-  color: inherit;
-  font: inherit;
+#levels button {
+  border-radius: 999px;
   font-size: 0.85rem;
-  cursor: pointer;
 }
 
 #levels button[aria-pressed='true'] {
-  border-color: #7aa2f7;
-  background: #2f3b57;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The card (empty, converting, error) and the panel (done): one element, two places. */
+
+#panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--panel);
+}
+
+body:not([data-state='done']) #panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(var(--card-width), 100% - 32px);
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  align-items: center;
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+body[data-state='empty'] #panel {
+  border: 2px dashed var(--line);
+}
+
+body[data-state='error'] #panel {
+  border-top: 4px solid var(--warn);
+}
+
+/* In the empty card the hint in #status comes after the button and the promise. */
+body[data-state='empty'] #status {
+  order: 1;
+}
+
+/*
+ * Over the viewport, not beside it: the canvas keeps the whole width in every state, so the
+ * stress scene and the benchmark see the same view as before the page had a panel.
+ */
+body[data-state='done'] #panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--panel-width);
+  overflow-y: auto;
+  padding: 20px;
+  border-left: 1px solid var(--rule);
+}
+
+#heading {
+  margin: 0;
+  font-size: 1.4rem;
+  overflow-wrap: anywhere;
+}
+
+body[data-state='done'] #heading {
+  font-size: 1.15rem;
+}
+
+#file-name {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#status {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#status.problem {
+  color: var(--warn);
+}
+
+.promise {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+#progress {
+  width: 100%;
+  max-width: 400px;
+  height: 10px;
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--control);
+  overflow: hidden;
+}
+
+#progress::-webkit-progress-bar {
+  background: var(--control);
+}
+
+#progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+#progress::-moz-progress-bar {
+  background: var(--accent);
+}
+
+/* A step that says nothing about its own progress (the bake): the fill shimmers. */
+#progress[data-silent]::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--accent) 30%, #b4c8fb 50%, var(--accent) 70%) 0 0 / 200%
+    100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+#progress[data-silent]::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--accent) 30%, #b4c8fb 50%, var(--accent) 70%) 0 0 / 200%
+    100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #progress[data-silent]::-webkit-progress-value,
+  #progress[data-silent]::-moz-progress-bar {
+    animation: none;
+  }
+}
+
+#mini-size {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 #export {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#export label,
+.check {
+  display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   font-size: 0.85rem;
 }
 
-#look,
-#sizing,
+/* Adjust: up and turn, size, look */
+
+#adjust {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+#adjust fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#adjust legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#adjust label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 #turn {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
-  margin: 0;
-  padding: 2px 10px 4px;
-  border: 1px solid #3a3f49;
-  border-radius: 4px;
-  font-size: 0.85rem;
+  gap: 8px;
 }
 
-#look legend,
-#sizing legend,
-#turn legend {
-  padding: 0 4px;
-  color: #a9afb8;
-}
-
-#look label,
-#sizing label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+#turn-pending {
+  flex-basis: 100%;
+  color: var(--muted);
 }
 
 #look input[type='range'] {
   width: 90px;
 }
 
-#sizing input[type='number'] {
-  width: 7em;
-}
-
-#sizing button {
-  padding: 2px 8px;
-  border: 1px solid #3a3f49;
-  border-radius: 4px;
-  background: #252830;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+#scale-to {
+  width: 6em;
 }
 
 #sizing-warning {
   flex-basis: 100%;
   margin: 0;
-  color: #f0b35e;
+  color: var(--warn);
 }
 
-#perf {
-  flex-basis: 100%;
-  margin: 0;
-  color: #a9afb8;
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
+/* Drag over the page */
+
+#drop-frame {
+  position: fixed;
+  inset: 8px;
+  z-index: 10;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--accent);
+  border-radius: 16px;
+  background: rgb(27 29 34 / 0.75);
+  font-size: 1.5rem;
+  font-weight: 600;
+  pointer-events: none;
 }
+
+body[data-dragging] #drop-frame {
+  display: flex;
+}
+
+/* The team's tools (?dev) */
 
 #stats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 20px;
-  flex-basis: 100%;
+  flex-direction: column;
+  gap: 2px;
   margin: 0;
-  font-size: 0.85rem;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -154,26 +424,38 @@ h1 {
 }
 
 #stats dt {
-  color: #a9afb8;
+  flex: none;
+  color: var(--muted);
 }
 
 #stats dd {
   margin: 0;
 }
 
-[hidden] {
-  display: none !important;
+#stress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.8rem;
 }
 
-#bench {
-  padding: 8px 16px;
-  border-top: 1px solid #2c3038;
+#dev-tools {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 4px 16px 8px;
+  border-top: 1px solid var(--rule);
   font-size: 0.85rem;
+}
+
+#perf {
+  margin: 4px 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 #bench summary {
   cursor: pointer;
-  color: #a9afb8;
+  color: var(--muted);
 }
 
 #bench p {
@@ -183,18 +465,6 @@ h1 {
 
 #bench button {
   margin: 0 6px 8px 0;
-  padding: 4px 10px;
-  border: 1px solid #3a3f49;
-  border-radius: 4px;
-  background: #252830;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-#bench button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 #bench textarea {
@@ -203,17 +473,13 @@ h1 {
   box-sizing: border-box;
   background: #14161a;
   color: inherit;
-  border: 1px solid #2c3038;
+  border: 1px solid var(--rule);
   border-radius: 4px;
   font:
     0.8rem ui-monospace,
     monospace;
 }
 
-#status.problem {
-  color: #f0b35e;
-}
-
 #bench a {
-  color: #7aa2f7;
+  color: var(--accent);
 }

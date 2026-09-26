@@ -10,7 +10,7 @@ const MAX_STALL_MS = process.env.STALL_LIMIT === 'strict' ? 100 : 400;
 // Most tests are about something other than baking and switch it off (a development option)
 // to stay quick on CI runners; the tests of the normal path open the page without options.
 test.beforeEach(async ({ page }) => {
-  await page.goto('/?bake=off');
+  await page.goto('/?dev&bake=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 });
 
@@ -193,7 +193,7 @@ test('suggests a creature size and lets the user change units, size, scale and b
   ]);
   await expect(page.locator('#sizing-warning')).toBeVisible();
   await testInfo.attach('sizing-warning', {
-    body: await page.locator('header').screenshot(),
+    body: await page.locator('#panel').screenshot(),
     contentType: 'image/png',
   });
   await page.getByRole('button', { name: 'Scale to fit' }).click();
@@ -384,7 +384,7 @@ test('bakes and compresses a mini without being asked to, and shows it that way'
 }, testInfo) => {
   // Loading and warming up the unwrapper, unwrapping, baking and encoding are slow on CI runners.
   test.setTimeout(240_000);
-  await page.goto('/');
+  await page.goto('/?dev');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.evaluate(() => window.__mt.loadGenerated(300));
   const state = await page.evaluate(() => window.__mt.state);
@@ -468,7 +468,7 @@ test('a running conversion can be cancelled, and the next one works', async ({ p
 
   const state = await page.evaluate(() => window.__mt.state);
   expect(state).toMatchObject({ cancelled: true, busy: false, error: null, stats: null });
-  await expect(page.locator('#status')).toContainText('cancelled');
+  await expect(page.locator('#status')).toContainText(/cancelled/i);
   await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
 
   await page.evaluate(() => window.__mt.loadDemo());
@@ -490,7 +490,7 @@ test('development options switch compression off', async ({ page }) => {
 
 test('runs the device benchmark and offers the result as text', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto('/?settle=1');
+  await page.goto('/?dev&settle=1');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.getByText('Benchmark this device').click();
 
