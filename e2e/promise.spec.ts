@@ -74,6 +74,10 @@ test('no request carries the file: the promise on the page is true', async ({ pa
   const origin = new URL(page.url()).origin;
   expect(requests.length).toBeGreaterThan(0);
   expect(requests.some((r) => r.afterPick && r.url.includes('/basis/'))).toBe(true);
+  // Our own build of xatlas, same-origin and fetched only once a file needs unwrapping.
+  expect(
+    requests.some((r) => r.afterPick && /\/assets\/[^/]+\.wasm$/.test(new URL(r.url).pathname)),
+  ).toBe(true);
   for (const request of requests) {
     const url = new URL(request.url);
     expect(url.origin, request.url).toBe(origin);

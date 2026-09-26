@@ -1,7 +1,7 @@
-import type { XAtlasModule } from 'xatlas-wasm';
 import { generateBumpySheet } from './generate';
 import { weldVertices, type IndexedMesh } from './mesh';
 import { cutIntoSlabs, splitByGroup, type MeshPart } from './slabs';
+import { loadXatlas, PROGRESS, type AtlasOptions, type Xatlas } from './xatlas';
 
 /** Texels left empty around every UV island, so neighbouring islands do not bleed into each other. */
 export const ISLAND_PADDING = 3;
@@ -27,15 +27,14 @@ export interface Unwrapped {
   slabs: number;
 }
 
-let module: Promise<XAtlasModule> | null = null;
+let module: Promise<Xatlas> | null = null;
 
 /**
- * Resolves once the WebAssembly unwrapper is compiled. Imported on first use only, so
- * conversions without baking never download it (about 290 KB).
+ * Resolves once the WebAssembly unwrapper is compiled. Fetched on first use only, so
+ * conversions without baking never download it (our own build of xatlas, 149 KB).
  */
-export const unwrapperReady = (): Promise<XAtlasModule> =>
-  (module ??= import('xatlas-wasm').then(async (imported) => {
-    const xatlas = await imported.default();
+export const unwrapperReady = (): Promise<Xatlas> =>
+  (module ??= loadXatlas().then((xatlas) => {
     warmUp(xatlas);
     return xatlas;
   }));
@@ -45,12 +44,12 @@ export const unwrapperReady = (): Promise<XAtlasModule> =>
  * later ones (measured: 111 s cold against 40 s warm for the same mesh). A small throwaway
  * unwrap, well under a second, takes that penalty instead of the user's mini.
  */
-function warmUp(xatlas: XAtlasModule): void {
+function warmUp(xatlas: Xatlas): void {
   const sheet = weldVertices(generateBumpySheet(70)).mesh;
   const atlas = xatlas.createAtlas();
   try {
-    atlas.addMesh({ positions: sheet.positions, indices: sheet.indices });
-    atlas.generate({}, { resolution: 512 });
+    atlas.addMesh({ positions: sheet.positions, indices: sheet.indices }, 1);
+    atlas.generate(settings(512));
   } finally {
     atlas.destroy();
   }
@@ -73,6 +72,14 @@ export const SLAB_COUNT = 8;
  */
 export const WHOLE_UNWRAP_BELOW = 8_000;
 
+const settings = (resolution: number): AtlasOptions => ({
+  maxCost: MAX_CHART_COST,
+  resolution,
+  padding: ISLAND_PADDING,
+  bilinear: true,
+  blockAlign: true,
+});
+
 /**
  * Gives a mesh texture coordinates with xatlas. `resolution` is the texture size the
  * island padding is planned for; the coordinates themselves are normalised to 0..1.
@@ -90,34 +97,27 @@ export async function unwrap(
   const xatlas = await unwrapperReady();
   const atlas = xatlas.createAtlas();
   try {
+    for (const part of parts) atlas.addMesh(part.mesh, parts.length);
     let reported = -1;
-    atlas.setProgressCallback((category, progress) => {
+    atlas.generate(settings(resolution), (category, progress) => {
       // Stages: add mesh, compute charts, pack charts, build output. Only the second is slow.
-      const percent = category < 1 ? 0 : category > 1 ? 100 : Math.round(progress);
+      const percent =
+        category < PROGRESS.computeCharts
+          ? 0
+          : category > PROGRESS.computeCharts
+            ? 100
+            : Math.round(progress);
       if (percent >= reported + 2 || (percent === 100 && reported !== 100)) {
         reported = percent;
         onProgress(percent);
       }
       return true;
     });
-    for (const part of parts) {
-      const error = atlas.addMesh({
-        positions: part.mesh.positions,
-        normals: part.mesh.normals,
-        indices: part.mesh.indices,
-        meshCountHint: parts.length,
-      });
-      if (error !== 0) throw new Error(`Unwrap failed: ${xatlas.addMeshErrorString(error)}`);
-    }
-    atlas.generate(
-      { maxCost: MAX_CHART_COST },
-      { resolution, padding: ISLAND_PADDING, bilinear: true, blockAlign: true },
-    );
 
     let count = 0;
     let indexCount = 0;
     const outs = parts.map((_, p) => {
-      const out = atlas.getMesh(p);
+      const out = atlas.mesh(p);
       count += out.vertexCount;
       indexCount += out.indices.length;
       return out;
@@ -127,12 +127,13 @@ export async function unwrap(
     const indices = new Uint32Array(indexCount);
     let vertex = 0;
     let index = 0;
+    const { width, height } = atlas;
     outs.forEach((out, p) => {
       const offset = vertex;
-      for (const { xref, uv } of out.vertices) {
-        sourceVertex[vertex] = parts[p]!.sourceVertex[xref]!;
-        uvs[vertex * 2] = uv[0] / atlas.width;
-        uvs[vertex * 2 + 1] = uv[1] / atlas.height;
+      for (let v = 0; v < out.vertexCount; v++) {
+        sourceVertex[vertex] = parts[p]!.sourceVertex[out.xref[v]!]!;
+        uvs[vertex * 2] = out.uvs[v * 2]! / width;
+        uvs[vertex * 2 + 1] = out.uvs[v * 2 + 1]! / height;
         vertex++;
       }
       for (const local of out.indices) indices[index++] = offset + local;
@@ -156,7 +157,7 @@ export async function unwrap(
         uvs,
       },
       charts: atlas.chartCount,
-      utilisation: atlas.getUtilization(0),
+      utilisation: atlas.utilisation(0),
       slabs: parts.length,
     };
   } finally {
