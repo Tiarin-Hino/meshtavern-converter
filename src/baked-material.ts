@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { BakedMaps } from './pipeline/bake';
-import { CAVITY_GAIN, DARKEST, HIGHLIGHT, parseHexColour, type Look } from './pipeline/look';
-import type { IndexedMesh } from './pipeline/mesh';
+import type { BakedMaps } from './lib/pipeline/bake';
+import { CAVITY_GAIN, DARKEST, HIGHLIGHT, parseHexColour, type Look } from './lib/pipeline/look';
+import type { IndexedMesh } from './lib/pipeline/mesh';
 
 /**
  * Material for a baked mini. One RGBA texture carries the sculpt's object-space normal

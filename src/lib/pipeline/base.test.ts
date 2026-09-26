@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateFigure, generateSwarm } from '../regression/shapes';
+import { generateFigure, generateSwarm } from '../../regression/shapes';
 import {
   convexHullArea,
   generatePlainBase,

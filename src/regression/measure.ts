@@ -1,9 +1,9 @@
-import { generateBumpySheet } from '../pipeline/generate';
-import { encodeGlb, glbEncoderReady } from '../pipeline/glb';
-import { DEFAULT_LOOK } from '../pipeline/look';
-import { runPipeline, type ConversionStats, type LodStats } from '../pipeline/run';
-import { encodeBinaryStl } from '../pipeline/stl';
-import type { UpAxis } from '../pipeline/orient';
+import { generateBumpySheet } from '../lib/pipeline/generate';
+import { encodeGlb, glbEncoderReady } from '../lib/pipeline/glb';
+import { DEFAULT_LOOK } from '../lib/pipeline/look';
+import { runPipeline, type ConversionStats, type LodStats } from '../lib/pipeline/run';
+import { encodeBinaryStl } from '../lib/pipeline/stl';
+import type { UpAxis } from '../lib/pipeline/orient';
 import {
   generateBoulder,
   generateFigure,

@@ -1,19 +1,24 @@
 import './style.css';
-import { generateBumpySheet } from './pipeline/generate';
-import { encodeGlb, glbEncoderReady } from './pipeline/glb';
-import { DEFAULT_LOOK, type Look } from './pipeline/look';
-import type { IndexedMesh } from './pipeline/mesh';
-import { checkFits, memoryBudgetBytes } from './pipeline/memory';
-import { UP_AXES, type Orientation, type OrientationOptions, type UpAxis } from './pipeline/orient';
+import { generateBumpySheet } from './lib/pipeline/generate';
+import { encodeGlb, glbEncoderReady } from './lib/pipeline/glb';
+import { DEFAULT_LOOK, type Look } from './lib/pipeline/look';
+import type { IndexedMesh } from './lib/pipeline/mesh';
+import { checkFits, memoryBudgetBytes } from './lib/pipeline/memory';
+import {
+  UP_AXES,
+  type Orientation,
+  type OrientationOptions,
+  type UpAxis,
+} from './lib/pipeline/orient';
 import {
   fromAxisAngle,
   IDENTITY,
   multiply,
   turnAngleDeg,
   type Rotation,
-} from './pipeline/rotation';
-import { toProblem, type ProblemCode } from './pipeline/problems';
-import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
+} from './lib/pipeline/rotation';
+import { toProblem, type ProblemCode } from './lib/pipeline/problems';
+import { BAKED_LEVEL, type ConversionStats, type Progress } from './lib/pipeline/run';
 import {
   CREATURE_SIZES,
   sizeLabel,
@@ -21,9 +26,9 @@ import {
   type Sizing,
   type SizingOptions,
   type Units,
-} from './pipeline/size';
-import { UNIT_FACTORS } from './pipeline/units';
-import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from './pipeline/stl';
+} from './lib/pipeline/size';
+import { UNIT_FACTORS } from './lib/pipeline/units';
+import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from './lib/pipeline/stl';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { transcodeDetail } from './compressed-texture';
 import { parsePageOptions } from './options';
@@ -38,7 +43,7 @@ import {
   type PageState,
 } from './page-state';
 import { Viewer, type BakedMini, type Perf } from './viewer';
-import { ConversionCancelled, Converter } from './worker/client';
+import { ConversionCancelled, Converter } from './lib/worker/client';
 
 interface AppState {
   ready: boolean;

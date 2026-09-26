@@ -1,6 +1,6 @@
 // Measures the peak memory of the page's process in real Chrome while it converts given
 // STL files, one fresh browser per file: the figures behind the estimate in
-// src/pipeline/memory.ts (issue #43). Usage, after `npm run build`:
+// src/lib/pipeline/memory.ts (issue #43). Usage, after `npm run build`:
 //   node scripts/measure-memory.mjs corpus/humanoid/some-mini.stl [more.stl …]
 // Windows and Linux only: the peak comes from the operating system, not from the page.
 import { chromium } from '@playwright/test';

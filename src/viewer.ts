@@ -13,10 +13,10 @@ import {
   updateLookUniforms,
 } from './baked-material';
 import { compressedTextureBytes, ownCopy } from './compressed-texture';
-import { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
-import type { IndexedMesh } from './pipeline/mesh';
-import type { Rotation } from './pipeline/rotation';
-import { GRID_SQUARE_MM } from './pipeline/size';
+import { DEFAULT_LOOK, vertexColours, type Look } from './lib/pipeline/look';
+import type { IndexedMesh } from './lib/pipeline/mesh';
+import type { Rotation } from './lib/pipeline/rotation';
+import { GRID_SQUARE_MM } from './lib/pipeline/size';
 
 /** Squares the grid shows along each side. */
 const GRID_SQUARES = 40;

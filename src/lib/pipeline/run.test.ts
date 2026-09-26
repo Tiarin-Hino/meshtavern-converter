@@ -4,7 +4,7 @@ import { generateBumpySheet } from './generate';
 import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
 import { PLAIN_BASE_HEIGHT_MM } from './base';
 import { encodeBinaryStl } from './stl';
-import { generateFigure, generateSwarm } from '../regression/shapes';
+import { generateFigure, generateSwarm } from '../../regression/shapes';
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {

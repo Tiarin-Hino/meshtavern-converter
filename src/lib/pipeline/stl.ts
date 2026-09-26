@@ -1,5 +1,5 @@
 /**
- * Pure STL reading. No DOM, no three.js: everything in src/pipeline must run in a Web
+ * Pure STL reading. No DOM, no three.js: everything in src/lib/pipeline must run in a Web
  * Worker and be unit-testable in Node. Files that cannot become a mini are refused with
  * a `ConversionProblem`, never read half-way into a broken one.
  */

@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
-import { generateBumpySheet } from '../src/pipeline/generate';
-import { PROBLEM_MESSAGES } from '../src/pipeline/problems';
-import { encodeAsciiStl, encodeBinaryStl } from '../src/pipeline/stl';
+import { generateBumpySheet } from '../src/lib/pipeline/generate';
+import { PROBLEM_MESSAGES } from '../src/lib/pipeline/problems';
+import { encodeAsciiStl, encodeBinaryStl } from '../src/lib/pipeline/stl';
 
 /**
  * Files that are not clean (#43), picked the way a user picks them. Every case ends in a

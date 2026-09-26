@@ -10,7 +10,7 @@
  * exactly so that welding joins them.
  */
 
-import { addRoundBase, pushOutward, type Vec3 } from '../pipeline/base';
+import { addRoundBase, pushOutward, type Vec3 } from '../lib/pipeline/base';
 
 /** A wave between -1 and 1 with period 1, smooth at its peaks. */
 function wave(x: number): number {
