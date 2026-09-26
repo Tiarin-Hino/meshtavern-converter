@@ -54,7 +54,8 @@
             ><input id="compact" type="checkbox" /> Compressed (smaller; not for Blender)</label
           >
         </section>
-        <div id="adjust" data-in="done" data-mini>
+        <details id="adjust" open data-in="done" data-mini>
+          <summary>Adjust <span class="summary-hint">Up and turn · Size · Look</span></summary>
           <fieldset id="orient">
             <legend>Up and turn</legend>
             <label id="up-label"
@@ -117,7 +118,7 @@
             <label>Wash <input id="look-wash" type="range" min="0" max="1" step="0.05" /></label>
             <label>Edges <input id="look-edges" type="range" min="0" max="1" step="0.05" /></label>
           </fieldset>
-        </div>
+        </details>
         <dl id="stats" data-in="done" data-mini data-dev></dl>
         <div id="stress" role="group" aria-label="Stress test" data-in="done" data-mini data-dev>
           <button type="button" data-count="100">100 minis</button>

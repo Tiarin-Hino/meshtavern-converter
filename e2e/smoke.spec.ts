@@ -63,9 +63,9 @@ test('keeps the page responsive while a large mesh converts', async ({ page }) =
 
 test('switches between detail levels without moving the camera', async ({ page }, testInfo) => {
   await page.evaluate(() => window.__mt.loadGenerated(200));
-  await page.getByRole('button', { name: /^far/ }).click();
+  await page.getByRole('button', { name: /^Far/ }).click();
   expect(await page.evaluate(() => window.__mt.state.shownLevel)).toBe(3);
-  await expect(page.getByRole('button', { name: /^far/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /^Far/ })).toHaveAttribute('aria-pressed', 'true');
 
   await page.evaluate(() => window.__mt.setWireframe(true));
   await page.waitForTimeout(300);
@@ -374,7 +374,7 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
   // The two download buttons offer files named after the mini and their own level, whatever
   // level is on screen; the close level is shown but never offered (PM decision, 2026-09-20).
   await page.evaluate(() => window.__mt.loadGenerated(50));
-  await page.getByRole('button', { name: /^Close|^close/ }).click();
+  await page.getByRole('button', { name: /^Close/ }).click();
   let download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download table level' }).click();
   expect((await download).suggestedFilename()).toBe('generated-50-table.glb');

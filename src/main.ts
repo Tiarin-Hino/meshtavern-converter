@@ -33,6 +33,7 @@ import {
   describeProgress,
   describeReady,
   describeWrongFile,
+  LEVEL_LABELS,
   pageStateOf,
   type PageState,
 } from './page-state';
@@ -156,6 +157,7 @@ const fileNameLine = document.querySelector<HTMLElement>('#file-name')!;
 const chooseButton = document.querySelector<HTMLButtonElement>('#choose')!;
 const chooseAgain = document.querySelector<HTMLButtonElement>('#choose-again')!;
 const miniSize = document.querySelector<HTMLElement>('#mini-size')!;
+const adjust = document.querySelector<HTMLDetailsElement>('#adjust')!;
 const status = document.querySelector<HTMLElement>('#status')!;
 const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
 const cancelButton = document.querySelector<HTMLButtonElement>('#cancel')!;
@@ -414,15 +416,13 @@ function showLevel(level: number, reframe = false, preferBaked = true): void {
 }
 
 function showLevelButtons(stats: ConversionStats): void {
-  const labels = [
-    'Full',
-    ...stats.lods.map((lod) => `${lod.name} ${Math.round(lod.triangles / 1000)}k`),
-  ];
+  const triangles = [stats.triangles, ...stats.lods.map((lod) => lod.triangles)];
   levelButtons.replaceChildren(
-    ...labels.map((label, level) => {
+    ...triangles.map((count, level) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = label;
+      button.textContent = LEVEL_LABELS[level] ?? `Level ${level}`;
+      button.title = `${count.toLocaleString()} triangles`;
       button.addEventListener('click', () => showLevel(level));
       return button;
     }),
@@ -678,6 +678,8 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     upSelect.value = stats.up;
     showTurn(null);
     showSizing(stats.sizing);
+    // A size warning is never hidden behind a closed Adjust.
+    if (stats.sizing.warnings.length > 0) adjust.open = true;
     // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
     showLevel(TABLE_LEVEL, true);

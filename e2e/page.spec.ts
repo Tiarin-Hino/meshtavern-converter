@@ -75,3 +75,27 @@ test('shows the empty, converting, done and error states', async ({ page }, test
   await expect(page.getByRole('button', { name: COPY.chooseAnother })).toBeVisible();
   await shoot(page, testInfo, 'page-error');
 });
+
+test('names the levels on the chips and opens Adjust for a size warning', async ({ page }) => {
+  await page.goto('/?bake=off');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await page.evaluate(() => window.__mt.loadDemo());
+
+  // The chips read the level, the triangles are in the title; the table level is pressed.
+  await expect(page.locator('#levels button')).toHaveText(['Original', 'Close', 'Table', 'Far']);
+  await expect(page.getByRole('button', { name: 'Table', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.getByRole('button', { name: 'Original' })).toHaveAttribute(
+    'title',
+    '6 triangles',
+  );
+
+  // Someone closed Adjust; a conversion that ends with a warning opens it again.
+  await page.locator('#adjust summary').click();
+  await expect(page.locator('#adjust')).not.toHaveAttribute('open');
+  await page.evaluate(() => window.__mt.setSizing({ size: 'tiny', scaleToBaseMm: 40 }));
+  await expect(page.locator('#adjust')).toHaveAttribute('open');
+  await expect(page.locator('#sizing-warning')).toBeVisible();
+});

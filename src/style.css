@@ -337,10 +337,42 @@ body[data-state='done'] #heading {
 /* Adjust: up and turn, size, look */
 
 #adjust {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
   font-size: 0.85rem;
+}
+
+#adjust summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 32px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#adjust summary::before {
+  content: '▸';
+  color: var(--muted);
+}
+
+#adjust[open] summary::before {
+  content: '▾';
+}
+
+#adjust summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+#adjust[open] .summary-hint {
+  display: none;
 }
 
 #adjust fieldset {
@@ -348,7 +380,7 @@ body[data-state='done'] #heading {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  margin: 0;
+  margin: 16px 0 0;
   padding: 0;
   border: 0;
 }
