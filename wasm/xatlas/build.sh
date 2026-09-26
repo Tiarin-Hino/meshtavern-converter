@@ -70,6 +70,7 @@ fetch LICENSE "$XATLAS_SHA256_LICENSE"
 OPT=(-O2 -flto)                                     # as the package we replaced, so results compare
 LANG_CPP=(-std=c++17 -fno-exceptions -fno-rtti)     # xatlas has no throw and no dynamic_cast
 DEFINES=(-DXATLAS_C_API=1 -DXA_MULTITHREADED=0)     # the C API; no threads (GitHub Pages cannot enable them)
+DEFINES+=(-DNDEBUG)                                 # xatlas's debug asserts off, as in the package we replaced
 HEAP_MB=$HEAP_INITIAL_MB
 SIMD=()
 case "$variant" in

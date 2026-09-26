@@ -4,7 +4,7 @@ The unwrap (`src/pipeline/unwrap.ts`) gives the table level texture coordinates 
 
 - `build.sh` — fetches four files of xatlas commit `f700c779` and refuses to build when a SHA-256 differs, then compiles them with `shim.c` in `emscripten/emsdk:6.0.10` (pinned by digest). All pins are constants at the top.
 - `shim.c` — the C side of our interface: fills xatlas's structs in C, so JavaScript never reads or writes one by offset.
-- `xatlas.wasm` — the built module, committed so that `npm ci && npm run dev` needs no Docker. Standalone WebAssembly: no generated JavaScript. Its imports are the complete list of what xatlas can reach outside itself (a progress callback, a memory-growth notice and three WASI stubs that are never called with data); `src/pipeline/xatlas.test.ts` pins that list.
+- `xatlas.wasm` — the built module, committed so that `npm ci && npm run dev` needs no Docker. Standalone WebAssembly: no generated JavaScript. Its imports are the complete list of what xatlas can reach outside itself (a progress callback, a memory-growth notice and a WASI `fd_write` that is never called: xatlas's printing is switched off); `src/pipeline/xatlas.test.ts` pins that list.
 - `src/pipeline/xatlas.ts` — the typed wrapper that loads it.
 
 ## Rebuilding
