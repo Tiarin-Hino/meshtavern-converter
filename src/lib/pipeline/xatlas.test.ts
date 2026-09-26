@@ -4,7 +4,7 @@ import { generateBumpySheet } from './generate';
 import { weldVertices, type IndexedMesh } from './mesh';
 import { loadXatlas, PROGRESS, type Atlas, type AtlasOptions, type Xatlas } from './xatlas';
 
-const WASM = new URL('../../wasm/xatlas/xatlas.wasm', import.meta.url);
+const WASM = new URL('../../../wasm/xatlas/xatlas.wasm', import.meta.url);
 
 /** Everything the module may reach outside itself (design note, section 5). A new entry is a question for a human, not a stub. */
 const ALLOWED_IMPORTS = [

@@ -96,7 +96,7 @@ interface Exports {
 }
 
 /** The module's own file: Vite turns this into a hashed asset under /assets/ in the page and the worker. */
-const WASM_URL = new URL('../../wasm/xatlas/xatlas.wasm', import.meta.url);
+const WASM_URL = new URL('../../../wasm/xatlas/xatlas.wasm', import.meta.url);
 
 /** Contains "cannot enlarge memory", so `isOutOfMemory` in problems.ts recognises it. */
 const OUT_OF_MEMORY = 'cannot enlarge memory: xatlas ran out of WebAssembly memory';

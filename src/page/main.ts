@@ -1,31 +1,39 @@
 import './style.css';
-import { generateBumpySheet } from './pipeline/generate';
-import { encodeGlb, glbEncoderReady } from './pipeline/glb';
-import { DEFAULT_LOOK, type Look } from './pipeline/look';
-import type { IndexedMesh } from './pipeline/mesh';
-import { checkFits, memoryBudgetBytes } from './pipeline/memory';
-import { UP_AXES, type Orientation, type OrientationOptions, type UpAxis } from './pipeline/orient';
 import {
+  encodeGlb,
+  glbEncoderReady,
+  DEFAULT_LOOK,
+  type Look,
+  type IndexedMesh,
+  memoryBudgetBytes,
+  UP_AXES,
+  type Orientation,
+  type OrientationOptions,
+  type UpAxis,
   fromAxisAngle,
   IDENTITY,
   multiply,
   turnAngleDeg,
   type Rotation,
-} from './pipeline/rotation';
-import { toProblem, type ProblemCode } from './pipeline/problems';
-import { BAKED_LEVEL, type ConversionStats, type Progress } from './pipeline/run';
-import {
+  toProblem,
+  type ProblemCode,
+  BAKED_LEVEL,
+  type ConversionStats,
+  type Progress,
   CREATURE_SIZES,
   sizeLabel,
   type CreatureSize,
   type Sizing,
   type SizingOptions,
   type Units,
-} from './pipeline/size';
-import { UNIT_FACTORS } from './pipeline/units';
-import { encodeBinaryStl, SNIFF_BYTES, sniffStl } from './pipeline/stl';
+  UNIT_FACTORS,
+  readStlFile,
+  ConversionCancelled,
+  Converter,
+} from '../lib';
+import { transcodeDetail } from '../lib/three';
+import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
-import { transcodeDetail } from './compressed-texture';
 import { parsePageOptions } from './options';
 import {
   COPY,
@@ -38,7 +46,6 @@ import {
   type PageState,
 } from './page-state';
 import { Viewer, type BakedMini, type Perf } from './viewer';
-import { ConversionCancelled, Converter } from './worker/client';
 
 interface AppState {
   ready: boolean;
@@ -812,9 +819,7 @@ async function loadFile(file: File | undefined): Promise<void> {
   try {
     // Look at the start and the size first: a file that is empty, not an STL or too large
     // for this device is refused before all of it is read into memory.
-    const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
-    checkFits(file.size, sniffStl(head, file.size), memoryBudget);
-    stl = await file.arrayBuffer();
+    stl = await readStlFile(file, memoryBudget);
   } catch (error) {
     state.fileName = file.name;
     return showProblem(file.name, error);

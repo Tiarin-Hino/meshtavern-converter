@@ -9,7 +9,7 @@
     The page has four states (empty, converting, done, error) set on body[data-state] by
     render() in main.ts; elements say in which states they show with data-in. Elements with
     data-dev are the team's tools and are removed from the page unless the address has ?dev.
-    The product's wording lives in COPY in src/page-state.ts: data-copy names the key that
+    The product's wording lives in COPY in src/page/page-state.ts: data-copy names the key that
     start-up writes into an element, and render() fills the heading and the panel's button.
   -->
   <body data-state="empty">
@@ -155,6 +155,6 @@
         <textarea id="bench-result" readonly rows="12" aria-label="Benchmark result"></textarea>
       </details>
     </footer>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/page/main.ts"></script>
   </body>
 </html>

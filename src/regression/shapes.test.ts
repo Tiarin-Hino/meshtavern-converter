@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { weldVertices } from '../pipeline/mesh';
-import { detectUpAxis } from '../pipeline/orient';
-import { addRoundBase } from '../pipeline/base';
+import { weldVertices, detectUpAxis, addRoundBase } from '../lib/dev';
 import {
   addBlob,
   generateFigure,

@@ -28,12 +28,12 @@ if (!wasmPath) {
 }
 
 const load = async (path) => (await runnerImport(path, { logLevel: 'silent' })).module;
-const { instantiateXatlas } = await load('./src/pipeline/xatlas.ts');
-const { unwrap } = await load('./src/pipeline/unwrap.ts');
-const { runPipeline, BAKED_LEVEL } = await load('./src/pipeline/run.ts');
-const { detailResolutionFor, surfaceAreaMm2 } = await load('./src/pipeline/bake-policy.ts');
+const { instantiateXatlas } = await load('./src/lib/pipeline/xatlas.ts');
+const { unwrap } = await load('./src/lib/pipeline/unwrap.ts');
+const { runPipeline, BAKED_LEVEL } = await load('./src/lib/pipeline/run.ts');
+const { detailResolutionFor, surfaceAreaMm2 } = await load('./src/lib/pipeline/bake-policy.ts');
 const { generateFigure } = await load('./src/regression/shapes.ts');
-const { encodeBinaryStl } = await load('./src/pipeline/stl.ts');
+const { encodeBinaryStl } = await load('./src/lib/pipeline/stl.ts');
 
 /** The table level of an STL, as the pipeline hands it to the unwrap. */
 async function tableLevel(stl) {

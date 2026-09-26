@@ -14,7 +14,7 @@ The built-in `/code-review` hunts for code bugs. This review adds what it does n
 2. **Does it deliver the issue?** For each acceptance criterion: ticked or not, and is the evidence real (a test that actually asserts it, a number with its device, a screenshot)? A ticked criterion without evidence is a finding. Work outside the issue's scope is a finding.
 3. **Repo rules.** Look specifically for:
    - user data (STL bytes, file names, measurements of a user's file) reaching a network call
-   - DOM or three.js scene objects inside `src/pipeline/`
+   - DOM or three.js scene objects inside `src/lib/` (pipeline, worker), or deep imports into `src/lib/pipeline`, `worker` or `three` from the page
    - STL files, renders of real minis, or names of third-party minis, creators or shops in code, fixtures, docs or the journal
    - a moved regression baseline without a reason in the PR
    - a changed behaviour with no update to `CLAUDE.md` or the spec

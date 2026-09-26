@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateFigure, toYUp } from '../regression/shapes';
+import { generateFigure, toYUp } from '../../regression/shapes';
 import type { Vec3 } from './base';
 import { generatePlainBase } from './base';
 import { generateBumpySheet } from './generate';
