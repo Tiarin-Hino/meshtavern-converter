@@ -790,7 +790,10 @@ function showProblem(fileName: string, error: unknown): void {
 async function loadFile(file: File | undefined): Promise<void> {
   if (!file || state.busy) return;
   status.classList.remove('problem');
-  if (file.name.toLowerCase().endsWith('.glb')) return loadGlb(await file.arrayBuffer(), file.name);
+  // Opening a GLB checks the export's round trip: a tool for the team, under ?dev.
+  if (pageOptions.dev && file.name.toLowerCase().endsWith('.glb')) {
+    return loadGlb(await file.arrayBuffer(), file.name);
+  }
   if (!file.name.toLowerCase().endsWith('.stl')) {
     status.textContent = describeWrongFile(file.name, pageOptions.dev);
     return;
@@ -953,6 +956,8 @@ if (matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).matches) adjust.open = fa
 // benchmark button to find. References taken above stay valid, and the hooks keep working.
 if (!pageOptions.dev) {
   for (const element of document.querySelectorAll('[data-dev]')) element.remove();
+} else {
+  fileInput.accept = '.stl,.glb';
 }
 if (pageOptions.problems.length > 0) {
   status.textContent = `Check the address: ${pageOptions.problems.join('; ')}.`;

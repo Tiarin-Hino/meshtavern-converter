@@ -20,7 +20,7 @@
         id="file"
         class="visually-hidden"
         type="file"
-        accept=".stl,.glb"
+        accept=".stl"
         tabindex="-1"
         aria-label="STL file"
       />
@@ -139,10 +139,10 @@
           Paste the result into the measurements issue.
         </p>
         <p>
-          Mode: <a href="?">baked minis, compressed (the normal path)</a> ·
-          <a href="?ktx=off">baked minis, uncompressed</a> ·
-          <a href="?bake=off">per-vertex look</a>. Switching reloads the page, so load your mini
-          afterwards.
+          Mode: <a href="?dev">baked minis, compressed (the normal path)</a> ·
+          <a href="?dev&amp;ktx=off">baked minis, uncompressed</a> ·
+          <a href="?dev&amp;bake=off">per-vertex look</a>. Switching reloads the page, so load your
+          mini afterwards.
         </p>
         <button id="bench-light" type="button">Run, light (phones)</button>
         <button id="bench-full" type="button">Run, full (100 MB mesh)</button>

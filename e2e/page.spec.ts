@@ -135,3 +135,27 @@ test('names the levels on the chips and opens Adjust for a size warning', async 
   await expect(page.locator('#adjust')).toHaveAttribute('open');
   await expect(page.locator('#sizing-warning')).toBeVisible();
 });
+
+test("keeps the team's tools behind ?dev", async ({ page }) => {
+  const tools = ['#stats', '#stress', '#bench', '#compact', '#perf', '#dev-badge'];
+  const glb = { name: 'mini.glb', mimeType: 'model/gltf-binary', buffer: Buffer.alloc(64, 1) };
+
+  // Without dev: none of the tools exist, the picker offers STL only, a GLB is refused.
+  await page.goto('/?bake=off');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  for (const tool of tools) await expect(page.locator(tool), tool).toHaveCount(0);
+  await expect(page.locator('#file')).toHaveAttribute('accept', '.stl');
+  await page.setInputFiles('#file', glb);
+  await expect(page.locator('#status')).toHaveText('mini.glb is not an STL file.');
+  expect(await page.evaluate(() => window.__mt.state.imported)).toBeNull();
+
+  // With dev: they are all there, and the benchmark's mode links keep dev.
+  await page.goto('/?dev&bake=off');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  for (const tool of tools) await expect(page.locator(tool), tool).toHaveCount(1);
+  await expect(page.locator('#file')).toHaveAttribute('accept', '.stl,.glb');
+  await expect(page.locator('#bench a')).toHaveCount(3);
+  for (const link of await page.locator('#bench a').all()) {
+    expect(await link.getAttribute('href')).toMatch(/^\?dev/);
+  }
+});
