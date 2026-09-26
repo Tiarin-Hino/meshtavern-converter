@@ -520,3 +520,71 @@ body[data-dragging] #drop-frame {
 #bench a {
   color: var(--accent);
 }
+
+/*
+ * Phone (PHONE_MAX_WIDTH_PX in main.ts): the done panel becomes a bottom sheet that
+ * scrolls inside, the viewport keeps the rest, every control is a touch target.
+ */
+@media (max-width: 600px) {
+  :root {
+    --sheet-max-height: 40vh;
+    --touch-target: 44px;
+  }
+
+  #promise-short {
+    display: none;
+  }
+
+  button,
+  select,
+  input[type='number'],
+  input[type='color'],
+  input[type='range'],
+  #adjust label,
+  #export label,
+  .check,
+  #adjust summary {
+    min-height: var(--touch-target);
+  }
+
+  input[type='checkbox'] {
+    width: 20px;
+    height: 20px;
+  }
+
+  body:not([data-state='done']) #panel {
+    padding: 24px 16px;
+  }
+
+  body[data-state='done'] #stage {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  body[data-state='done'] #panel {
+    position: relative;
+    width: auto;
+    max-height: var(--sheet-max-height);
+    padding: 20px 16px 16px;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+  }
+
+  /* The grab handle: a sign that the sheet scrolls, drawn, not a control. */
+  body[data-state='done'] #panel::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+    transform: translateX(-50%);
+  }
+
+  #levels {
+    bottom: 8px;
+    left: 8px;
+  }
+}

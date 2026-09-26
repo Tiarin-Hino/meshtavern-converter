@@ -76,6 +76,42 @@ test('shows the empty, converting, done and error states', async ({ page }, test
   await shoot(page, testInfo, 'page-error');
 });
 
+test('fits a phone screen', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/?bake=off');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  const noSideways = () =>
+    page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+
+  expect(await noSideways()).toBe(true);
+  for (const button of [page.locator('#choose'), page.locator('#choose-again')]) {
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  await shoot(page, testInfo, 'phone-empty');
+
+  await page.evaluate(() => window.__mt.loadDemo());
+  expect(await noSideways()).toBe(true);
+  // The viewport keeps at least half of the screen; the sheet's first screen has the size
+  // line and both downloads; Adjust is closed.
+  expect((await page.locator('#viewport').boundingBox())!.height).toBeGreaterThanOrEqual(844 / 2);
+  await expect(page.locator('#mini-size')).toBeInViewport();
+  await expect(page.getByRole('button', { name: COPY.downloadTable })).toBeInViewport();
+  await expect(page.getByRole('button', { name: COPY.downloadFar })).toBeInViewport();
+  await expect(page.locator('#adjust')).not.toHaveAttribute('open');
+  for (const button of await page.locator('#panel button:visible').all()) {
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  await page.waitForTimeout(500);
+  await shoot(page, testInfo, 'phone-done');
+
+  // Opened, Adjust scrolls inside the sheet and nothing runs off the side.
+  await page.locator('#adjust summary').click();
+  await page.getByLabel('Edges').scrollIntoViewIfNeeded();
+  expect(await noSideways()).toBe(true);
+  await expect(page.getByLabel('Edges')).toBeInViewport();
+  await shoot(page, testInfo, 'phone-adjust');
+});
+
 test('names the levels on the chips and opens Adjust for a size warning', async ({ page }) => {
   await page.goto('/?bake=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);

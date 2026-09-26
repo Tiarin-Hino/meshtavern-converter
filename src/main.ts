@@ -945,6 +945,10 @@ benchCopy.addEventListener('click', () => {
   benchResult.select();
 });
 
+/** Screens up to this width get the phone layout; the same number is in the media query of style.css. _(proposal)_ */
+const PHONE_MAX_WIDTH_PX = 600;
+// On a phone the sheet starts with the size line and the downloads; Adjust is one tap away.
+if (matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).matches) adjust.open = false;
 // The team's tools exist only under ?dev. Removed rather than hidden: a product page has no
 // benchmark button to find. References taken above stay valid, and the hooks keep working.
 if (!pageOptions.dev) {
