@@ -2,7 +2,7 @@
 // cap lifted so differences show. Every mini owns its texture, as different minis would.
 // Usage: npm run build && node scripts/measure-baked.mjs [resolution ...] [-- file.stl:share ...]
 //   node scripts/measure-baked.mjs 512 1024 2048
-//   node scripts/measure-baked.mjs 1024 -- MINI-014.stl:0.8 HillGiant_32mm_FDM.stl:0.2
+//   node scripts/measure-baked.mjs 1024 -- humanoid/MINI-014.stl:0.8 large-creature/large-02.stl:0.2
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
