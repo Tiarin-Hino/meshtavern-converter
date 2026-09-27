@@ -20,7 +20,7 @@ This project is built by a small team together with the Claude Code agent. Human
 
 ## WebAssembly we build ourselves
 
-`wasm/xatlas/xatlas.wasm` (the unwrapper) is built by this project from pinned sources and committed, so `npm ci && npm run dev` needs no toolchain. Rebuilding it or bumping xatlas or Emscripten needs Docker: `npm run xatlas:build` (from Git Bash or WSL on Windows); how to bump is in `wasm/xatlas/README.md`. The `xatlas build` workflow rebuilds it on every PR that touches `wasm/xatlas/` and fails if one byte differs from the committed file.
+Both WebAssembly modules in the critical path are built by this project from pinned sources and committed, so `npm ci && npm run dev` needs no toolchain: `wasm/xatlas/xatlas.wasm` (the unwrapper) and `wasm/basis-encoder/basis_encoder.wasm` (the KTX2 encoder). Rebuilding one or bumping its library or Emscripten needs Docker: `npm run xatlas:build` or `npm run basis:build` (from Git Bash or WSL on Windows); how to bump is in the folder's `README.md`. The `xatlas build` and `basis encoder build` workflows rebuild them on every PR that touches their folder and fail if one byte differs from the committed file.
 
 ## Automatic reviews
 
