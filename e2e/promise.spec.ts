@@ -73,10 +73,18 @@ test('no request carries the file: the promise on the page is true', async ({ pa
   const origin = new URL(page.url()).origin;
   expect(requests.length).toBeGreaterThan(0);
   expect(requests.some((r) => r.afterPick && r.url.includes('/basis/'))).toBe(true);
-  // Our own build of xatlas, same-origin and fetched only once a file needs unwrapping.
-  expect(
-    requests.some((r) => r.afterPick && /\/assets\/[^/]+\.wasm$/.test(new URL(r.url).pathname)),
-  ).toBe(true);
+  // Our own builds of xatlas and the Basis encoder, same-origin and fetched only once a file
+  // needs unwrapping and compressing: two distinct modules under /assets/.
+  const ownModules = new Set(
+    requests
+      .filter((r) => r.afterPick)
+      .map((r) => new URL(r.url).pathname)
+      .filter((path) => /^\/assets\/[^/]+\.wasm$/.test(path)),
+  );
+  expect([...ownModules].sort()).toEqual([
+    expect.stringMatching(/^\/assets\/basis_encoder-[^/]+\.wasm$/),
+    expect.stringMatching(/^\/assets\/xatlas-[^/]+\.wasm$/),
+  ]);
   for (const request of requests) {
     const url = new URL(request.url);
     expect(url.origin, request.url).toBe(origin);
