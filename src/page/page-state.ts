@@ -1,4 +1,12 @@
-import type { ConversionStats, Progress, StepName, CreatureSize, Units } from '../lib';
+import type {
+  ConversionStats,
+  PairWarning,
+  Placement,
+  Progress,
+  StepName,
+  CreatureSize,
+  Units,
+} from '../lib';
 
 /**
  * What the page says and which of its four states it is in (issue #41, design note
@@ -38,8 +46,16 @@ export const COPY = {
   downloadTable: 'Download table level',
   downloadFar: 'Download far level',
   adjust: 'Adjust',
-  adjustHint: 'Up and turn · Size · Look',
+  adjustHint: 'Up and turn · Size · Look · Base',
+  pairHint: 'Two files? Drop the figure and its base together.',
+  addBase: 'Add a base file',
+  removeBase: 'Remove the base',
+  swapPair: 'Swap figure and base',
+  moveByHand: 'Move by hand',
 } as const;
+
+/** How far one press of Raise or Lower moves the figure on its base. _(proposal, #70)_ */
+export const LIFT_STEP_MM = 0.5;
 
 /** The level chips, in the order of the levels: full detail, then close, table, far. */
 export const LEVEL_LABELS = ['Original', 'Close', 'Table', 'Far'] as const;
@@ -79,9 +95,15 @@ const millimetres = (mm: number): string =>
 
 const sizeName = (size: CreatureSize): string => size[0]!.toUpperCase() + size.slice(1);
 
-/** "38 mm tall · Medium, 1 square · 25 mm round base": the one line the done state says about the mini. */
-export function describeMini(stats: Pick<ConversionStats, 'sizeMm' | 'sizing'>): string {
+/**
+ * "38 mm tall · Medium, 1 square · 25 mm round base": the one line the done state says about
+ * the mini. A figure with its base file says "from its own file" after the base.
+ */
+export function describeMini(
+  stats: Pick<ConversionStats, 'sizeMm' | 'sizing'> & { pair?: unknown | null },
+): string {
   const { sizing } = stats;
+  const own = stats.pair ? ' from its own file' : '';
   const squares = sizing.footprintSquares;
   const size = `${sizeName(sizing.size)}, ${squares === 1 ? '1 square' : `${squares}×${squares} squares`}`;
   const base = sizing.base
@@ -89,7 +111,7 @@ export function describeMini(stats: Pick<ConversionStats, 'sizeMm' | 'sizing'>):
     : sizing.plainBase
       ? `${Math.round(sizing.plainBase.diameterMm)} mm plain base added`
       : 'no base';
-  return `${millimetres(stats.sizeMm[1])} tall · ${size} · ${base}${UNITS_READ_AS[sizing.units]}`;
+  return `${millimetres(stats.sizeMm[1])} tall · ${size} · ${base}${sizing.base ? own : ''}${UNITS_READ_AS[sizing.units]}`;
 }
 
 /** "Ready. Converted from 1,250,000 triangles." */
@@ -100,4 +122,59 @@ export function describeReady(stats: Pick<ConversionStats, 'sourceTriangles'>): 
 /** The line for a dropped file the page does not take; a GLB is only opened under `?dev`. */
 export function describeWrongFile(name: string, dev: boolean): string {
   return dev ? `${name} is neither an STL nor a GLB file.` : `${name} is not an STL file.`;
+}
+
+/** The line for more files than a figure and its base. */
+export function describeTooManyFiles(): string {
+  return 'Drop one figure file, or a figure and its base.';
+}
+
+/** Two sides this close count as one size: a round hole, not a slot. _(proposal)_ */
+const ROUND_SPOT = 0.1;
+
+/**
+ * "Set in the 3.2 mm hole", "Set in the 14 × 10 mm recess", "Set on the flattest patch of
+ * the top", with " · moved by hand" when the user moved it. `scale` turns the base file's
+ * units into mm (`Sizing.scale`).
+ */
+export function describePlacement(placement: Placement, scale = 1): string {
+  const { spot } = placement;
+  const [a, b] = [...spot.sizeMm].map((mm) => mm * scale).sort((x, y) => y - x) as [number, number];
+  const size =
+    a - b <= a * ROUND_SPOT ? millimetres(a) : `${millimetres(a).slice(0, -3)} × ${millimetres(b)}`;
+  const where =
+    spot.kind === 'flat'
+      ? 'Set on the flattest patch of the top'
+      : spot.kind === 'hole'
+        ? `Set in the ${size} ${a - b <= a * ROUND_SPOT ? 'hole' : 'slot'}`
+        : `Set in the ${size} recess`;
+  return placement.method === 'manual' ? `${where} · moved by hand` : where;
+}
+
+/** The warning line of a pair, or null when there is nothing to say. */
+export function describePairWarning(warnings: readonly PairWarning[]): string | null {
+  if (warnings.includes('both-look-like-bases'))
+    return 'Both files look like bases. If one is a low creature, swap them.';
+  if (warnings.includes('figure-has-its-own-base'))
+    return 'The figure has a flat underside of its own; it was set on the base anyway.';
+  return null;
+}
+
+/** "Moved 2.3 mm, turned 15°, raised 0.5 mm — not applied yet"; null when nothing is pending. */
+export function describePendingPlacement(pending: {
+  moveMm: [number, number];
+  liftMm: number;
+  turnDeg: number;
+}): string | null {
+  const parts: string[] = [];
+  const moved = Math.hypot(pending.moveMm[0], pending.moveMm[1]);
+  if (moved > 0) parts.push(`moved ${Math.round(moved * 10) / 10} mm`);
+  if (pending.turnDeg !== 0) parts.push(`turned ${Math.round(pending.turnDeg)}°`);
+  if (pending.liftMm !== 0)
+    parts.push(
+      `${pending.liftMm > 0 ? 'raised' : 'lowered'} ${Math.round(Math.abs(pending.liftMm) * 10) / 10} mm`,
+    );
+  if (parts.length === 0) return null;
+  const text = parts.join(', ');
+  return `${text[0]!.toUpperCase()}${text.slice(1)} — not applied yet`;
 }

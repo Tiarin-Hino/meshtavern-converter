@@ -94,6 +94,14 @@ export class Viewer {
   private readonly pivot = new THREE.Group();
   private gizmo: TransformControls | null = null;
   private onTurn: ((turn: Rotation) => void) | null = null;
+  /**
+   * A figure with its base file (#70), shown as two parts so the figure can be moved on the
+   * base before anything converts: the figure part turns about its contact centre, which
+   * sits at `figureHome` when unmoved. Null when a single mini is shown.
+   */
+  private figure: { pivot: THREE.Group; mesh: THREE.Mesh; home: THREE.Vector3 } | null = null;
+  private moveGizmo: TransformControls | null = null;
+  private onMove: ((moveMm: [number, number]) => void) | null = null;
   private look: Look = { ...DEFAULT_LOOK };
   private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
@@ -148,6 +156,93 @@ export class Viewer {
     this.clear();
     this.mesh = new THREE.Mesh(this.toGeometry(mesh), this.material);
     this.showSingle(sizeMm, reframe);
+  }
+
+  /**
+   * Shows the full-detail mesh of a figure with its base file as two parts that share their
+   * vertices: the first `figureTriangles` triangles are the figure (the pipeline lists it
+   * first), the rest the base. `contactMm` is where the figure's contact centre stands, scene
+   * mm: the point it turns about in `setFigureOffset`.
+   */
+  showPair(
+    mesh: IndexedMesh,
+    figureTriangles: number,
+    contactMm: [number, number],
+    sizeMm: [number, number, number],
+    reframe = false,
+  ): void {
+    this.clear();
+    const whole = this.toGeometry(mesh);
+    const part = (from: number, to: number): THREE.BufferGeometry => {
+      const geometry = new THREE.BufferGeometry();
+      for (const [name, attribute] of Object.entries(whole.attributes))
+        geometry.setAttribute(name, attribute);
+      geometry.setIndex(new THREE.BufferAttribute(mesh.indices.subarray(from * 3, to * 3), 1));
+      geometry.userData.source = mesh;
+      return geometry;
+    };
+    this.mesh = new THREE.Mesh(part(figureTriangles, mesh.indices.length / 3), this.material);
+    const home = new THREE.Vector3(contactMm[0], 0, contactMm[1]);
+    const figureMesh = new THREE.Mesh(part(0, figureTriangles), this.material);
+    figureMesh.position.set(-home.x, 0, -home.z);
+    const pivot = new THREE.Group();
+    pivot.position.copy(home);
+    pivot.add(figureMesh);
+    this.mesh.add(pivot);
+    this.figure = { pivot, mesh: figureMesh, home };
+    this.showSingle(sizeMm, reframe);
+    if (this.moveGizmo) this.moveGizmo.attach(pivot);
+  }
+
+  /** Whether the two parts of a pair are on screen. */
+  hasFigure(): boolean {
+    return this.figure !== null;
+  }
+
+  /**
+   * Moves the figure part of a pair from where it was set: `moveMm` across, `liftMm` up,
+   * turned by `turnDeg` about the vertical through its contact centre (a three.js
+   * rotation.y). Scene mm. A preview: nothing is converted.
+   */
+  setFigureOffset(moveMm: [number, number], liftMm: number, turnDeg: number): void {
+    if (!this.figure) return;
+    const { pivot, home } = this.figure;
+    pivot.position.set(home.x + moveMm[0], liftMm, home.z + moveMm[1]);
+    pivot.rotation.y = THREE.MathUtils.degToRad(turnDeg);
+  }
+
+  /**
+   * Shows a move gizmo on the figure part of a pair, across only: raising and lowering has
+   * its own buttons. `onMove` hears every change as the move from where the figure was set,
+   * scene mm; null hides it. The camera stays still while the gizmo is dragged.
+   */
+  setMoveGizmo(onMove: ((moveMm: [number, number]) => void) | null): void {
+    this.onMove = onMove;
+    if (!onMove) {
+      if (this.moveGizmo) {
+        this.moveGizmo.detach();
+        this.scene.remove(this.moveGizmo.getHelper());
+        this.moveGizmo.dispose();
+        this.moveGizmo = null;
+      }
+      return;
+    }
+    if (!this.moveGizmo) {
+      const gizmo = new TransformControls(this.camera, this.canvas);
+      gizmo.setMode('translate');
+      gizmo.showY = false;
+      gizmo.addEventListener('dragging-changed', (event) => {
+        this.controls.enabled = !event.value;
+      });
+      gizmo.addEventListener('objectChange', () => {
+        if (!this.figure) return;
+        const { pivot, home } = this.figure;
+        this.onMove?.([pivot.position.x - home.x, pivot.position.z - home.z]);
+      });
+      this.scene.add(gizmo.getHelper());
+      this.moveGizmo = gizmo;
+    }
+    if (this.figure) this.moveGizmo.attach(this.figure.pivot);
   }
 
   /** Adds the single mini to the scene, with the turn being tried out and the gizmo if shown. */
@@ -419,6 +514,11 @@ export class Viewer {
 
   private clear(): void {
     this.gizmo?.detach();
+    this.moveGizmo?.detach();
+    if (this.figure) {
+      this.figure.mesh.geometry.dispose();
+      this.figure = null;
+    }
     if (this.mesh) {
       this.pivot.remove(this.mesh);
       this.scene.remove(this.pivot);

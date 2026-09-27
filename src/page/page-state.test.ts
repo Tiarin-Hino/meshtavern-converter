@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   describeMini,
+  describePairWarning,
+  describePendingPlacement,
+  describePlacement,
   describeProgress,
   describeReady,
+  describeTooManyFiles,
   describeWrongFile,
   pageStateOf,
   STEP_LABELS,
 } from './page-state';
-import { BAKE_STEPS, STEPS, type Sizing } from '../lib';
+import { BAKE_STEPS, STEPS, type Placement, type Sizing } from '../lib';
 
 const idle = { busy: false, stats: null, imported: null, error: null };
 
@@ -113,5 +117,67 @@ describe('describeReady and describeWrongFile', () => {
   it('offers a GLB only to the team', () => {
     expect(describeWrongFile('mini.obj', false)).toBe('mini.obj is not an STL file.');
     expect(describeWrongFile('mini.obj', true)).toBe('mini.obj is neither an STL nor a GLB file.');
+  });
+});
+
+const placement = (
+  changes: Partial<Placement['spot']>,
+  method: Placement['method'] = 'detected',
+): Placement => ({
+  spot: { kind: 'recess', centre: [0, 0], sizeMm: [14, 10], depthMm: 1, fit: 0.5, ...changes },
+  contactMm: [12, 8],
+  offsetMm: [0, 0, 3],
+  yawDeg: 0,
+  method,
+  candidates: [],
+});
+
+describe('the base section', () => {
+  it('says where the figure was set', () => {
+    expect(describePlacement(placement({}))).toBe('Set in the 14 × 10 mm recess');
+    expect(describePlacement(placement({ sizeMm: [13, 13] }))).toBe('Set in the 13 mm recess');
+    expect(describePlacement(placement({ kind: 'hole', sizeMm: [3.2, 3.1] }))).toBe(
+      'Set in the 3.2 mm hole',
+    );
+    expect(describePlacement(placement({ kind: 'hole', sizeMm: [2, 9] }))).toBe(
+      'Set in the 9 × 2 mm slot',
+    );
+    expect(describePlacement(placement({ kind: 'flat' }), 1)).toBe(
+      'Set on the flattest patch of the top',
+    );
+    expect(describePlacement(placement({ kind: 'hole', sizeMm: [0.125, 0.125] }), 25.4)).toBe(
+      'Set in the 3.2 mm hole',
+    );
+    expect(describePlacement(placement({}, 'manual'))).toBe(
+      'Set in the 14 × 10 mm recess · moved by hand',
+    );
+  });
+
+  it('says what it saw about the two files', () => {
+    expect(describePairWarning([])).toBeNull();
+    expect(describePairWarning(['both-look-like-bases'])).toMatch(/Both files look like bases/);
+    expect(describePairWarning(['figure-has-its-own-base'])).toMatch(/flat underside of its own/);
+  });
+
+  it('says what is pending and not applied', () => {
+    expect(describePendingPlacement({ moveMm: [0, 0], liftMm: 0, turnDeg: 0 })).toBeNull();
+    expect(describePendingPlacement({ moveMm: [2.3, 0], liftMm: 0.5, turnDeg: 15 })).toBe(
+      'Moved 2.3 mm, turned 15°, raised 0.5 mm — not applied yet',
+    );
+    expect(describePendingPlacement({ moveMm: [0, 0], liftMm: -1, turnDeg: 0 })).toBe(
+      'Lowered 1 mm — not applied yet',
+    );
+  });
+
+  it('says a pair measured its base from the base file, and refuses a third file', () => {
+    const stats = {
+      sizeMm: [32, 34, 32] as [number, number, number],
+      sizing: sizing({ base: measured('round', 32), baseDiameterMm: 32 }),
+      pair: {},
+    };
+    expect(describeMini(stats)).toBe(
+      '34 mm tall · Medium, 1 square · 32 mm round base from its own file',
+    );
+    expect(describeTooManyFiles()).toBe('Drop one figure file, or a figure and its base.');
   });
 });

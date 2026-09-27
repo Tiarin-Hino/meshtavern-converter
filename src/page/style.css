@@ -421,6 +421,36 @@ body[data-state='done'] #heading {
   color: var(--warn);
 }
 
+/* The Base section shows the button to add a base for one file, the pair's controls for two. */
+#pair[data-kind='single'] [data-pair='pair'],
+#pair[data-kind='pair'] [data-pair='single'] {
+  display: none;
+}
+
+#pair-files,
+#placement {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+#pair-warning {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--warn);
+}
+
+#placement-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#placement-pending {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+
 /* Drag over the page */
 
 #drop-frame {

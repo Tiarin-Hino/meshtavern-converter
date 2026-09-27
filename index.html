@@ -23,6 +23,7 @@
         class="visually-hidden"
         type="file"
         accept=".stl"
+        multiple
         tabindex="-1"
         aria-label="STL file"
       />
@@ -40,6 +41,7 @@
         <button id="cancel" type="button" data-in="converting" data-copy="cancel"></button>
         <button id="choose-again" class="primary" type="button" data-in="empty error"></button>
         <p class="promise" data-in="empty error" data-copy="promise"></p>
+        <p id="pair-hint" class="promise" data-in="empty" data-copy="pairHint"></p>
         <p id="mini-size" data-in="done" data-mini></p>
         <section id="export" aria-labelledby="export-heading" data-in="done" data-mini>
           <h3 id="export-heading" data-copy="downloads"></h3>
@@ -122,6 +124,41 @@
             /></label>
             <label>Wash <input id="look-wash" type="range" min="0" max="1" step="0.05" /></label>
             <label>Edges <input id="look-edges" type="range" min="0" max="1" step="0.05" /></label>
+          </fieldset>
+          <!-- A figure with its base file (#70): data-pair says whether an element shows for one file or a pair. -->
+          <fieldset id="pair" data-kind="single">
+            <legend>Base</legend>
+            <button id="add-base" type="button" data-pair="single" data-copy="addBase"></button>
+            <input
+              id="base-file"
+              class="visually-hidden"
+              type="file"
+              accept=".stl"
+              tabindex="-1"
+              aria-label="Base STL file"
+            />
+            <p id="pair-files" data-pair="pair"></p>
+            <button id="swap-pair" type="button" data-pair="pair" data-copy="swapPair"></button>
+            <p id="pair-warning" data-pair="pair" hidden></p>
+            <p id="placement" data-pair="pair"></p>
+            <div
+              id="placement-controls"
+              role="group"
+              aria-label="Place the figure"
+              data-pair="pair"
+            >
+              <label class="check"
+                ><input id="move-by-hand" type="checkbox" /> <span data-copy="moveByHand"></span
+              ></label>
+              <button type="button" data-lift="1">Raise 0.5 mm</button>
+              <button type="button" data-lift="-1">Lower 0.5 mm</button>
+              <button type="button" data-yaw="-15">Turn −15°</button>
+              <button type="button" data-yaw="15">Turn +15°</button>
+              <span id="placement-pending" hidden></span>
+              <button id="placement-apply" type="button" disabled>Apply</button>
+              <button id="placement-reset" type="button" disabled>Reset</button>
+              <button id="remove-base" type="button" data-copy="removeBase"></button>
+            </div>
           </fieldset>
         </details>
         <dl id="stats" data-in="done" data-mini data-dev></dl>

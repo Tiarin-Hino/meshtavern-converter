@@ -30,18 +30,27 @@ import {
   readStlFile,
   ConversionCancelled,
   Converter,
+  type PairingOptions,
+  type PairResult,
+  type PlacementOptions,
 } from '../lib';
 import { transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
+import { generatePuddleFigure, generateRecessBase } from '../regression/shapes';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { parsePageOptions } from './options';
 import {
   COPY,
   describeMini,
   describeProgress,
+  describePairWarning,
+  describePendingPlacement,
+  describePlacement,
   describeReady,
+  describeTooManyFiles,
   describeWrongFile,
   LEVEL_LABELS,
+  LIFT_STEP_MM,
   pageStateOf,
   type PageState,
 } from './page-state';
@@ -103,6 +112,18 @@ interface AppState {
    * `setDown()` convert with it.
    */
   orientation: { turn: Rotation | null; turnDeg: number };
+  /**
+   * A placement of the figure on its base the user is trying out (#70): moved across, lifted
+   * and turned, relative to where the last result set it, in the base file's units. Shown in
+   * the viewer only; `applyPlacement()` converts with it. Null when nothing is pending.
+   */
+  pair: PendingPlacement | null;
+}
+
+interface PendingPlacement {
+  moveMm: [number, number];
+  liftMm: number;
+  turnDeg: number;
 }
 
 declare global {
@@ -146,6 +167,24 @@ declare global {
        * base diameter, plain base), merged into the ones made so far. `undefined` drops a choice.
        */
       setSizing: (changes: Partial<SizingOptions>) => Promise<void>;
+      /** Converts the generated figure on its puddle together with the generated recess base (#70). */
+      loadGeneratedPair: () => Promise<void>;
+      /** Adds a base file to the mini on screen and converts the two as a pair. */
+      addBase: (stl: ArrayBuffer, name: string) => Promise<void>;
+      /** Converts the pair again with figure and base the other way round. */
+      swapPair: () => Promise<void>;
+      /** Moves the figure on its base by mm across (scene x, z): a preview, nothing is converted. */
+      movePlacement: (dxMm: number, dzMm: number) => void;
+      /** Raises (positive) or lowers the figure on its base: a preview. */
+      liftPlacement: (dyMm: number) => void;
+      /** Turns the figure on its base about the vertical: a preview. */
+      turnPlacement: (deg: number) => void;
+      /** Converts the pair again with the placement as previewed. */
+      applyPlacement: () => Promise<void>;
+      /** Drops the previewed placement. */
+      resetPlacement: () => void;
+      /** Converts the figure alone again, without its base. */
+      removeBase: () => Promise<void>;
       startStress: (count: number, forcedLod?: number | null, textureBudgetMb?: number) => void;
       /**
        * Remembers the converted mini for mixed stress scenes. With a pool, `startStress`
@@ -179,6 +218,21 @@ const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
 const turnReset = document.querySelector<HTMLButtonElement>('#turn-reset')!;
 const turnApply = document.querySelector<HTMLButtonElement>('#turn-apply')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
+const pairInputs = {
+  fieldset: document.querySelector<HTMLFieldSetElement>('#pair')!,
+  addBase: document.querySelector<HTMLButtonElement>('#add-base')!,
+  baseFile: document.querySelector<HTMLInputElement>('#base-file')!,
+  files: document.querySelector<HTMLElement>('#pair-files')!,
+  swap: document.querySelector<HTMLButtonElement>('#swap-pair')!,
+  warning: document.querySelector<HTMLElement>('#pair-warning')!,
+  placement: document.querySelector<HTMLElement>('#placement')!,
+  controls: document.querySelector<HTMLElement>('#placement-controls')!,
+  moveByHand: document.querySelector<HTMLInputElement>('#move-by-hand')!,
+  pending: document.querySelector<HTMLElement>('#placement-pending')!,
+  apply: document.querySelector<HTMLButtonElement>('#placement-apply')!,
+  reset: document.querySelector<HTMLButtonElement>('#placement-reset')!,
+  remove: document.querySelector<HTMLButtonElement>('#remove-base')!,
+};
 const sizingInputs = {
   units: document.querySelector<HTMLSelectElement>('#units')!,
   size: document.querySelector<HTMLSelectElement>('#size')!,
@@ -218,6 +272,7 @@ const state: AppState = {
   baked: null,
   showingBaked: false,
   orientation: { turn: null, turnDeg: 0 },
+  pair: null,
 };
 /** The baked table level of the converted mini; null when it has the per-vertex look. */
 let baked: BakedMini | null = null;
@@ -234,13 +289,44 @@ const FRAME_WAIT_MS = 500;
 const TABLE_LEVEL = BAKED_LEVEL + 1;
 /** Full-detail mesh first, then the LODs. */
 let levels: IndexedMesh[] = [];
-/** Re-reads the last source, because its buffer moves to the worker on every conversion. */
-let lastSource: { name: string; read: () => Promise<ArrayBuffer> } | null = null;
+/** A file the page can read again, because its buffer moves to the worker on every conversion. */
+interface Source {
+  name: string;
+  read: () => Promise<ArrayBuffer>;
+}
+/** The last file, or the figure and its base file in the order given (#70). */
+let sources: Source[] = [];
+interface Choices {
+  orientation: OrientationOptions;
+  sizing: SizingOptions;
+  /** A pair only: the user swapped figure and base. */
+  pairing: PairingOptions;
+  /** A pair only: the user moved, raised or turned the figure, relative to the detection. */
+  placement: PlacementOptions;
+}
+const noChoices = (): Choices => ({ orientation: {}, sizing: {}, pairing: {}, placement: {} });
 /** What the user chose for the last source; a new file starts without choices. */
-let choices: { orientation: OrientationOptions; sizing: SizingOptions } = {
-  orientation: {},
-  sizing: {},
-};
+let choices: Choices = noChoices();
+
+/** "figure.stl" or "figure.stl + base.stl": the figure first once a conversion said which it is. */
+function sourcesName(pair: PairResult | null = null): string {
+  const names = sources.map((source) => source.name);
+  if (pair && names.length === 2 && pair.pairing.baseFile === 0) names.reverse();
+  return names.join(' + ');
+}
+
+/** The figure's source of the pair on screen, or the only source. */
+function figureSource(): Source | undefined {
+  const pair = state.stats?.pair;
+  return pair && sources.length === 2 ? sources[1 - pair.pairing.baseFile] : sources[0];
+}
+
+/** Converts the current sources again with the current choices. */
+async function reconvert(): Promise<void> {
+  if (sources.length === 0 || state.busy) return;
+  const [stl, secondStl] = await Promise.all(sources.map((source) => source.read()));
+  await convert(stl!, sourcesName(), secondStl);
+}
 /** Name of the GLB on screen (`?dev`); null when the page shows a converted mini or none. */
 let importedName: string | null = null;
 
@@ -260,7 +346,7 @@ function render(): void {
       : state.page === 'error'
         ? COPY.errorHeading
         : state.page === 'done'
-          ? (importedName ?? name.replace(/\.stl$/i, ''))
+          ? (importedName ?? name.replace(/\.stl(?=$| \+ )/gi, ''))
           : name;
   fileNameLine.textContent = name;
   chooseAgain.textContent = state.page === 'error' ? COPY.chooseAnother : COPY.chooseFile;
@@ -274,6 +360,7 @@ function showStats(stats: ConversionStats): void {
     ['Up', describeOrientation(stats.orientation)],
     ['Size', describeSize(stats.sizing)],
     ['Units', describeUnits(stats.sizing)],
+    ...describePairRows(stats.pair),
     ['Dimensions', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
     ['Triangles', stats.triangles.toLocaleString()],
     ['Vertices', stats.vertices.toLocaleString()],
@@ -314,6 +401,32 @@ function showStats(stats: ConversionStats): void {
       return row;
     }),
   );
+}
+
+/**
+ * The figures of a pair (#70): "base: file 2 (guessed), figure 16 × 31 × 12 mm, base 32 × 4 ×
+ * 32 mm" and "recess 13 × 13 mm, fit 0.85, lift 3.0 mm, turn 0°". File units.
+ */
+function describePairRows(pair: PairResult | null): [string, string][] {
+  if (!pair) return [];
+  const { pairing, placement } = pair;
+  const size = (mm: number[]): string => `${mm.map((v) => v.toFixed(0)).join(' × ')} mm`;
+  const figure = pairing.files[1 - pairing.baseFile]!;
+  const base = pairing.files[pairing.baseFile]!;
+  const { spot } = placement;
+  return [
+    [
+      'Pair',
+      `base: file ${pairing.baseFile + 1} (${pairing.method}), figure ${size(figure.sizeMm)}, base ${size(base.sizeMm)}` +
+        (pairing.warnings.length > 0 ? `, ${pairing.warnings.join(', ')}` : ''),
+    ],
+    [
+      'Placement',
+      `${spot.kind} ${spot.sizeMm.map((v) => v.toFixed(1)).join(' × ')} mm, fit ${spot.fit.toFixed(2)}, ` +
+        `lift ${placement.offsetMm[2].toFixed(1)} mm, turn ${Math.round(placement.yawDeg)}° (${placement.method}), ` +
+        `${placement.candidates.length} basins`,
+    ],
+  ];
 }
 
 const UNIT_NAMES: Record<Units, string> = { mm: 'mm', in: 'inches', m: 'metres' };
@@ -373,9 +486,9 @@ function showSizing(sizing: Sizing): void {
 }
 
 async function setSizing(changes: Partial<SizingOptions>): Promise<void> {
-  if (!lastSource || state.busy) return;
+  if (sources.length === 0 || state.busy) return;
   choices.sizing = { ...choices.sizing, ...changes };
-  await convert(await lastSource.read(), lastSource.name);
+  await reconvert();
 }
 
 sizingInputs.size.replaceChildren(
@@ -412,6 +525,15 @@ sizingInputs.scaleFit.addEventListener('click', () => {
 function showLevel(level: number, reframe = false, preferBaked = true): void {
   const mesh = levels[level];
   if (!mesh || !state.stats) return;
+  // Another level drops a placement being tried out: it is shown on the full-detail mesh only.
+  if (state.pair || pairInputs.moveByHand.checked) {
+    state.pair = null;
+    pairInputs.pending.hidden = true;
+    pairInputs.apply.disabled = true;
+    pairInputs.reset.disabled = true;
+    pairInputs.moveByHand.checked = false;
+    viewer.setMoveGizmo(null);
+  }
   state.showingBaked = level === TABLE_LEVEL && baked !== null && preferBaked;
   state.stressCount = 0;
   if (state.showingBaked) viewer.showBaked(baked!, state.stats.sizeMm, reframe);
@@ -468,9 +590,9 @@ for (const input of Object.values(lookInputs)) {
 setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
-  if (!lastSource || state.busy) return;
+  if (sources.length === 0 || state.busy) return;
   choices.orientation = { up };
-  await convert(await lastSource.read(), lastSource.name);
+  await reconvert();
 }
 
 /** The steps of the turn buttons. _(proposal, #72)_ */
@@ -504,6 +626,7 @@ function showTurn(turn: Rotation | null): void {
 
 function turn(axis: TurnAxis, deg: number): void {
   if (!state.stats || state.busy) return;
+  if (state.pair) showPlacement(null);
   showTurn(multiply(fromAxisAngle(TURN_AXES[axis], deg), state.orientation.turn ?? IDENTITY));
 }
 
@@ -513,11 +636,11 @@ function turn(axis: TurnAxis, deg: number): void {
  * decision on PR #79, 2026-09-25: only on request).
  */
 async function applyTurn(setDown: boolean): Promise<void> {
-  if (!lastSource || state.busy || !state.stats) return;
+  if (sources.length === 0 || state.busy || !state.stats) return;
   const last = state.stats.orientation.rotation;
   const turned = state.orientation.turn;
   choices.orientation = { rotation: turned ? multiply(turned, last) : last, setDown };
-  await convert(await lastSource.read(), lastSource.name);
+  await reconvert();
 }
 
 const stressPool: {
@@ -610,7 +733,7 @@ function describeSkipped(skipped: NonNullable<ConversionStats['bakeSkipped']>): 
 }
 
 /** Converts with the choices made for the current source; see `choices`. */
-async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
+async function convert(stl: ArrayBuffer, fileName: string, secondStl?: ArrayBuffer): Promise<void> {
   if (state.busy) return;
   Object.assign(state, {
     busy: true,
@@ -644,6 +767,11 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
         compress: pageOptions.ktx,
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
         memoryBudgetBytes: memoryBudget,
+        ...(secondStl && {
+          secondStl,
+          pairing: choices.pairing,
+          placement: choices.placement,
+        }),
       },
     );
     // From here on the mini exists; cancelling would only stop it from being shown.
@@ -679,11 +807,15 @@ async function convert(stl: ArrayBuffer, fileName: string): Promise<void> {
     }
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = stats;
+    // The heading names the figure first once the conversion said which file is the base.
+    state.fileName = sourcesName(stats.pair);
     showLevelButtons(stats);
     state.imported = null;
     importedName = null;
     upSelect.value = stats.up;
     showTurn(null);
+    showPlacement(null);
+    showPairSection(stats);
     showSizing(stats.sizing);
     // A size warning is never hidden behind a closed Adjust.
     if (stats.sizing.warnings.length > 0) adjust.open = true;
@@ -741,7 +873,7 @@ async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> 
   if (!mesh || level === 0 || !state.fileName) throw new Error('No converted level to export');
   if (compact) await glbEncoderReady();
   return encodeGlb(mesh, {
-    name: state.fileName.replace(/.stl$/i, ''),
+    name: downloadName(),
     look: state.look,
     compact,
     sizing: state.stats?.sizing,
@@ -773,7 +905,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('#export [data
     void exportGlb(level, compactBox.checked).then((glb) => {
       const link = document.createElement('a');
       link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-      link.download = `${state.fileName!.replace(/.stl$/i, '')}-${state.stats!.lods[level - 1]!.name}.glb`;
+      link.download = `${downloadName()}-${state.stats!.lods[level - 1]!.name}.glb`;
       link.click();
       URL.revokeObjectURL(link.href);
     });
@@ -794,47 +926,196 @@ function showProblem(fileName: string, error: unknown): void {
   render();
 }
 
-async function loadFile(file: File | undefined): Promise<void> {
-  if (!file || state.busy) return;
+/**
+ * One file converts alone and replaces whatever is on screen; two convert as a figure and its
+ * base file (#70); more are refused. A single file never joins the mini on screen by itself:
+ * a base is added with the Base section's button, so converting the next mini stays one drop.
+ */
+async function loadFiles(files: File[]): Promise<void> {
+  if (files.length === 0 || state.busy) return;
   status.classList.remove('problem');
-  // Opening a GLB checks the export's round trip: a tool for the team, under ?dev.
-  if (pageOptions.dev && file.name.toLowerCase().endsWith('.glb')) {
-    return loadGlb(await file.arrayBuffer(), file.name);
-  }
-  if (!file.name.toLowerCase().endsWith('.stl')) {
+  const refuse = (fileName: string, error: string, errorCode: ProblemCode): void => {
     // The error card, like the refusals below, so the page state matches what is on screen.
-    Object.assign(state, {
-      fileName: file.name,
-      error: describeWrongFile(file.name, pageOptions.dev),
-      errorCode: 'not-stl',
-      errorDetail: null,
-    });
-    status.textContent = state.error;
+    Object.assign(state, { fileName, error, errorCode, errorDetail: null });
+    status.textContent = error;
     status.classList.add('problem');
     render();
+  };
+  const names = files.map((file) => file.name).join(' + ');
+  if (files.length > 2) return refuse(names, describeTooManyFiles(), 'not-stl');
+  // Opening a GLB checks the export's round trip: a tool for the team, under ?dev.
+  const [first] = files;
+  if (files.length === 1 && pageOptions.dev && first!.name.toLowerCase().endsWith('.glb')) {
+    return loadGlb(await first!.arrayBuffer(), first!.name);
+  }
+  const wrong = files.find((file) => !file.name.toLowerCase().endsWith('.stl'));
+  if (wrong) return refuse(wrong.name, describeWrongFile(wrong.name, pageOptions.dev), 'not-stl');
+  // The files are read locally and handed to a worker in this tab. They are never sent anywhere.
+  const buffers: ArrayBuffer[] = [];
+  for (const file of files) {
+    try {
+      // Look at the start and the size first: a file that is empty, not an STL or too large
+      // for this device is refused before all of it is read into memory.
+      buffers.push(await readStlFile(file, memoryBudget));
+    } catch (error) {
+      state.fileName = file.name;
+      return showProblem(file.name, error);
+    }
+  }
+  sources = files.map((file) => ({ name: file.name, read: () => file.arrayBuffer() }));
+  choices = noChoices();
+  await convert(buffers[0]!, names, buffers[1]);
+}
+
+/** Adds a base file to the mini on screen: the two convert as a pair, the guess says which is the base. */
+async function addBase(base: Source): Promise<void> {
+  const figure = figureSource();
+  if (!figure || state.busy) return;
+  sources = [figure, base];
+  // The figure's orientation stays; the size is measured from the base now.
+  choices = { ...noChoices(), orientation: choices.orientation };
+  await reconvert();
+}
+
+/** Converts the figure alone again. */
+async function removeBase(): Promise<void> {
+  const figure = figureSource();
+  if (!figure || sources.length < 2 || state.busy) return;
+  const turned = choices.pairing.swap === true;
+  sources = [figure];
+  choices = { ...noChoices(), orientation: turned ? {} : choices.orientation };
+  await reconvert();
+}
+
+/** Converts the pair again with figure and base the other way round. The up axis was the figure's: it starts afresh. */
+async function swapPair(): Promise<void> {
+  if (sources.length < 2 || state.busy) return;
+  choices = { ...noChoices(), pairing: { swap: !choices.pairing.swap }, sizing: choices.sizing };
+  await reconvert();
+}
+
+/** The Base section for what is on screen: the add button for one file, the pair's lines and controls for two. */
+function showPairSection(stats: ConversionStats): void {
+  const { pair } = stats;
+  pairInputs.fieldset.dataset.kind = pair ? 'pair' : 'single';
+  pairInputs.moveByHand.checked = false;
+  viewer.setMoveGizmo(null);
+  if (!pair) return;
+  const figure = sources[1 - pair.pairing.baseFile]?.name ?? '';
+  const base = sources[pair.pairing.baseFile]?.name ?? '';
+  pairInputs.files.textContent = `Base: ${base} · Figure: ${figure}`;
+  const warning = describePairWarning(pair.pairing.warnings);
+  pairInputs.warning.hidden = warning === null;
+  pairInputs.warning.textContent = warning ?? '';
+  pairInputs.placement.textContent = describePlacement(pair.placement, stats.sizing.scale);
+}
+
+/**
+ * Shows a placement being tried out, in the viewer and in words; null drops it. The figure
+ * part moves in scene mm: the base file's units times the scale.
+ */
+function showPlacement(pending: PendingPlacement | null): void {
+  const text = pending && describePendingPlacement(pending);
+  state.pair = text ? pending : null;
+  pairInputs.pending.hidden = !text;
+  pairInputs.pending.textContent = text ?? '';
+  pairInputs.apply.disabled = !text;
+  pairInputs.reset.disabled = !text;
+  const pair = state.stats?.pair;
+  if (!pair || !state.stats) return;
+  if (!state.pair && !pairInputs.moveByHand.checked) {
+    // Back to what the table will show.
+    if (viewer.hasFigure()) showLevel(TABLE_LEVEL);
     return;
   }
-  // The file is read locally and handed to a worker in this tab. It is never sent anywhere.
-  let stl: ArrayBuffer;
-  try {
-    // Look at the start and the size first: a file that is empty, not an STL or too large
-    // for this device is refused before all of it is read into memory.
-    stl = await readStlFile(file, memoryBudget);
-  } catch (error) {
-    state.fileName = file.name;
-    return showProblem(file.name, error);
+  const scale = state.stats.sizing.scale;
+  if (!viewer.hasFigure()) {
+    const [x, z] = pair.placement.offsetMm;
+    viewer.showPair(levels[0]!, pair.figureTriangles, [x * scale, z * scale], state.stats.sizeMm);
+    state.shownLevel = 0;
+    for (const [index, button] of [...levelButtons.children].entries())
+      button.setAttribute('aria-pressed', String(index === 0));
   }
-  lastSource = { name: file.name, read: () => file.arrayBuffer() };
-  choices = { orientation: {}, sizing: {} };
-  await convert(stl, file.name);
+  const shown = state.pair ?? { moveMm: [0, 0], liftMm: 0, turnDeg: 0 };
+  viewer.setFigureOffset(
+    [shown.moveMm[0] * scale, shown.moveMm[1] * scale],
+    shown.liftMm * scale,
+    shown.turnDeg,
+  );
+}
+
+/** Adds to the placement being tried out; the turn preview of the whole mini is dropped. */
+function changePlacement(change: Partial<PendingPlacement>): void {
+  if (!state.stats?.pair || state.busy) return;
+  if (state.orientation.turn) showTurn(null);
+  const current = state.pair ?? { moveMm: [0, 0], liftMm: 0, turnDeg: 0 };
+  showPlacement({
+    moveMm: [
+      current.moveMm[0] + (change.moveMm?.[0] ?? 0),
+      current.moveMm[1] + (change.moveMm?.[1] ?? 0),
+    ],
+    liftMm: current.liftMm + (change.liftMm ?? 0),
+    turnDeg: current.turnDeg + (change.turnDeg ?? 0),
+  });
+}
+
+/** Converts the pair again with the placement as previewed, on top of what was applied before. */
+async function applyPlacement(): Promise<void> {
+  if (!state.pair || sources.length < 2 || state.busy) return;
+  const before = choices.placement;
+  const { moveMm, liftMm, turnDeg } = state.pair;
+  choices.placement = {
+    moveMm: [(before.moveMm?.[0] ?? 0) + moveMm[0], (before.moveMm?.[1] ?? 0) + moveMm[1]],
+    liftMm: (before.liftMm ?? 0) + liftMm,
+    turnDeg: (before.turnDeg ?? 0) + turnDeg,
+  };
+  await reconvert();
+}
+
+/** The name downloads carry: the figure's, without .stl. */
+function downloadName(): string {
+  return (figureSource()?.name ?? state.fileName ?? 'mini').replace(/\.stl$/i, '');
 }
 
 fileInput.addEventListener('change', () => {
-  const file = fileInput.files?.[0];
+  const files = [...(fileInput.files ?? [])];
   // Clear the input so picking the same file again still fires a change event.
   fileInput.value = '';
-  void loadFile(file);
+  void loadFiles(files);
 });
+pairInputs.addBase.addEventListener('click', () => pairInputs.baseFile.click());
+pairInputs.baseFile.addEventListener('change', () => {
+  const file = pairInputs.baseFile.files?.[0];
+  pairInputs.baseFile.value = '';
+  if (file) void addBase({ name: file.name, read: () => file.arrayBuffer() });
+});
+pairInputs.swap.addEventListener('click', () => void swapPair());
+pairInputs.remove.addEventListener('click', () => void removeBase());
+pairInputs.apply.addEventListener('click', () => void applyPlacement());
+pairInputs.reset.addEventListener('click', () => showPlacement(null));
+for (const button of pairInputs.controls.querySelectorAll<HTMLButtonElement>('[data-lift]'))
+  button.addEventListener('click', () =>
+    changePlacement({ liftMm: (Number(button.dataset.lift) * LIFT_STEP_MM) / scaleOfMini() }),
+  );
+for (const button of pairInputs.controls.querySelectorAll<HTMLButtonElement>('[data-yaw]'))
+  button.addEventListener('click', () => changePlacement({ turnDeg: Number(button.dataset.yaw) }));
+pairInputs.moveByHand.addEventListener('change', () => {
+  if (!pairInputs.moveByHand.checked) {
+    viewer.setMoveGizmo(null);
+    return showPlacement(state.pair);
+  }
+  showPlacement(state.pair ?? { moveMm: [0, 0], liftMm: 0, turnDeg: 0 });
+  viewer.setMoveGizmo((moveMm) => {
+    const scale = scaleOfMini();
+    const current = state.pair ?? { moveMm: [0, 0], liftMm: 0, turnDeg: 0 };
+    showPlacement({ ...current, moveMm: [moveMm[0] / scale, moveMm[1] / scale] });
+  });
+});
+
+/** File units to scene mm of the mini on screen. */
+function scaleOfMini(): number {
+  return state.stats?.sizing.scale ?? 1;
+}
 for (const button of stressButtons.querySelectorAll<HTMLButtonElement>('button')) {
   button.addEventListener('click', () => {
     const count = Number(button.dataset.count);
@@ -885,23 +1166,42 @@ document.body.addEventListener('drop', (event) => {
   event.preventDefault();
   dragDepth = 0;
   setDragging(false);
-  void loadFile(event.dataTransfer?.files[0]);
+  void loadFiles([...(event.dataTransfer?.files ?? [])]);
 });
 
 window.__mt = {
   state,
   loadDemo: () => {
-    lastSource = { name: 'demo.stl', read: async () => demoStl() };
-    choices = { orientation: {}, sizing: {} };
+    sources = [{ name: 'demo.stl', read: async () => demoStl() }];
+    choices = noChoices();
     return convert(demoStl(), 'demo.stl');
   },
   loadGenerated: (quadsPerSide, sizing = {}) => {
     const read = async (): Promise<ArrayBuffer> =>
       encodeBinaryStl(generateBumpySheet(quadsPerSide));
-    lastSource = { name: `generated-${quadsPerSide}.stl`, read };
-    choices = { orientation: {}, sizing };
-    return read().then((stl) => convert(stl, `generated-${quadsPerSide}.stl`));
+    sources = [{ name: `generated-${quadsPerSide}.stl`, read }];
+    choices = { ...noChoices(), sizing };
+    return reconvert();
   },
+  loadGeneratedPair: () => {
+    sources = [
+      { name: 'figure.stl', read: async () => encodeBinaryStl(generatePuddleFigure(12)) },
+      { name: 'recess-base.stl', read: async () => encodeBinaryStl(generateRecessBase()) },
+    ];
+    choices = noChoices();
+    return reconvert();
+  },
+  addBase: (stl, name) => addBase({ name, read: async () => stl.slice(0) }),
+  swapPair,
+  movePlacement: (dxMm, dzMm) => {
+    const scale = scaleOfMini();
+    changePlacement({ moveMm: [dxMm / scale, dzMm / scale] });
+  },
+  liftPlacement: (dyMm) => changePlacement({ liftMm: dyMm / scaleOfMini() }),
+  turnPlacement: (deg) => changePlacement({ turnDeg: deg }),
+  applyPlacement,
+  resetPlacement: () => showPlacement(null),
+  removeBase,
   setUp,
   turn,
   applyTurn: () => applyTurn(false),
