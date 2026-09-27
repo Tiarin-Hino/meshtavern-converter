@@ -9,6 +9,8 @@ export type ProblemCode =
   | 'truncated'
   | 'no-surface'
   | 'too-large'
+  /** Two files, and neither has a flat underside: no base to set the other on (issue #70). */
+  | 'not-a-pair'
   /** The safety net: the estimate let the file through, but memory ran out anyway. */
   | 'out-of-memory'
   /** Anything else: a bug, or damage nobody foresaw. */
@@ -31,6 +33,9 @@ export const PROBLEM_MESSAGES: Record<ProblemCode, string> = {
     'This file has no usable surface: every triangle in it is broken or flat. ' +
     'Export the model again.',
   'too-large': TOO_LARGE,
+  'not-a-pair':
+    'Neither of these files has a flat underside, so neither can be the base of the other. ' +
+    'Drop the figure on its own, or drop it together with its base file.',
   'out-of-memory': TOO_LARGE,
   unexpected:
     'Something went wrong while converting this file. Try again; if it happens again, the ' +
