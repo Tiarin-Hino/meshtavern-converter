@@ -1,0 +1,40 @@
+name: basis encoder build
+
+# Proves that wasm/basis-encoder/basis_encoder.wasm is exactly what the pinned sources and the
+# pinned Emscripten image produce. Runs only when the build changes, so other PRs skip the compile.
+on:
+  pull_request:
+    paths:
+      - 'wasm/basis-encoder/**'
+      - '.github/workflows/basis-encoder.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'wasm/basis-encoder/**'
+      - '.github/workflows/basis-encoder.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: basis-encoder-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    # Thirty-one files with link-time optimisation take longer than xatlas's one.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash wasm/basis-encoder/build.sh --check
+      # When the check fails, the module CI built is kept for a day, so a first commit of the
+      # binary does not need a working local Docker.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: basis-encoder-plain
+          path: out/basis-encoder/plain.wasm
+          if-no-files-found: ignore
+          retention-days: 1
