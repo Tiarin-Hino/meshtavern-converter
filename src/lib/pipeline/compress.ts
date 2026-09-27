@@ -1,8 +1,10 @@
+import { loadBasisEncoder, type EncodeOptions } from './basis-encoder';
+
 /**
  * GPU-compressed detail textures. The raw RGBA texture is encoded to a KTX2 file with UASTC
- * (Basis Universal, WebAssembly, about 3.3 MB, loaded on first use) and Zstandard on top;
- * three.js transcodes that to whatever block format the GPU has (BC7 on desktops, ASTC or
- * ETC2 on phones). On the GPU that is 1 byte per texel instead of 4, and the file is what
+ * (Basis Universal, our own WebAssembly build in wasm/basis-encoder/, 3.1 MB or 1.2 MB gzipped,
+ * loaded on first use) and Zstandard on top; three.js transcodes that to whatever block format
+ * the GPU has (BC7 on desktops, ASTC or ETC2 on phones). On the GPU that is 1 byte per texel instead of 4, and the file is what
  * gets stored and sent to other players. DOM-free: runs in the worker and in Node.
  */
 
@@ -13,24 +15,31 @@ export const DETAIL_EFFORTS = [0, 1, 2, 3] as const;
 /** `supercompressionScheme` in a KTX2 header. */
 export const KTX2_ZSTANDARD = 2;
 
+/**
+ * Mipmaps filtered in sRGB space, as the encoder's default and ktx2-encoder before #38 left them.
+ * Wrong for our texture, which holds data (normals and cavity), not colours; kept so that #38
+ * changed only who compiles the encoder. Fixing it is #86.
+ */
+export const SRGB_MIPS = true;
+
+/** The encoder settings for a detail texture. */
+export const DETAIL_OPTIONS = (effort: number): EncodeOptions => ({
+  effort,
+  supercompress: true,
+  mipmaps: true,
+  // Normals and cavity are data, not colours: no perceptual weighting, no sRGB curve in the header.
+  perceptual: false,
+  srgbTransfer: false,
+  srgbMips: SRGB_MIPS,
+});
+
 export async function compressDetail(
   detail: Uint8Array,
   resolution: number,
   effort: number = DETAIL_EFFORT,
 ): Promise<Uint8Array> {
-  const { encodeToKTX2 } = await import('ktx2-encoder');
-  // The encoder expects an image file; its decoder hook lets us hand over raw pixels instead.
-  return encodeToKTX2(new Uint8Array(1), {
-    isUASTC: true,
-    uastcLDRQualityLevel: effort,
-    needSupercompression: true,
-    generateMipmap: true,
-    // Normals and cavity are data, not colours: no sRGB curve, no perceptual weighting.
-    isPerceptual: false,
-    isSetKTX2SRGBTransferFunc: false,
-    isKTX2File: true,
-    imageDecoder: async () => ({ width: resolution, height: resolution, data: detail }),
-  });
+  const encoder = await loadBasisEncoder();
+  return encoder.encodeKtx2(detail, resolution, resolution, DETAIL_OPTIONS(effort));
 }
 
 export interface Ktx2Header {

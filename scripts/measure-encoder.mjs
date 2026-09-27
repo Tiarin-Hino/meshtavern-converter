@@ -1,11 +1,11 @@
 // Times one build of the Basis Universal encoder, cold and warm, on generated detail textures
 // (issue #38, design note docs/design/own-basis-encoder-build.md, section 6).
 //
-//   node scripts/measure-encoder.mjs <file.wasm | package> [--runs N]
+//   node scripts/measure-encoder.mjs <file.wasm> [--runs N]
 //
-// `package` is the ktx2-encoder package the pipeline used before #38 (the before column; it only
-// works while the package is installed). A .wasm is one of our builds (wasm/basis-encoder/ or a
-// variant under out/basis-encoder/). For every texture and run: a fresh instance, one encode
+// The .wasm is one of our builds (wasm/basis-encoder/ or a variant under out/basis-encoder/). The
+// before column, ktx2-encoder 0.6.0, was measured with this script before #38 removed the package:
+// docs/journal/2026-09-27-own-basis-encoder-build.md. For every texture and run: a fresh instance, one encode
 // (cold), the same encode again (warm). Settings are the pipeline's: UASTC effort 0, Zstandard,
 // mipmaps, linear. The output's size and SHA-256 show whether two builds write the same files.
 import { createHash } from 'node:crypto';
@@ -20,34 +20,17 @@ const option = (name) => {
 const runs = Number(option('--runs') ?? 1);
 const [target] = args;
 if (!target) {
-  console.error('usage: node scripts/measure-encoder.mjs <file.wasm | package> [--runs N]');
+  console.error('usage: node scripts/measure-encoder.mjs <file.wasm> [--runs N]');
   process.exit(2);
 }
 
 const load = async (path) => (await runnerImport(path, { logLevel: 'silent' })).module;
 const { gradientTexture, noiseTexture } = await load('./src/regression/textures.ts');
-const { DETAIL_EFFORT } = await load('./src/lib/pipeline/compress.ts');
+const { DETAIL_EFFORT, DETAIL_OPTIONS } = await load('./src/lib/pipeline/compress.ts');
 
 /** A fresh encoder of the target: `(rgba, size) => Promise<Uint8Array>`. */
 async function freshEncoder() {
-  if (target === 'package') {
-    const { NodeBasisEncoder } = await import('ktx2-encoder');
-    const encoder = new NodeBasisEncoder();
-    return (rgba, size) =>
-      encoder.encode(new Uint8Array(1), {
-        isUASTC: true,
-        uastcLDRQualityLevel: DETAIL_EFFORT,
-        needSupercompression: true,
-        generateMipmap: true,
-        isPerceptual: false,
-        isSetKTX2SRGBTransferFunc: false,
-        isKTX2File: true,
-        imageDecoder: async () => ({ width: size, height: size, data: rgba }),
-      });
-  }
-  const { instantiateBasisEncoder, DETAIL_OPTIONS } = await load(
-    './src/lib/pipeline/basis-encoder.ts',
-  );
+  const { instantiateBasisEncoder } = await load('./src/lib/pipeline/basis-encoder.ts');
   const encoder = await instantiateBasisEncoder(readFileSync(target));
   return async (rgba, size) => encoder.encodeKtx2(rgba, size, size, DETAIL_OPTIONS(DETAIL_EFFORT));
 }
