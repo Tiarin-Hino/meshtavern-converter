@@ -26,6 +26,7 @@
     "bench": "vitest bench --run",
     "baseline:update": "node scripts/update-baseline.mjs",
     "xatlas:build": "bash wasm/xatlas/build.sh",
+    "basis:build": "bash wasm/basis-encoder/build.sh",
     "corpus": "npm run build && node scripts/corpus.mjs",
     "e2e": "playwright test",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
