@@ -23,7 +23,7 @@ export const KTX2_ZSTANDARD = 2;
 export const SRGB_MIPS = true;
 
 /** The encoder settings for a detail texture. */
-export const DETAIL_OPTIONS = (effort: number): EncodeOptions => ({
+export const detailOptions = (effort: number): EncodeOptions => ({
   effort,
   supercompress: true,
   mipmaps: true,
@@ -39,7 +39,7 @@ export async function compressDetail(
   effort: number = DETAIL_EFFORT,
 ): Promise<Uint8Array> {
   const encoder = await loadBasisEncoder();
-  return encoder.encodeKtx2(detail, resolution, resolution, DETAIL_OPTIONS(effort));
+  return encoder.encodeKtx2(detail, resolution, resolution, detailOptions(effort));
 }
 
 export interface Ktx2Header {

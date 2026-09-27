@@ -26,13 +26,13 @@ if (!target) {
 
 const load = async (path) => (await runnerImport(path, { logLevel: 'silent' })).module;
 const { gradientTexture, noiseTexture } = await load('./src/regression/textures.ts');
-const { DETAIL_EFFORT, DETAIL_OPTIONS } = await load('./src/lib/pipeline/compress.ts');
+const { DETAIL_EFFORT, detailOptions } = await load('./src/lib/pipeline/compress.ts');
 
 /** A fresh encoder of the target: `(rgba, size) => Promise<Uint8Array>`. */
 async function freshEncoder() {
   const { instantiateBasisEncoder } = await load('./src/lib/pipeline/basis-encoder.ts');
   const encoder = await instantiateBasisEncoder(readFileSync(target));
-  return async (rgba, size) => encoder.encodeKtx2(rgba, size, size, DETAIL_OPTIONS(DETAIL_EFFORT));
+  return async (rgba, size) => encoder.encodeKtx2(rgba, size, size, detailOptions(DETAIL_EFFORT));
 }
 
 const textures = [
