@@ -41,7 +41,7 @@ As the design note says: the same upstream commit, the pinned `emsdk:6.0.10` ima
 
 **Same results:** byte-identical KTX2 files for the two fixtures, the four harness textures and all 30 corpus minis; all 30 comparison sheets are identical PNGs.
 
-**Encoder alone,** `measure-encoder.mjs`, Node 20.19.2, **development PC**, 3 runs, total warm over four textures (1024² and 2048², gradient and noise): package 8,509 ms, ours 8,191–8,265 ms, interleaved. Variants in the PR.
+**Encoder alone,** `measure-encoder.mjs`, Node 20.19.2, **development PC**, 3 runs, total warm over four textures (1024² and 2048², gradient and noise): package 8,509 ms, ours 8,191–8,265 ms, interleaved. The variants of Dead ends: simd 8,012 ms, no-lto 8,453 ms, slim 8,225 ms, all writing the same bytes.
 
 **Corpus,** **development PC**, Chrome 153, three runs back to back, all 30 minis baked, none fell back:
 
