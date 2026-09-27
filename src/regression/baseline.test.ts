@@ -30,6 +30,9 @@ describe('regression baseline for generated meshes', () => {
       // Every case with a known upright axis stands on it, whatever the baseline says.
       for (const testCase of REGRESSION_CASES) {
         if (testCase.up) expect(figures[testCase.name]!.up, testCase.name).toBe(testCase.up);
+        // ...and a figure with its base file is set in the spot made for it.
+        if (testCase.pair)
+          expect(figures[testCase.name]!.spot, testCase.name).toBe(testCase.pair.spot);
       }
 
       if (UPDATE) {

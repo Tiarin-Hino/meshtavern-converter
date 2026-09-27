@@ -4,13 +4,16 @@ import {
   DEFAULT_LOOK,
   type ConversionStats,
   type LodStats,
+  type SpotKind,
   type UpAxis,
 } from '../lib';
 import { generateBumpySheet, runPipeline, encodeBinaryStl } from '../lib/dev';
 import {
   generateBoulder,
   generateFigure,
+  generatePuddleFigure,
   generateQuadruped,
+  generateRecessBase,
   generateSwarm,
   generateTiltedFigure,
   toYUp,
@@ -28,6 +31,8 @@ export interface RegressionCase {
    * base are detected (#72); the guess stands them on an edge (+y).
    */
   up?: UpAxis;
+  /** A figure with its base file (#70): the base, and the kind of spot the figure must be set in. */
+  pair?: { base: () => Float32Array; spot: SpotKind };
 }
 
 /** Bumpy-sheet size below the close level's floor, so the "small source" path stays covered. */
@@ -44,6 +49,14 @@ export const REGRESSION_CASES: readonly RegressionCase[] = [
   { name: 'quadruped', soup: generateQuadruped, bake: 0, up: '+z' },
   // Stands on +z, but tilted by 36.9°: today's guess does not level it (tiltDeg 0).
   { name: 'figure-tilted', soup: generateTiltedFigure, bake: 0, up: '+z' },
+  // The figure on a 12 mm puddle, set in the 14 mm recess of its base file.
+  {
+    name: 'figure-on-base',
+    soup: () => generatePuddleFigure(12),
+    bake: 0,
+    up: '+z',
+    pair: { base: generateRecessBase, spot: 'recess' },
+  },
 ];
 
 export interface LevelFigures extends LodStats {
@@ -78,6 +91,9 @@ export interface CaseFigures extends Pick<
     baseDiameterMm: number;
   };
   levels: LevelFigures[];
+  /** A pair only: the kind of spot the figure was set in, and how far it was lifted onto it. */
+  spot?: SpotKind;
+  liftMm?: number;
   baked?: {
     resolution: number;
     vertices: number;
@@ -94,7 +110,10 @@ export type Figures = Record<string, CaseFigures>;
 export async function measureCase(testCase: RegressionCase): Promise<CaseFigures> {
   await glbEncoderReady();
   const stl = encodeBinaryStl(testCase.soup());
-  const { lods, baked, stats } = await runPipeline(stl, { bake: testCase.bake });
+  const { lods, baked, stats } = await runPipeline(stl, {
+    bake: testCase.bake,
+    secondStl: testCase.pair && encodeBinaryStl(testCase.pair.base()),
+  });
   const glb = (level: number, compact: boolean): number =>
     encodeGlb(lods[level]!.mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;
   return {
@@ -119,6 +138,10 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
       glbBytes: glb(level, false),
       compactGlbBytes: glb(level, true),
     })),
+    ...(stats.pair && {
+      spot: stats.pair.placement.spot.kind,
+      liftMm: stats.pair.placement.offsetMm[2],
+    }),
     baked: baked && {
       resolution: baked.maps.resolution,
       vertices: baked.mesh.positions.length / 3,
