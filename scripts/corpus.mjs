@@ -1,8 +1,9 @@
 // The regression run over the local corpus (issue #46). Converts every STL in corpus/ in
 // real Chrome (GPU on) and writes to out/corpus/:
 //   results.json     triangles, error, sizes and times per level for every mini
-//   results.md       the same as tables, the corpus coverage, the size suggestions and the
-//                    up directions checked against scripts/corpus-index.json, and what
+//   results.md       the same as tables, the corpus coverage, the size suggestions, the
+//                    up directions and the spots of figures on their base files (#70)
+//                    checked against scripts/corpus-index.json, and what
 //                    changed since the last run
 //   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels
 // Sort the corpus into folders named after the kind of mini (see KINDS); files directly in
@@ -15,12 +16,14 @@ import { cpus, totalmem } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
-import { CORPUS, corpusFiles } from './lib/corpus-files.mjs';
+import { baseFileFor, CORPUS, corpusFiles } from './lib/corpus-files.mjs';
 
 const PORT = 4179;
 /**
- * The expected creature size (issue #44) and up direction in the file (issue #72) per corpus
- * mini, keyed like results.json. Committed; the corpus itself is not. The script only reads it.
+ * The expected creature size (issue #44), up direction in the file (issue #72) and, for a
+ * figure with a base file, the kind of spot it belongs in (`spot`: hole, recess or flat, with
+ * an optional `placementNote`; issue #70) per corpus mini, keyed like results.json.
+ * Committed; the corpus itself is not. The script only reads it.
  */
 const INDEX = 'scripts/corpus-index.json';
 /** The kinds the Phase 1 spec asks the corpus to cover; each is a folder under corpus/. */
@@ -80,9 +83,15 @@ try {
     const kind = path.includes(sep) ? path.split(sep)[0] : 'unsorted';
     const mini = { kind, stlBytes: statSync(file).size };
     minis[key] = mini;
+    // A figure with its base file next to it (#70) is converted as a pair; the key stays the figure's.
+    const base = baseFileFor(path);
+    if (base) {
+      mini.baseFile = base.split(sep).join('/');
+      mini.baseStlBytes = statSync(join(CORPUS, base)).size;
+    }
 
     await page.evaluate(() => Object.assign(window.__mt.state, { stats: null, error: null }));
-    await page.setInputFiles('#file', file);
+    await page.setInputFiles('#file', base ? [file, join(CORPUS, base)] : file);
     try {
       await page.waitForFunction(
         () => (window.__mt.state.stats || window.__mt.state.error) && !window.__mt.state.busy,
@@ -152,6 +161,7 @@ try {
         warnings: stats.sizing.warnings.map((warning) => warning.kind),
       },
       bakeSkipped: stats.bakeSkipped ?? null,
+      ...(stats.pair && { pair: pairFigures(stats.pair) }),
       levels: stats.lods.map((lod, i) => ({
         name: lod.name,
         decidedBy: lod.decidedBy,
@@ -215,7 +225,7 @@ try {
       viewport: { width: 380 * columns.length + 20, height: 100 },
     });
     await sheet.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
-      <h3 style="margin:0 0 8px">${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod}${stats.orientation.tiltDeg > 0 ? `, tilted ${round(stats.orientation.tiltDeg, 1)}°` : ''}), ${stats.sizing.size} (${stats.sizing.footprintSquares}×${stats.sizing.footprintSquares})</h3>
+      <h3 style="margin:0 0 8px">${key}${mini.pair ? ` on ${basename(mini.baseFile, '.stl')}, ${spotWords(mini.pair.spot)}` : ''}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod}${stats.orientation.tiltDeg > 0 ? `, tilted ${round(stats.orientation.tiltDeg, 1)}°` : ''}), ${stats.sizing.size} (${stats.sizing.footprintSquares}×${stats.sizing.footprintSquares})</h3>
       <div style="display:grid;grid-template-columns:repeat(${columns.length},1fr);gap:6px">
       ${shots.map((s) => `<figure style="margin:0"><img src="data:image/png;base64,${s.data}" style="width:100%;display:block"><figcaption>${s.caption}</figcaption></figure>`).join('')}
       </div></body>`);
@@ -227,6 +237,32 @@ try {
 } finally {
   await browser.close();
   server.kill();
+}
+
+/** What results.json keeps of a pair (#70): the roles, the spot, where the figure went, the other basins. */
+function pairFigures(pair) {
+  const spot = (s) => ({
+    kind: s.kind,
+    centre: s.centre.map((mm) => round(mm, 2)),
+    sizeMm: s.sizeMm.map((mm) => round(mm, 2)),
+    depthMm: round(s.depthMm, 2),
+    fit: round(s.fit, 3),
+  });
+  return {
+    baseFile: pair.pairing.baseFile,
+    method: pair.pairing.method,
+    warnings: pair.pairing.warnings,
+    spot: spot(pair.placement.spot),
+    offsetMm: pair.placement.offsetMm.map((mm) => round(mm, 2)),
+    yawDeg: round(pair.placement.yawDeg, 1),
+    placement: pair.placement.method,
+    candidates: pair.placement.candidates.map(spot),
+  };
+}
+
+/** "set in the hole", "set on the flattest patch". */
+function spotWords(spot) {
+  return spot.kind === 'flat' ? 'set on the flattest patch' : `set in the ${spot.kind}`;
 }
 
 const results = {
@@ -311,6 +347,48 @@ function sizeReport() {
     ),
   ].join('\n\n');
 }
+/** The pairs (#70): the spot found against the kind the index expects, with the runners-up. */
+function pairReport() {
+  const index = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
+  const pairs = converted.filter(([, m]) => m.pair);
+  const withBase = Object.entries(minis).filter(([, m]) => m.baseFile);
+  if (withBase.length === 0) return 'No figure has a base file next to it (`<name>-base.stl`).';
+  const size = (s) => `${s.sizeMm.join(' × ')} mm`;
+  const matches = pairs.filter(([key, m]) => index[key]?.spot === m.pair.spot.kind);
+  return [
+    `${pairs.length} of ${withBase.length} pairs converted; the spot matches the index for ${matches.length}.`,
+    '',
+    table(
+      [
+        'Figure',
+        'Base file',
+        'Spot found',
+        'Expected',
+        'Size',
+        'Depth',
+        'Fit',
+        'At (x, z)',
+        'Lift',
+        'Turn',
+        'Warnings',
+        'Other basins',
+      ],
+      pairs.map(([key, m]) => {
+        const p = m.pair;
+        const others = p.candidates
+          .filter((c) => c.kind !== p.spot.kind || c.centre.join() !== p.spot.centre.join())
+          .slice(0, 3)
+          .map((c) => `${c.kind} ${size(c)}, fit ${c.fit}`)
+          .join('; ');
+        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${p.spot.kind} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
+      }),
+    ),
+    ...pairs
+      .filter(([key]) => index[key]?.placementNote)
+      .map(([key]) => `- ${key}: ${index[key].placementNote}`),
+  ].join('\n');
+}
+
 /** The up directions against the committed index (issue #72): every mismatch and every tilt. */
 function orientationReport() {
   if (!existsSync(INDEX)) return `No ${INDEX}: nothing to check the up directions against.`;
@@ -350,6 +428,10 @@ ${orientationReport()}
 ## Size suggestions
 
 ${sizeReport()}
+
+## Base files
+
+${pairReport()}
 
 ## Changes since the last run
 
