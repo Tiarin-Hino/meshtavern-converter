@@ -348,12 +348,18 @@ function levelled(
  * The orient step's decision (design note §3): the detection, or what the user chose.
  * A forced axis or rotation is kept as given, and set down only when `setDown` asks for
  * it; a forced axis with a base on it is never levelled.
+ *
+ * @param scanned The pass over this mesh from an earlier call, so it is not run twice
+ *   (0.6 s on the largest corpus file): the pair path detects first, then applies the options.
  */
 export function resolveOrientation(
   mesh: IndexedMesh,
   options: OrientationOptions = {},
+  scanned?: Omit<UpDetection, 'orientation'>,
 ): UpDetection {
-  const pass = scanMesh(mesh);
+  const pass = scanned
+    ? { coverageByAxis: scanned.coverageByAxis, scan: scanned.scan }
+    : scanMesh(mesh);
   const { positions } = mesh;
   const hasBase = (up: UpAxis): boolean => coverageFor(pass, up) >= MIN_BASE_COVERAGE;
   const setsDown = options.setDown === true && positions.length > 0;

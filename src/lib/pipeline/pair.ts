@@ -7,6 +7,7 @@ import { MIN_BASE_COVERAGE } from './base';
 import type { IndexedMesh } from './mesh';
 import {
   resolveOrientation,
+  TO_Y_UP,
   UP_AXES,
   type Orientation,
   type UpAxis,
@@ -108,6 +109,16 @@ export function fileShape(orientation: Orientation, sizeMm: [number, number, num
     aspect: across > 0 ? sizeMm[1] / across : Infinity,
     flatUnderside: orientation.method === 'base',
   };
+}
+
+/**
+ * The shape of a file from its detection alone (`detectPairFile`): its orientation is a
+ * quarter turn, so its size after placing is its bounding box with the axes exchanged.
+ */
+export function shapeOfDetection({ orientation, scan }: UpDetection): FileShape {
+  const { min, max } = scan;
+  const turned = TO_Y_UP[orientation.up](max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  return fileShape(orientation, [Math.abs(turned[0]), Math.abs(turned[1]), Math.abs(turned[2])]);
 }
 
 /**

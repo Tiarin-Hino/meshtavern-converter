@@ -48,6 +48,7 @@ export const STEP_LABELS: Record<StepName, string> = {
   read: 'Reading the file',
   weld: 'Joining the surface',
   orient: 'Finding which way is up',
+  place: 'Setting the figure on its base',
   size: 'Measuring the base',
   simplify: 'Reducing the detail',
   shade: 'Priming and washing',

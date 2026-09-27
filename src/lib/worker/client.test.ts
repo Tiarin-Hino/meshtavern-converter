@@ -9,9 +9,14 @@ class FakeWorker implements WorkerLike {
   onerror: WorkerLike['onerror'] = null;
   terminated = false;
   readonly requests: WorkerRequest[] = [];
+  readonly transfers: Transferable[][] = [];
 
-  postMessage(request: WorkerRequest): void {
+  postMessage(
+    request: WorkerRequest,
+    transfer?: Transferable[] | StructuredSerializeOptions,
+  ): void {
     this.requests.push(request);
+    this.transfers.push(Array.isArray(transfer) ? transfer : []);
   }
   terminate(): void {
     this.terminated = true;
@@ -44,6 +49,17 @@ describe('Converter', () => {
     workers[0]!.reply({ type: 'done', id: request.id, result });
     await expect(job).resolves.toBe(result);
     expect(seen).toEqual(['read']);
+  });
+
+  it('transfers both files of a pair to the worker', () => {
+    const { converter, workers } = setUp();
+    const stl = new ArrayBuffer(84);
+    const secondStl = new ArrayBuffer(84);
+    void converter.convert(stl, () => {}, { secondStl, pairing: { swap: true } });
+    expect(workers[0]!.transfers[0]).toEqual([stl, secondStl]);
+    expect(workers[0]!.requests[0]!.options).toMatchObject({ secondStl, pairing: { swap: true } });
+    void converter.convert(new ArrayBuffer(84), () => {});
+    expect(workers[0]!.transfers[1]).toHaveLength(1);
   });
 
   it('cancels by ending the worker, and converts the next file in a fresh one', async () => {

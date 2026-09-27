@@ -4,6 +4,7 @@ import {
   checkFits,
   DEVICE_SHARE,
   estimateConversionBytes,
+  estimatePairBytes,
   estimateTriangles,
   FIXED_BYTES,
   memoryBudgetBytes,
@@ -60,5 +61,15 @@ describe('memory estimate', () => {
   it('lets an ordinary mini through even on a phone that reports 2 GB', () => {
     // A 1.25M-triangle humanoid, 63 MB.
     expect(() => checkFits(84 + 50 * 1_253_530, 'binary', memoryBudgetBytes(2))).not.toThrow();
+  });
+
+  it('counts a pair as both files with the fixed part once', () => {
+    const figure = 84 + 50 * 1_000_000;
+    const base = 84 + 50 * 200_000;
+    expect(estimatePairBytes(figure, 'binary', base, 'binary')).toBe(
+      estimateConversionBytes(figure, 'binary') +
+        estimateConversionBytes(base, 'binary') -
+        FIXED_BYTES,
+    );
   });
 });

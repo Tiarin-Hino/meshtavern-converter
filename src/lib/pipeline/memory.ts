@@ -54,9 +54,30 @@ export function memoryBudgetBytes(deviceMemoryGb: number | undefined): number {
   return gb * 1024 ** 3 * DEVICE_SHARE;
 }
 
+/**
+ * Peak memory a conversion of a figure and its base file is expected to need (#70): both
+ * files' estimates, with the memory every conversion needs counted once.
+ */
+export function estimatePairBytes(
+  byteLength: number,
+  format: StlFormat,
+  secondByteLength: number,
+  secondFormat: StlFormat,
+): number {
+  return (
+    estimateConversionBytes(byteLength, format) +
+    estimateConversionBytes(secondByteLength, secondFormat) -
+    FIXED_BYTES
+  );
+}
+
 /** Refuses a file whose conversion is expected to need more than `budgetBytes`. */
 export function checkFits(byteLength: number, format: StlFormat, budgetBytes: number): void {
-  const needed = estimateConversionBytes(byteLength, format);
+  checkNeeded(estimateConversionBytes(byteLength, format), budgetBytes);
+}
+
+/** Refuses a conversion expected to need `needed` bytes when it may use `budgetBytes`. */
+export function checkNeeded(needed: number, budgetBytes: number): void {
   if (needed > budgetBytes) {
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
     throw new ConversionProblem(

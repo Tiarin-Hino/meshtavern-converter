@@ -8,7 +8,15 @@
  * the same place (the regression pair depends on it).
  */
 import type { IndexedMesh } from './mesh';
+import type { Pairing } from './pair';
 import { restingPoints } from './stance';
+
+/**
+ * The place step on the largest realistic pair (a 5.6 M-triangle figure on a 1 M-triangle
+ * base) should take no longer, on the development PC. `scripts/measure-place.mjs` measures
+ * it. _(proposal)_
+ */
+export const PLACE_BUDGET_MS = 300;
 
 /** Side of a height-map cell. A 50 mm base is 100 × 100 cells. _(proposal)_ */
 export const HEIGHTMAP_CELL_MM = 0.5;
@@ -597,4 +605,226 @@ function slideColumns(
     );
   }
   return out;
+}
+
+/**
+ * A vertex is dropped onto the lowest top in this many cells around its own: the fit
+ * tolerance, without which a peg the size of its hole would sit on the rim. _(proposal)_
+ */
+export const DROP_NEIGHBOURHOOD = 1;
+/**
+ * A basin and a contact footprint whose long axis is at least this many times the short
+ * one are aligned: a tab is turned into its slot. _(proposal)_
+ */
+export const ELONGATED_ASPECT = 1.3;
+
+/** What the user changed about the placement, all relative to the detection (design note §3). */
+export interface PlacementOptions {
+  /** Moves the figure from the detected spot, scene x and z, base file units. */
+  moveMm?: [number, number];
+  /** Raises (positive) or sinks the figure from the drop height. */
+  liftMm?: number;
+  /** Turns the figure about the vertical, on top of any alignment the detection applied (§4.5). */
+  turnDeg?: number;
+}
+
+export interface Placement {
+  spot: Spot;
+  /** The figure's contact footprint that was matched: its extent in x and z. */
+  contactMm: [number, number];
+  /** Where the figure ended up: its contact centre relative to the base's origin (x, z), and its lift above y = 0. */
+  offsetMm: [number, number, number];
+  /**
+   * The turn about the vertical applied to the figure, degrees, in the sense of a three.js
+   * `rotation.y`: counter-clockwise seen from above.
+   */
+  yawDeg: number;
+  /** `detected`: the heuristic alone. `manual`: the user moved, turned, raised or lowered it. */
+  method: 'detected' | 'manual';
+  /** Every basin that was considered, best first, for the corpus report and tuning. */
+  candidates: Spot[];
+}
+
+export interface PairResult {
+  pairing: Pairing;
+  placement: Placement;
+  /** The merged full-detail mesh lists the figure's vertices and triangles first: the page splits it there for the preview (§6). */
+  figureVertices: number;
+  figureTriangles: number;
+}
+
+/**
+ * The long axis of a set of x/z points: the major eigenvector of their covariance, in closed
+ * form with one sqrt, and how elongated they are (the square root of the eigenvalues' ratio,
+ * the ratio of the spreads). Infinity for points on a line.
+ */
+export function principalAxis(
+  count: number,
+  point: (k: number) => [number, number],
+): { axis: [number, number]; elongation: number } {
+  let mx = 0;
+  let mz = 0;
+  for (let k = 0; k < count; k++) {
+    const [x, z] = point(k);
+    mx += x;
+    mz += z;
+  }
+  mx /= count;
+  mz /= count;
+  let sxx = 0;
+  let szz = 0;
+  let sxz = 0;
+  for (let k = 0; k < count; k++) {
+    const [x, z] = point(k);
+    sxx += (x - mx) * (x - mx);
+    szz += (z - mz) * (z - mz);
+    sxz += (x - mx) * (z - mz);
+  }
+  const mean = (sxx + szz) / 2;
+  const spread = Math.sqrt(((sxx - szz) / 2) * ((sxx - szz) / 2) + sxz * sxz);
+  const major = mean + spread;
+  const minor = mean - spread;
+  const elongation = minor > 0 ? Math.sqrt(major / minor) : major > 0 ? Infinity : 1;
+  // Two forms of the same eigenvector; the longer one is the better conditioned.
+  const a: [number, number] = [sxz, major - sxx];
+  const b: [number, number] = [major - szz, sxz];
+  let [ux, uz] = a[0] * a[0] + a[1] * a[1] >= b[0] * b[0] + b[1] * b[1] ? a : b;
+  const length = Math.sqrt(ux * ux + uz * uz);
+  if (length === 0) return { axis: sxx >= szz ? [1, 0] : [0, 1], elongation };
+  ux /= length;
+  uz /= length;
+  return { axis: [ux, uz], elongation };
+}
+
+/**
+ * Sets the figure on its base (design note §4.5), in this order, all about the figure's
+ * contact centre: turned so a long contact footprint lies along a long basin (never more
+ * than 90°), then by the user's turn; moved onto the spot's centre plus the user's move;
+ * dropped straight down until it first touches the top, or the floor beside the base; then
+ * raised or sunk by the user's lift. Returns new positions for the figure; the input is
+ * left untouched.
+ *
+ * @param figure The figure, Y-up on y = 0 (after its own `orientAndPlace`).
+ * @param map The base's top.
+ * @param choice Where it goes (`chooseSpot`).
+ * @param contact The figure's contact footprint (`contactFootprint`).
+ */
+export function placeFigure(
+  figure: IndexedMesh,
+  map: HeightMap,
+  choice: Choice,
+  contact: Contact,
+  options: PlacementOptions = {},
+): { positions: Float32Array; placement: Placement } {
+  const source = figure.positions;
+  const { spot, basin } = choice;
+
+  // Alignment, as the cosine and sine of a turn that takes x towards z.
+  let c = 1;
+  let s = 0;
+  if (basin && contact.points.length >= 2) {
+    const { columns, cellMm, origin } = map;
+    const cells = basin.cells;
+    const hole = principalAxis(cells.length, (k) => {
+      const i = cells[k]! % columns;
+      const j = (cells[k]! - i) / columns;
+      return [origin[0] + i * cellMm, origin[1] + j * cellMm];
+    });
+    const feet = principalAxis(contact.points.length, (k) => {
+      const p = contact.points[k]! * 3;
+      return [source[p]!, source[p + 2]!];
+    });
+    if (hole.elongation >= ELONGATED_ASPECT && feet.elongation >= ELONGATED_ASPECT) {
+      let [vx, vz] = hole.axis;
+      const [ux, uz] = feet.axis;
+      // Axes have no direction: the smaller of the two turns.
+      if (ux * vx + uz * vz < 0) {
+        vx = 0 - vx;
+        vz = 0 - vz;
+      }
+      c = ux * vx + uz * vz;
+      s = ux * vz - uz * vx;
+    }
+  }
+  const turnDeg = options.turnDeg ?? 0;
+  if (turnDeg !== 0) {
+    // A three.js rotation.y by θ turns x towards -z: sine -sin θ in the sense used here.
+    const theta = (turnDeg * Math.PI) / 180;
+    const tc = Math.cos(theta);
+    const ts = 0 - Math.sin(theta);
+    const nc = c * tc - s * ts;
+    s = s * tc + c * ts;
+    c = nc;
+  }
+
+  const move = options.moveMm ?? [0, 0];
+  const [cx, cz] = contact.centre;
+  const tx = spot.centre[0] + move[0];
+  const tz = spot.centre[1] + move[1];
+  const positions = new Float32Array(source.length);
+  for (let i = 0; i < source.length; i += 3) {
+    const dx = source[i]! - cx;
+    const dz = source[i + 2]! - cz;
+    positions[i] = tx + c * dx - s * dz;
+    positions[i + 1] = source[i + 1]!;
+    positions[i + 2] = tz + s * dx + c * dz;
+  }
+
+  const drop = dropHeight(positions, map);
+  const lift = drop + (options.liftMm ?? 0);
+  if (lift !== 0) for (let i = 1; i < positions.length; i += 3) positions[i] = positions[i]! + lift;
+
+  const manual = move[0] !== 0 || move[1] !== 0 || (options.liftMm ?? 0) !== 0 || turnDeg !== 0;
+  return {
+    positions,
+    placement: {
+      spot,
+      contactMm: contact.sizeMm,
+      offsetMm: [tx, tz, lift],
+      yawDeg: s === 0 && c > 0 ? 0 : (0 - Math.atan2(s, c) * 180) / Math.PI,
+      method: manual ? 'manual' : 'detected',
+      candidates: choice.candidates,
+    },
+  };
+}
+
+/**
+ * How far a figure standing on y = 0 must rise to rest on the top: the largest of the
+ * lowest top around each vertex minus its height, and never below the floor. Vertices
+ * over cells outside the base do not constrain.
+ */
+export function dropHeight(positions: Float32Array, map: HeightMap): number {
+  const { columns, rows, top, cellMm, origin } = map;
+  const reach = DROP_NEIGHBOURHOOD;
+  let lift = 0;
+  for (let v = 0; v < positions.length; v += 3) {
+    const i = Math.round((positions[v]! - origin[0]) / cellMm);
+    const j = Math.round((positions[v + 2]! - origin[1]) / cellMm);
+    if (i < 0 || j < 0 || i >= columns || j >= rows || Number.isNaN(top[j * columns + i]!))
+      continue;
+    let lowest = Infinity;
+    for (let jj = Math.max(0, j - reach); jj <= Math.min(rows - 1, j + reach); jj++) {
+      for (let ii = Math.max(0, i - reach); ii <= Math.min(columns - 1, i + reach); ii++) {
+        const h = top[jj * columns + ii]!;
+        if (h < lowest) lowest = h;
+      }
+    }
+    const rise = lowest - positions[v + 1]!;
+    if (rise > lift) lift = rise;
+  }
+  return lift;
+}
+
+/** One mesh of two: the first's vertices and triangles first, then the second's, indices offset. */
+export function mergeMeshes(first: IndexedMesh, second: IndexedMesh): IndexedMesh {
+  const count = first.positions.length;
+  const positions = new Float32Array(count + second.positions.length);
+  positions.set(first.positions);
+  positions.set(second.positions, count);
+  const indices = new Uint32Array(first.indices.length + second.indices.length);
+  indices.set(first.indices);
+  const offset = count / 3;
+  for (let i = 0; i < second.indices.length; i++)
+    indices[first.indices.length + i] = second.indices[i]! + offset;
+  return { positions, indices };
 }

@@ -33,8 +33,9 @@ export class Converter {
   }
 
   /**
-   * The STL buffer is transferred to the worker and is unusable on the page afterwards.
-   * A file that does not become a mini rejects with a `ConversionProblem`.
+   * The STL buffer, and a base file's in `options.secondStl`, are transferred to the worker
+   * and are unusable on the page afterwards. A file that does not become a mini rejects with
+   * a `ConversionProblem`.
    */
   convert(
     stl: ArrayBuffer,
@@ -45,7 +46,7 @@ export class Converter {
     const request: WorkerRequest = { type: 'convert', id, stl, options };
     return new Promise((resolve, reject) => {
       this.jobs.set(id, { onProgress, resolve, reject });
-      this.worker.postMessage(request, [stl]);
+      this.worker.postMessage(request, options.secondStl ? [stl, options.secondStl] : [stl]);
     });
   }
 

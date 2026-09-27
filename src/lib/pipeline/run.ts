@@ -3,15 +3,28 @@ import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
-import { checkFits } from './memory';
+import { checkFits, checkNeeded, estimatePairBytes } from './memory';
 import {
   coverageFor,
   orientAndPlace,
   resolveOrientation,
   type Orientation,
   type OrientationOptions,
+  type PlacedMesh,
   type UpAxis,
+  type UpDetection,
 } from './orient';
+import { detectPairFile, guessRoles, shapeOfDetection, type PairingOptions } from './pair';
+import {
+  chooseSpot,
+  contactFootprint,
+  findBasins,
+  mergeMeshes,
+  placeFigure,
+  topHeightMap,
+  type PairResult,
+  type PlacementOptions,
+} from './place';
 import { shade } from './shade';
 import { sizeMini, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
@@ -19,7 +32,17 @@ import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
 import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
-export const STEPS = ['read', 'weld', 'orient', 'size', 'simplify', 'shade', 'levels'] as const;
+/** Every step in order. `place` runs only for a figure with its base file (#70). */
+export const STEPS = [
+  'read',
+  'weld',
+  'orient',
+  'place',
+  'size',
+  'simplify',
+  'shade',
+  'levels',
+] as const;
 /** The steps that turn the table level into a baked mini. They run unless baking is switched off. */
 export const BAKE_STEPS = ['unwrap', 'bake', 'compress'] as const;
 export type BakeStepName = (typeof BAKE_STEPS)[number];
@@ -79,6 +102,8 @@ export interface ConversionStats {
   peakHeapBytes: number | null;
   /** Set when baking was wanted but the mini keeps the per-vertex look instead, and why. */
   bakeSkipped: BakeSkipped | null;
+  /** A figure with its base file: which was the base and where the figure was set. Null for one file. */
+  pair: PairResult | null;
 }
 
 export type BakeSkipped =
@@ -113,8 +138,10 @@ export interface ConversionResult {
   baked?: Baked;
   /** The same object as `stats.sizing`. */
   sizing: Sizing;
-  /** The same object as `stats.orientation`. */
+  /** The same object as `stats.orientation`: the figure's, for a pair. */
   orientation: Orientation;
+  /** The same object as `stats.pair`. */
+  pair: PairResult | null;
   stats: ConversionStats;
 }
 
@@ -148,7 +175,17 @@ export interface PipelineOptions {
    * whose estimate is larger is refused before anything is read. Unset: no check.
    */
   memoryBudgetBytes?: number;
+  /** The second STL of a figure-plus-base pair. Which one is the base is guessed unless `pairing.swap`. */
+  secondStl?: ArrayBuffer;
+  /** For a pair: the user swapped figure and base. */
+  pairing?: PairingOptions;
+  /** For a pair: the user moved, turned, raised or lowered the figure on its base. */
+  placement?: PlacementOptions;
 }
+
+/** Whether the user chose anything about the orientation. */
+const choosesOrientation = (options: OrientationOptions): boolean =>
+  options.up !== undefined || options.rotation !== undefined || options.setDown === true;
 
 /**
  * Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node.
@@ -164,13 +201,24 @@ export async function runPipeline(
     compress = DETAIL_EFFORT,
     maxTextureSize,
     memoryBudgetBytes,
+    secondStl,
+    pairing: pairingOptions = {},
+    placement: placementOptions = {},
   }: PipelineOptions = {},
 ): Promise<ConversionResult> {
   const format = sniffStl(new Uint8Array(stl), stl.byteLength);
-  if (memoryBudgetBytes !== undefined) checkFits(stl.byteLength, format, memoryBudgetBytes);
+  const files = secondStl ? [stl, secondStl] : [stl];
+  if (memoryBudgetBytes !== undefined) {
+    if (secondStl) {
+      const secondFormat = sniffStl(new Uint8Array(secondStl), secondStl.byteLength);
+      const needed = estimatePairBytes(stl.byteLength, format, secondStl.byteLength, secondFormat);
+      checkNeeded(needed, memoryBudgetBytes);
+    } else checkFits(stl.byteLength, format, memoryBudgetBytes);
+  }
+  const fileBytes = files.reduce((sum, file) => sum + file.byteLength, 0);
 
   const bakeSteps = BAKE_STEPS.filter((step) => step !== 'compress' || compress !== null);
-  const stepCount = STEPS.length + (bakeRequest !== 0 ? bakeSteps.length : 0);
+  const stepCount = STEPS.length - (secondStl ? 0 : 1) + (bakeRequest !== 0 ? bakeSteps.length : 0);
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
 
@@ -196,42 +244,119 @@ export async function runPipeline(
     return end(result, liveBytes(result));
   };
 
-  const { soup, invalidTriangles } = run(
+  // With a base file, read, weld and orient each run over both files inside their step.
+  const reads = run(
     'read',
-    () => dropInvalidTriangles(readStlTriangles(stl)),
-    (s) => stl.byteLength + s.soup.byteLength * 2,
+    () => files.map((file) => dropInvalidTriangles(readStlTriangles(file))),
+    (r) => fileBytes + r.reduce((sum, read) => sum + read.soup.byteLength * 2, 0),
+  );
+  const soupBytes = reads.reduce((sum, read) => sum + read.soup.byteLength, 0);
+  const invalidTriangles = reads.reduce((sum, read) => sum + read.invalidTriangles, 0);
+  const sourceTriangles = reads.reduce(
+    (sum, read) => sum + read.soup.length / 9 + read.invalidTriangles,
+    0,
   );
   // While welding, the soup, the hash table and the per-corner scratch arrays coexist:
   // roughly three more soup-sized allocations.
-  const welded = run(
+  const welds = run(
     'weld',
-    () => weldVertices(soup),
-    (w) => stl.byteLength + soup.byteLength * 4 + meshBytes(w.mesh),
+    () => reads.map((read) => weldVertices(read.soup)),
+    (w) => fileBytes + soupBytes * 4 + w.reduce((sum, weld) => sum + meshBytes(weld.mesh), 0),
   );
-  if (welded.mesh.indices.length === 0) {
+  welds.forEach((weld, k) => {
+    if (weld.mesh.indices.length > 0) return;
+    const read = reads[k]!;
+    const which = secondStl ? ` in file ${k + 1}` : '';
     throw new ConversionProblem(
       'no-surface',
-      `${soup.length / 9 + invalidTriangles} triangles, none usable`,
+      `${read.soup.length / 9 + read.invalidTriangles} triangles${which}, none usable`,
     );
-  }
+  });
+  const weldedBytes = welds.reduce((sum, weld) => sum + meshBytes(weld.mesh), 0);
+
   const oriented = run(
     'orient',
     () => {
-      const detection = resolveOrientation(welded.mesh, orientationOptions);
-      const { orientation } = detection;
-      const coverage = coverageFor(detection, orientation.up);
-      return { ...orientAndPlace(welded.mesh, orientation.rotation, coverage), orientation };
+      const placeAs = (mesh: IndexedMesh, detection: UpDetection): PlacedMesh => {
+        const { orientation } = detection;
+        return orientAndPlace(mesh, orientation.rotation, coverageFor(detection, orientation.up));
+      };
+      if (!secondStl) {
+        const detection = resolveOrientation(welds[0]!.mesh, orientationOptions);
+        return {
+          figure: placeAs(welds[0]!.mesh, detection),
+          orientation: detection.orientation,
+          base: null,
+          pairing: null,
+        };
+      }
+      // The roles are guessed from each file's own detection; the user's orientation is the figure's.
+      const detections = welds.map((weld) => detectPairFile(weld.mesh));
+      const pairing = guessRoles(
+        [shapeOfDetection(detections[0]!), shapeOfDetection(detections[1]!)],
+        pairingOptions,
+      );
+      const figureMesh = welds[1 - pairing.baseFile]!.mesh;
+      const baseMesh = welds[pairing.baseFile]!.mesh;
+      const plain = detections[1 - pairing.baseFile]!;
+      const figureDetection = choosesOrientation(orientationOptions)
+        ? resolveOrientation(figureMesh, orientationOptions, plain)
+        : plain;
+      return {
+        figure: placeAs(figureMesh, figureDetection),
+        orientation: figureDetection.orientation,
+        base: placeAs(baseMesh, detections[pairing.baseFile]!),
+        pairing,
+      };
     },
-    (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
+    (o) =>
+      fileBytes +
+      soupBytes +
+      weldedBytes +
+      o.figure.mesh.positions.byteLength +
+      (o.base?.mesh.positions.byteLength ?? 0),
   );
+
+  let pair: PairResult | null = null;
+  let toSize: PlacedMesh = oriented.figure;
+  if (oriented.base && oriented.pairing) {
+    const { figure, base, pairing } = oriented;
+    const placedPair = run(
+      'place',
+      () => {
+        const map = topHeightMap(base.mesh);
+        const contact = contactFootprint(figure.mesh.positions);
+        const choice = chooseSpot(map, findBasins(map), contact);
+        const { positions, placement } = placeFigure(
+          figure.mesh,
+          map,
+          choice,
+          contact,
+          placementOptions,
+        );
+        const mesh = mergeMeshes({ positions, indices: figure.mesh.indices }, base.mesh);
+        const result: PairResult = {
+          pairing,
+          placement,
+          figureVertices: positions.length / 3,
+          figureTriangles: figure.mesh.indices.length / 3,
+        };
+        // The base's origin is kept: the merged mini stands centred on its base like one file.
+        const merged: PlacedMesh = { mesh, sizeMm: extentOf(mesh.positions), base: base.base };
+        return { merged, result };
+      },
+      (p) => fileBytes + meshBytes(figure.mesh) + meshBytes(base.mesh) + meshBytes(p.merged.mesh),
+    );
+    pair = placedPair.result;
+    toSize = placedPair.merged;
+  }
+
   const placed = run(
     'size',
-    () => sizeMini(oriented, sizingOptions),
+    // A pair has its base: the plain one is never added.
+    () => sizeMini(toSize, pair ? { ...sizingOptions, plainBase: false } : sizingOptions),
     // A scaled mesh is a copy; the oriented one is dropped once this step is done.
-    (s) =>
-      stl.byteLength +
-      meshBytes(oriented.mesh) +
-      (s.mesh === oriented.mesh ? 0 : meshBytes(s.mesh)),
+    (s) => fileBytes + meshBytes(toSize.mesh) + (s.mesh === toSize.mesh ? 0 : meshBytes(s.mesh)),
   );
   const close = run(
     'simplify',
@@ -318,13 +443,14 @@ export async function runPipeline(
     baked,
     sizing: placed.sizing,
     orientation: oriented.orientation,
+    pair,
     stats: {
       format,
-      sourceTriangles: soup.length / 9 + invalidTriangles,
+      sourceTriangles,
       triangles: placed.mesh.indices.length / 3,
       vertices: placed.mesh.positions.length / 3,
-      degenerateTriangles: welded.degenerateTriangles,
-      duplicateTriangles: welded.duplicateTriangles,
+      degenerateTriangles: welds.reduce((sum, weld) => sum + weld.degenerateTriangles, 0),
+      duplicateTriangles: welds.reduce((sum, weld) => sum + weld.duplicateTriangles, 0),
       invalidTriangles,
       sizeMm: placed.sizeMm,
       sizing: placed.sizing,
@@ -343,6 +469,21 @@ export async function runPipeline(
       peakBufferBytes,
       peakHeapBytes,
       bakeSkipped,
+      pair,
     },
   };
+}
+
+/** Width, height and depth of a mesh's vertices. */
+function extentOf(positions: Float32Array): [number, number, number] {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      const value = positions[i + k]!;
+      if (value < min[k]!) min[k] = value;
+      if (value > max[k]!) max[k] = value;
+    }
+  }
+  return [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!];
 }

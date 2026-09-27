@@ -1,4 +1,6 @@
 import type { OrientationOptions } from '../pipeline/orient';
+import type { PairingOptions } from '../pipeline/pair';
+import type { PlacementOptions } from '../pipeline/place';
 import type { ProblemCode } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
 import type { SizingOptions } from '../pipeline/size';
@@ -17,6 +19,15 @@ export interface ConvertOptions {
   maxTextureSize?: number;
   /** Memory the conversion may use; a file expected to need more is refused. See memory.ts. */
   memoryBudgetBytes?: number;
+  /**
+   * The second STL of a figure-plus-base pair (#70). Transferred to the worker like the first
+   * and unusable on the page afterwards. Which of the two is the base is guessed.
+   */
+  secondStl?: ArrayBuffer;
+  /** For a pair: the user swapped figure and base. */
+  pairing?: PairingOptions;
+  /** For a pair: the user moved, turned, raised or lowered the figure, relative to the detection. */
+  placement?: PlacementOptions;
 }
 
 /** Messages between the page and the conversion worker. Every job carries an id so replies can be matched. */

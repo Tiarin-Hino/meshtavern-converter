@@ -4,7 +4,17 @@ import { generateBumpySheet } from './generate';
 import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
 import { PLAIN_BASE_HEIGHT_MM } from './base';
 import { encodeBinaryStl } from './stl';
-import { generateFigure, generateSwarm } from '../../regression/shapes';
+import {
+  generateFigure,
+  generatePegFigure,
+  generatePuddleFigure,
+  generateRecessBase,
+  generateSwarm,
+} from '../../regression/shapes';
+import { estimateConversionBytes } from './memory';
+
+/** The steps of a single file: `place` runs for a figure with its base file only. */
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {
@@ -55,7 +65,7 @@ describe('runPipeline', () => {
       onProgress: (p) => progress.push(p),
     });
 
-    const steps = [...STEPS, ...BAKE_STEPS];
+    const steps = [...ONE_FILE_STEPS, ...BAKE_STEPS];
     expect(stats.timings.map((timing) => timing.step)).toEqual(steps);
     expect(progress.filter((p) => p.stepPercent === undefined).map((p) => p.step)).toEqual(steps);
     expect(progress.some((p) => p.step === 'unwrap' && p.stepPercent !== undefined)).toBe(true);
@@ -109,7 +119,7 @@ describe('runPipeline', () => {
     const { baked, stats } = await runPipeline(sheet(), { maxTextureSize: 512 });
     expect(baked).toBeUndefined();
     expect(stats.bakeSkipped).toEqual({ reason: 'device', resolution: 1024, maxTextureSize: 512 });
-    expect(stats.timings.map((timing) => timing.step)).toEqual([...STEPS]);
+    expect(stats.timings.map((timing) => timing.step)).toEqual([...ONE_FILE_STEPS]);
   });
 
   it('development: baking can be switched off, and so can compression', async () => {
@@ -125,7 +135,8 @@ describe('runPipeline', () => {
 
   it('sizes the mini between orient and simplify: units, base and the suggested size', async () => {
     const { sizing, stats } = await runPipeline(encodeBinaryStl(generateFigure(true)), { bake: 0 });
-    expect(STEPS.indexOf('size')).toBe(STEPS.indexOf('orient') + 1);
+    expect(STEPS.indexOf('place')).toBe(STEPS.indexOf('orient') + 1);
+    expect(STEPS.indexOf('size')).toBe(STEPS.indexOf('place') + 1);
     expect(STEPS.indexOf('simplify')).toBe(STEPS.indexOf('size') + 1);
     expect(sizing).toMatchObject({
       units: 'mm',
@@ -243,5 +254,74 @@ describe('runPipeline', () => {
     expect(sizing.warnings).toEqual([
       { kind: 'base-exceeds-footprint', baseMm: sizing.baseDiameterMm, footprintMm: 32 },
     ]);
+  }, 60_000);
+});
+
+describe('runPipeline with a base file (#70)', () => {
+  const figure = (): ArrayBuffer => encodeBinaryStl(generatePuddleFigure(12));
+  const base = (): ArrayBuffer => encodeBinaryStl(generateRecessBase());
+
+  it('sets the figure in the recess and merges the two before reducing', async () => {
+    const result = await runPipeline(figure(), { bake: 0, secondStl: base() });
+    const { pair, stats, sizing, mesh } = result;
+    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(pair).not.toBeNull();
+    expect(stats.pair).toBe(pair);
+    expect(pair!.pairing).toMatchObject({
+      baseFile: 1,
+      method: 'guessed',
+      warnings: ['figure-has-its-own-base'],
+    });
+    expect(pair!.placement.spot.kind).toBe('recess');
+    expect(pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    // Measured from the base file: 32 mm round, not the puddle.
+    expect(sizing.base).toMatchObject({ shape: 'round', diameterMm: 32 });
+    expect(sizing).toMatchObject({ size: 'medium', plainBase: null });
+    // The figure first: its triangles use its vertices only.
+    const figureTriangles = mesh.indices.subarray(0, pair!.figureTriangles * 3);
+    expect(figureTriangles.reduce((a, b) => Math.max(a, b), 0)).toBeLessThan(pair!.figureVertices);
+    expect(stats.triangles).toBeGreaterThan(pair!.figureTriangles);
+    // Stands on y = 0, 3 mm of rim under the puddle and the figure's own height above it.
+    expect(stats.sizeMm[0]).toBeCloseTo(32, 3);
+    expect(stats.sizeMm[1]).toBeGreaterThan(30.9 + 3 - 0.01);
+    expect(stats.orientation.up).toBe('+z');
+  }, 60_000);
+
+  it('finds the base in either order, and swaps when asked', async () => {
+    const reversed = await runPipeline(base(), { bake: 0, secondStl: figure() });
+    expect(reversed.pair!.pairing.baseFile).toBe(0);
+    expect(reversed.pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    const swapped = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      pairing: { swap: true },
+    });
+    expect(swapped.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
+    expect(swapped.sizing.base?.diameterMm).toBeCloseTo(12, 3);
+  }, 60_000);
+
+  it('passes the user’s placement through', async () => {
+    const moved = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      placement: { moveMm: [1, 0], liftMm: 0.5 },
+    });
+    expect(moved.pair!.placement.method).toBe('manual');
+    expect(moved.pair!.placement.offsetMm[0]).toBe(1);
+  }, 60_000);
+
+  it('refuses two figures, and a pair too large for the device', async () => {
+    const figures = runPipeline(encodeBinaryStl(generateFigure(false)), {
+      bake: 0,
+      secondStl: encodeBinaryStl(generatePegFigure(2)),
+    });
+    await expect(figures).rejects.toMatchObject({ name: 'ConversionProblem', code: 'not-a-pair' });
+    const small = await runPipeline(figure(), { bake: 0, secondStl: base() }).then(() => 0);
+    expect(small).toBe(0);
+    // Each file fits the budget alone; the two together do not.
+    const budget = estimateConversionBytes(figure().byteLength, 'binary') + 1;
+    await expect(
+      runPipeline(figure(), { bake: 0, secondStl: figure(), memoryBudgetBytes: budget }),
+    ).rejects.toMatchObject({ code: 'too-large' });
   }, 60_000);
 });

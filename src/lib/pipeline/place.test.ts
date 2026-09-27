@@ -18,6 +18,8 @@ import {
   findBasins,
   fitOf,
   flattestPatch,
+  mergeMeshes,
+  placeFigure,
   HEIGHTMAP_CELL_MM,
   RECESS_MIN_AREA_MM2,
   topHeightMap,
@@ -290,5 +292,92 @@ describe('flattestPatch', () => {
   it('falls back to the centre when the figure is wider than the base', () => {
     const map = topHeightMap(placed(generateRecessBase()));
     expect(flattestPatch(map, [60, 60]).centre).toEqual([0, 0]);
+  });
+});
+
+/** Sets a Z-up figure on a Z-up base the way the place step does. */
+function set(figureSoup: Float32Array, base: Float32Array | IndexedMesh, options = {}) {
+  const figure = placed(figureSoup);
+  const map = topHeightMap(base instanceof Float32Array ? placed(base) : base);
+  const contact = contactFootprint(figure.positions);
+  const choice = chooseSpot(map, findBasins(map), contact);
+  const result = placeFigure(figure, map, choice, contact, options);
+  return { ...result, figure, contact };
+}
+
+function lowest(positions: Float32Array): number {
+  let low = Infinity;
+  for (let i = 1; i < positions.length; i += 3) if (positions[i]! < low) low = positions[i]!;
+  return low;
+}
+
+/** Centre of the x/z bounding box of the given vertices. */
+function centreOf(positions: Float32Array, points: number[]): [number, number] {
+  const xs = points.map((p) => positions[p * 3]!);
+  const zs = points.map((p) => positions[p * 3 + 2]!);
+  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2];
+}
+
+describe('placeFigure', () => {
+  it('sets a puddle on the recess floor, centred on the recess', () => {
+    const { heightMm, recessDepthMm } = RECESS_BASE;
+    const { positions, placement, contact } = set(generatePuddleFigure(12), generateRecessBase());
+    expect(placement).toMatchObject({ method: 'detected', yawDeg: 0 });
+    expect(placement.offsetMm).toEqual([0, 0, heightMm - recessDepthMm]);
+    expect(lowest(positions)).toBe(heightMm - recessDepthMm);
+    const [x, z] = centreOf(positions, contact.points);
+    expect(Math.abs(x)).toBeLessThan(1e-6);
+    expect(Math.abs(z)).toBeLessThan(1e-6);
+  });
+
+  it('puts a long peg on the floor of a hole through the base, a short one hangs from the feet', () => {
+    // The body starts 0.5 mm below the top of the peg: 3.5 mm above the tip of a 4 mm peg.
+    expect(lowest(set(generatePegFigure(4), holeBase()).positions)).toBe(0);
+    const short = set(generatePegFigure(2), holeBase());
+    expect(short.placement.spot.kind).toBe('hole');
+    expect(lowest(short.positions)).toBeGreaterThan(0.3);
+    expect(lowest(short.positions)).toBeLessThan(1.5);
+  });
+
+  it('puts a peg on the floor of a blind hole deeper than the peg is long', () => {
+    const blind = plate(20, 0.2, (x, z) => (x * x + z * z < 1.6 * 1.6 ? 1 : 4));
+    const { positions, placement } = set(generatePegFigure(4), blind);
+    expect(placement.spot.kind).toBe('hole');
+    expect(lowest(positions)).toBe(1);
+  });
+
+  it('turns a tab into its slot, and leaves a round peg as it is', () => {
+    const tab = set(generateTabFigure(2), slotBase());
+    expect(Math.abs(Math.abs(tab.placement.yawDeg) - 90)).toBeLessThan(1);
+    expect(set(generatePegFigure(2), holeBase()).placement.yawDeg).toBe(0);
+  });
+
+  it('moves, raises and turns by exactly what the user gave, and says so', () => {
+    const detected = set(generatePuddleFigure(12), generateRecessBase());
+    const manual = set(generatePuddleFigure(12), generateRecessBase(), {
+      moveMm: [2, -1],
+      liftMm: 0.5,
+      turnDeg: 15,
+    });
+    const [x, z, lift] = detected.placement.offsetMm;
+    expect(manual.placement.method).toBe('manual');
+    expect(manual.placement.offsetMm[0]).toBe(x + 2);
+    expect(manual.placement.offsetMm[1]).toBe(z - 1);
+    expect(manual.placement.yawDeg).toBeCloseTo(15, 9);
+    // Raised by 0.5 mm from where it dropped: a sink of the same size gives it back.
+    const sunk = set(generatePuddleFigure(12), generateRecessBase(), { liftMm: -0.5 });
+    expect(sunk.placement.offsetMm[2]).toBeCloseTo(lift - 0.5, 6);
+    expect(sunk.placement.method).toBe('manual');
+  });
+});
+
+describe('mergeMeshes', () => {
+  it('lists the first mesh first and offsets the indices of the second', () => {
+    const a = plate(2, 1, () => 1);
+    const b = plate(2, 1, () => 2);
+    const merged = mergeMeshes(a, b);
+    expect(merged.positions.length).toBe(a.positions.length + b.positions.length);
+    expect([...merged.indices.subarray(0, a.indices.length)]).toEqual([...a.indices]);
+    expect(merged.indices[a.indices.length]).toBe(b.indices[0]! + a.positions.length / 3);
   });
 });
