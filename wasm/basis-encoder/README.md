@@ -20,7 +20,7 @@ npm run basis:build -- --check   # rebuild into out/basis-encoder/ and fail if o
 
 The CI job `.github/workflows/basis-encoder.yml` runs the check on every PR that touches this folder. On Windows, run the command from Git Bash or WSL. The sources land in the git-ignored `out/basis-encoder/src/` and are reused by later builds.
 
-`--variant <name>` builds an experiment into `out/basis-encoder/<name>.wasm` without touching the committed file: `no-lto` (without link-time optimisation), `simd` (`-msimd128`), `slim` (no exceptions, no RTTI, no BC7 or XUASTC in the transcoder half). `scripts/measure-encoder.mjs` times them.
+`--variant <name>` builds an experiment into `out/basis-encoder/<name>.wasm` without touching the committed file: `no-lto` (without link-time optimisation), `simd` (`-msimd128`), `slim` (no exceptions, no RTTI). `scripts/measure-encoder.mjs` times them.
 
 ## Bumping Basis Universal or Emscripten
 

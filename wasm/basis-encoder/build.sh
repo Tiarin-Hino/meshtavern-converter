@@ -84,8 +84,8 @@ case "$variant" in
   simd) SIMD=(-msimd128) ;;
   slim)
     LANG_CPP+=(-fno-exceptions -fno-rtti)
-    DEFINES=("${DEFINES[@]/-DBASISD_SUPPORT_BC7=1/-DBASISD_SUPPORT_BC7=0}")
-    DEFINES=("${DEFINES[@]/-DBASISD_SUPPORT_XUASTC=1/-DBASISD_SUPPORT_XUASTC=0}")
+    # Turning BASISD_SUPPORT_BC7 or _XUASTC off does not compile at this commit: the encoder's
+    # XBC7 code needs the transcoder's BC7 helpers.
     ;;
   *) echo "unknown variant: $variant" >&2; exit 2 ;;
 esac
