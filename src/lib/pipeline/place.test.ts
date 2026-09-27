@@ -1,14 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { generateRecessBase, RECESS_BASE } from '../../regression/shapes';
+import {
+  generateFigure,
+  generatePegFigure,
+  generatePlate,
+  generatePuddleFigure,
+  generateRecessBase,
+  generateTabFigure,
+  RECESS_BASE,
+} from '../../regression/shapes';
 import { addRoundBase } from './base';
 import { weldVertices, type IndexedMesh } from './mesh';
-import { coverageFor, orientAndPlace, resolveOrientation } from './orient';
-import { HEIGHTMAP_CELL_MM, topHeightMap, type HeightMap } from './place';
+import { coverageFor, orientAndPlace } from './orient';
+import { detectPairFile } from './pair';
+import {
+  chooseSpot,
+  contactFootprint,
+  findBasins,
+  fitOf,
+  flattestPatch,
+  HEIGHTMAP_CELL_MM,
+  RECESS_MIN_AREA_MM2,
+  topHeightMap,
+  type HeightMap,
+} from './place';
 
 /** A Z-up soup as the pipeline leaves it: welded, oriented by its own detection, placed. */
 function placed(soup: Float32Array): IndexedMesh {
   const mesh = weldVertices(soup).mesh;
-  const detection = resolveOrientation(mesh, {});
+  const detection = detectPairFile(mesh);
   const { orientation } = detection;
   return orientAndPlace(mesh, orientation.rotation, coverageFor(detection, orientation.up)).mesh;
 }
@@ -123,5 +142,153 @@ describe('topHeightMap', () => {
     const map = topHeightMap(placed(roundBase(400, 5)));
     expect(map.columns).toBeLessThanOrEqual(512);
     expect(map.cellMm).toBeGreaterThan(HEIGHTMAP_CELL_MM);
+  });
+});
+
+/** A 20 mm square plate 3 mm thick with a 3.2 mm round hole through it. */
+const holeBase = (): Float32Array => generatePlate(20, 3, 0.2, (x, y) => x * x + y * y < 1.6 * 1.6);
+/** A 20 mm square plate 3 mm thick with a 2 × 9 mm slot through it, long in the file's y. */
+const slotBase = (): Float32Array =>
+  generatePlate(20, 3, 0.25, (x, y) => Math.abs(x) < 1 && Math.abs(y) < 4.5);
+
+describe('findBasins', () => {
+  it('finds the recess of the recess base, its size and depth', () => {
+    const { recessMm, recessDepthMm } = RECESS_BASE;
+    const basins = findBasins(topHeightMap(placed(generateRecessBase())));
+    expect(basins).toHaveLength(1);
+    const { spot } = basins[0]!;
+    expect(spot.kind).toBe('recess');
+    expect(spot.depthMm).toBe(recessDepthMm);
+    expect(spot.centre).toEqual([0, 0]);
+    // The rim's vertices stamp the outermost ring of cells: within a cell either way.
+    for (const side of spot.sizeMm) expect(Math.abs(side - recessMm)).toBeLessThanOrEqual(1);
+  });
+
+  it('finds a hole through the base, as deep as the base is tall', () => {
+    const basins = findBasins(topHeightMap(placed(holeBase())));
+    expect(basins.map((b) => b.spot.kind)).toEqual(['hole']);
+    expect(basins[0]!.spot.depthMm).toBe(3);
+    for (const side of basins[0]!.spot.sizeMm) expect(Math.abs(side - 3.2)).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps sculpted texture shallower than a recess out', () => {
+    const rippled = plate(30, 0.25, (x, z) => 3 + 0.15 * Math.sin(x * 2) * Math.cos(z * 1.7));
+    expect(findBasins(topHeightMap(rippled))).toEqual([]);
+  });
+
+  it('drops basins smaller than a peg hole', () => {
+    // One cell deep, 1 mm² at most: under RECESS_MIN_AREA_MM2.
+    const pit = plate(20, 0.25, (x, z) => (Math.abs(x) < 0.4 && Math.abs(z) < 0.4 ? 1 : 3));
+    expect(RECESS_MIN_AREA_MM2).toBeGreaterThan(1);
+    expect(findBasins(topHeightMap(pit))).toEqual([]);
+  });
+});
+
+describe('contactFootprint', () => {
+  it('finds the lowest part of a figure without a base', () => {
+    const contact = contactFootprint(placed(generateFigure(false)).positions);
+    expect(contact.points.length).toBeGreaterThan(10);
+    // The rounded underside of the body, not the whole body.
+    for (const side of contact.sizeMm) {
+      expect(side).toBeGreaterThan(1);
+      expect(side).toBeLessThan(4);
+    }
+  });
+
+  it('finds the end of a peg, the puddle, the tab', () => {
+    const peg = contactFootprint(placed(generatePegFigure(2)).positions);
+    expect(peg.sizeMm.map((v) => v.toFixed(2))).toEqual(['3.00', '3.00']);
+    const puddle = contactFootprint(placed(generatePuddleFigure(12)).positions);
+    expect(puddle.sizeMm.map((v) => v.toFixed(2))).toEqual(['12.00', '12.00']);
+    const tab = contactFootprint(placed(generateTabFigure(2)).positions);
+    expect(tab.sizeMm.map((v) => v.toFixed(2))).toEqual(['8.00', '1.50']);
+  });
+});
+
+describe('fitOf', () => {
+  it('scores the design note examples', () => {
+    expect(fitOf([3, 3], [3.2, 3.2])).toBeCloseTo(0.88, 2);
+    expect(fitOf([12, 8], [16, 12])).toBeCloseTo(0.5, 2);
+    expect(fitOf([12, 8], [2, 3])).toBeCloseTo(0.06, 2);
+    expect(fitOf([3, 3], [20, 20])).toBeCloseTo(0.02, 2);
+    // Sorted before comparing: a turned slot fits as well.
+    expect(fitOf([8, 1.5], [2, 9])).toBe(fitOf([1.5, 8], [9, 2]));
+    expect(fitOf([0, 3], [3, 3])).toBe(0);
+  });
+});
+
+describe('chooseSpot', () => {
+  const choose = (figure: Float32Array, base: Float32Array) => {
+    const map = topHeightMap(placed(base));
+    return chooseSpot(map, findBasins(map), contactFootprint(placed(figure).positions));
+  };
+
+  it('sets a puddle in the recess', () => {
+    const { spot, basin, candidates } = choose(generatePuddleFigure(12), generateRecessBase());
+    expect(spot.kind).toBe('recess');
+    expect(spot.fit).toBeGreaterThan(0.8);
+    expect(basin).not.toBeNull();
+    expect(candidates).toEqual([spot]);
+  });
+
+  it('sets a peg in the hole and a tab in the slot', () => {
+    expect(choose(generatePegFigure(2), holeBase()).spot).toMatchObject({ kind: 'hole' });
+    const slot = choose(generateTabFigure(2), slotBase()).spot;
+    expect(slot.kind).toBe('hole');
+    expect(slot.fit).toBeGreaterThan(0.8);
+  });
+
+  it('takes the flattest patch when no basin fits: a peg over a wide recess', () => {
+    const { spot, basin, candidates } = choose(generatePegFigure(2), generateRecessBase());
+    expect(spot).toMatchObject({ kind: 'flat', depthMm: 0, fit: 0 });
+    expect(basin).toBeNull();
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.fit).toBeLessThan(0.25);
+  });
+
+  it('takes the deeper of two basins that fit about as well', () => {
+    const twoPits = plate(30, 0.25, (x, z) => {
+      if (Math.abs(x + 7) < 2 && Math.abs(z) < 2) return 2;
+      if (Math.abs(x - 7) < 2 && Math.abs(z) < 2) return 1;
+      return 3;
+    });
+    const map = topHeightMap(twoPits);
+    const basins = findBasins(map);
+    expect(basins).toHaveLength(2);
+    const contact = {
+      centre: [0, 0] as [number, number],
+      sizeMm: [4, 4] as [number, number],
+      points: [],
+    };
+    const { spot, candidates } = chooseSpot(map, basins, contact);
+    expect(spot.depthMm).toBe(2);
+    expect(spot.centre[0]).toBeGreaterThan(0);
+    expect(candidates).toHaveLength(2);
+  });
+});
+
+describe('flattestPatch', () => {
+  it('takes the window nearest the centre among equally flat ones', () => {
+    const map = topHeightMap(plate(20, 0.5, () => 3));
+    const spot = flattestPatch(map, [4, 2]);
+    expect(spot.kind).toBe('flat');
+    expect(Math.hypot(...spot.centre)).toBeLessThanOrEqual(map.cellMm);
+    expect(spot.sizeMm).toEqual([4, 2]);
+  });
+
+  it('finds the one flat plateau of a sculpted top', () => {
+    const rocky = plate(30, 0.25, (x, z) =>
+      Math.abs(x - 8) < 3 && Math.abs(z + 6) < 3
+        ? 4
+        : 3 + 0.8 * Math.sin(x * 1.3) * Math.cos(z * 1.1),
+    );
+    const spot = flattestPatch(topHeightMap(rocky), [4, 4]);
+    expect(Math.abs(spot.centre[0] - 8)).toBeLessThanOrEqual(1);
+    expect(Math.abs(spot.centre[1] + 6)).toBeLessThanOrEqual(1);
+  });
+
+  it('falls back to the centre when the figure is wider than the base', () => {
+    const map = topHeightMap(placed(generateRecessBase()));
+    expect(flattestPatch(map, [60, 60]).centre).toEqual([0, 0]);
   });
 });

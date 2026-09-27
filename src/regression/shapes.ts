@@ -231,3 +231,112 @@ export function generateRecessBase(): Float32Array {
   addRecessBase(soup, diameterMm, heightMm, 64, recessMm, recessDepthMm);
   return new Float32Array(soup);
 }
+
+/** A closed box between two corners, Z-up. 12 triangles. */
+export function addBox(soup: number[], from: Vec3, to: Vec3): void {
+  const inside: Vec3 = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2];
+  const corner = (k: number): Vec3 => [
+    k & 1 ? to[0] : from[0],
+    k & 2 ? to[1] : from[1],
+    k & 4 ? to[2] : from[2],
+  ];
+  // Each face as four corners by bit pattern, in order around it.
+  for (const [a, b, c, d] of [
+    [0, 1, 3, 2],
+    [4, 5, 7, 6],
+    [0, 1, 5, 4],
+    [2, 3, 7, 6],
+    [0, 2, 6, 4],
+    [1, 3, 7, 5],
+  ] as const) {
+    pushOutward(soup, corner(a), corner(b), corner(c), inside);
+    pushOutward(soup, corner(a), corner(c), corner(d), inside);
+  }
+}
+
+/**
+ * A square plate, Z-up on z = 0, with an opening through it where `open(x, y)` holds at a
+ * quad's centre: top, underside and outer walls, the opening's walls left out (the height
+ * map reads tops only). For the unit tests of #70, not the baseline.
+ */
+export function generatePlate(
+  sideMm: number,
+  heightMm: number,
+  stepMm: number,
+  open: (x: number, y: number) => boolean,
+): Float32Array {
+  const soup: number[] = [];
+  const n = Math.round(sideMm / stepMm);
+  const at = (k: number): number => -sideMm / 2 + k * stepMm;
+  const inside: Vec3 = [0, 0, heightMm / 2];
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      if (open((at(i) + at(i + 1)) / 2, (at(j) + at(j + 1)) / 2)) continue;
+      for (const z of [0, heightMm]) {
+        pushOutward(
+          soup,
+          [at(i), at(j), z],
+          [at(i + 1), at(j), z],
+          [at(i + 1), at(j + 1), z],
+          [(at(i) + at(i + 1)) / 2, (at(j) + at(j + 1)) / 2, heightMm / 2],
+        );
+        pushOutward(
+          soup,
+          [at(i), at(j), z],
+          [at(i + 1), at(j + 1), z],
+          [at(i), at(j + 1), z],
+          [(at(i) + at(i + 1)) / 2, (at(j) + at(j + 1)) / 2, heightMm / 2],
+        );
+      }
+    }
+  }
+  const half = sideMm / 2;
+  const corners: [number, number][] = [
+    [-half, -half],
+    [half, -half],
+    [half, half],
+    [-half, half],
+  ];
+  for (let k = 0; k < 4; k++) {
+    const [ax, ay] = corners[k]!;
+    const [bx, by] = corners[(k + 1) % 4]!;
+    pushOutward(soup, [ax, ay, 0], [bx, by, 0], [bx, by, heightMm], inside);
+    pushOutward(soup, [ax, ay, 0], [bx, by, heightMm], [ax, ay, heightMm], inside);
+  }
+  return new Float32Array(soup);
+}
+
+/**
+ * The figure without a base, standing on something under its body: `under` adds that
+ * something to the soup, from z = 0 up to `heightMm`, and the figure is lifted so its body's
+ * lowest point is at that height. Z-up.
+ */
+function figureStandingOn(heightMm: number, under: (soup: number[]) => void): Float32Array {
+  const figure = generateFigure(false);
+  let low = Infinity;
+  for (let i = 2; i < figure.length; i += 3) if (figure[i]! < low) low = figure[i]!;
+  // Half a millimetre into the body, so the two parts overlap like a printed peg.
+  const lift = heightMm - 0.5 - low;
+  for (let i = 2; i < figure.length; i += 3) figure[i] = figure[i]! + lift;
+  const soup: number[] = [];
+  under(soup);
+  const joined = new Float32Array(soup.length + figure.length);
+  joined.set(soup);
+  joined.set(figure, soup.length);
+  return joined;
+}
+
+/** The figure on a 3 mm peg `lengthMm` long. Z-up. */
+export function generatePegFigure(lengthMm: number): Float32Array {
+  return figureStandingOn(lengthMm, (soup) => addRoundBase(soup, [0, 0], 3, lengthMm, 8));
+}
+
+/** The figure on a tab 8 mm long in x, 1.5 mm wide, `lengthMm` tall. Z-up. */
+export function generateTabFigure(lengthMm: number): Float32Array {
+  return figureStandingOn(lengthMm, (soup) => addBox(soup, [-4, -0.75, 0], [4, 0.75, lengthMm]));
+}
+
+/** The figure on a thin puddle: a disc `diameterMm` across, 0.8 mm tall. Z-up. */
+export function generatePuddleFigure(diameterMm: number): Float32Array {
+  return figureStandingOn(0.8, (soup) => addRoundBase(soup, [0, 0], diameterMm, 0.8, 16));
+}

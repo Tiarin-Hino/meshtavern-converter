@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { addBlob, generateFigure } from '../../regression/shapes';
+import {
+  addBlob,
+  generateFigure,
+  generatePlate,
+  generateRecessBase,
+} from '../../regression/shapes';
 import { addRoundBase } from './base';
 import { weldVertices } from './mesh';
 import { coverageFor, orientAndPlace, resolveOrientation } from './orient';
-import { BASE_MAX_ASPECT, fileShape, guessRoles, type FileShape } from './pair';
+import { BASE_MAX_ASPECT, detectPairFile, fileShape, guessRoles, type FileShape } from './pair';
 import { ConversionProblem } from './problems';
 
 /** The shape the pipeline sees for a Z-up soup: its own detection, then placed. */
 function shapeOf(soup: Float32Array): FileShape {
   const mesh = weldVertices(soup).mesh;
-  const detection = resolveOrientation(mesh, {});
+  const detection = detectPairFile(mesh);
   const { orientation } = detection;
   const placed = orientAndPlace(mesh, orientation.rotation, coverageFor(detection, orientation.up));
   return fileShape(orientation, placed.sizeMm);
@@ -31,6 +36,31 @@ function lowCreature(): Float32Array {
 const figure = shapeOf(generateFigure(false));
 const figureOnBase = shapeOf(generateFigure(true));
 const base = shapeOf(roundBase(32, 4));
+
+describe('detectPairFile', () => {
+  it('stands a square base on its underside, not on the wall the single-file detection picks', () => {
+    const mesh = weldVertices(generatePlate(25, 3, 0.5, () => false)).mesh;
+    expect(resolveOrientation(mesh, {}).orientation.up).toBe('+x');
+    expect(detectPairFile(mesh).orientation).toMatchObject({ up: '+z', method: 'base' });
+  });
+
+  it('takes the underside over a top with a recess in it', () => {
+    // The recess base upside down: its full underside faces +z, the recess -z.
+    const upright = generateRecessBase();
+    const soup = new Float32Array(upright.length);
+    for (let i = 0; i < soup.length; i += 3) {
+      soup[i] = upright[i]!;
+      soup[i + 1] = 0 - upright[i + 1]!;
+      soup[i + 2] = 4 - upright[i + 2]!;
+    }
+    expect(detectPairFile(weldVertices(soup).mesh).orientation.up).toBe('-z');
+  });
+
+  it('keeps the detection of a figure', () => {
+    const mesh = weldVertices(generateFigure(true)).mesh;
+    expect(detectPairFile(mesh)).toEqual(resolveOrientation(mesh, {}));
+  });
+});
 
 describe('fileShape', () => {
   it('sees a flat underside on a base and none under a figure without one', () => {
