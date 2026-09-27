@@ -25,6 +25,7 @@
     "test:watch": "vitest",
     "bench": "vitest bench --run",
     "baseline:update": "node scripts/update-baseline.mjs",
+    "xatlas:build": "bash wasm/xatlas/build.sh",
     "corpus": "npm run build && node scripts/corpus.mjs",
     "e2e": "playwright test",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
@@ -32,8 +33,7 @@
   "dependencies": {
     "ktx2-encoder": "0.6.0",
     "meshoptimizer": "^1.2.0",
-    "three": "^0.186.0",
-    "xatlas-wasm": "0.1.3"
+    "three": "^0.186.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

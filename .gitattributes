@@ -2,3 +2,4 @@
 *.stl binary
 *.glb binary
 *.png binary
+*.wasm binary
