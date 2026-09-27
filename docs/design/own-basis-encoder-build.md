@@ -23,7 +23,7 @@ Everything below was checked on 2026-09-27 against the installed package, the np
 Two things the review noticed and leaves alone, recorded here so they are not lost:
 
 - The package never sets the encoder's `m_mip_srgb`, which defaults to true since upstream's change of 2026-04-26. Our detail texture is linear data (normals and cavity), so its mipmaps are today filtered in sRGB space. The switch keeps that (§5: same results first); the fix is one flag and its own decision (§11).
-- three.js's Basis _transcoder_ (`basis_transcoder.wasm`, 527 KB, served under `/basis/`) is also a prebuilt binary, but from a large old project with many maintainers, and it only reads. It falls outside this issue and is filed separately, because in Phase 2 it will read files other players made.
+- three.js's Basis _transcoder_ (`basis_transcoder.wasm`, 527 KB, served under `/basis/`) is also a prebuilt binary, but from a large old project with many maintainers, and it only reads. It falls outside this issue and is filed as #87, because in Phase 2 it will read files other players made.
 
 ## 2. What we have today, and what changes
 
@@ -176,8 +176,8 @@ Steps 1–5 are the deliverable; 6–7 are the look and can be short if the numb
 
 ## 11. Out of this note
 
-- **sRGB mip filtering on linear data** (§1): flipping `SRGB_MIPS` to false is a one-line change with a visible-in-principle effect on the mipmaps of every mini; it gets its own small issue with comparison sheets, after this PR, so the switch here stays a pure change of who compiles the encoder.
-- **The three.js transcoder** as a prebuilt binary: its own issue, for the PM to weigh before Phase 2.
+- **sRGB mip filtering on linear data** (§1): flipping `SRGB_MIPS` to false is a one-line change with a visible-in-principle effect on the mipmaps of every mini; it gets its own issue (#86) with comparison sheets, after this PR, so the switch here stays a pure change of who compiles the encoder.
+- **The three.js transcoder** as a prebuilt binary: its own issue (#87), for the PM to weigh before Phase 2.
 - **Third-party notices on the published page:** when the page is published (#47), the Apache-2.0 NOTICE and the other licences must be reachable from it (an "About" line or a `licenses.txt` next to the page). Noted for #47; nothing to do while nothing is published.
 - Threads in the encoder (GitHub Pages cannot send the headers), a bump to v2.50, RDO or higher effort levels, ETC1S, HDR, any change to `bake-policy.ts`.
 
