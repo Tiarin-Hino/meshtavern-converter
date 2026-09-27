@@ -8,6 +8,7 @@
  * the same place (the regression pair depends on it).
  */
 import type { IndexedMesh } from './mesh';
+import type { PlacedMesh } from './orient';
 import type { Pairing } from './pair';
 import { restingPoints } from './stance';
 
@@ -796,23 +797,80 @@ export function placeFigure(
 export function dropHeight(positions: Float32Array, map: HeightMap): number {
   const { columns, rows, top, cellMm, origin } = map;
   const reach = DROP_NEIGHBOURHOOD;
+  // The lowest top around each cell, once, so each vertex reads one number: NaN outside.
+  const lowestAround = new Float64Array(top.length);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < columns; i++) {
+      const cell = j * columns + i;
+      if (Number.isNaN(top[cell]!)) {
+        lowestAround[cell] = NaN;
+        continue;
+      }
+      let lowest = Infinity;
+      for (let jj = Math.max(0, j - reach); jj <= Math.min(rows - 1, j + reach); jj++) {
+        for (let ii = Math.max(0, i - reach); ii <= Math.min(columns - 1, i + reach); ii++) {
+          const h = top[jj * columns + ii]!;
+          if (h < lowest) lowest = h;
+        }
+      }
+      lowestAround[cell] = lowest;
+    }
+  }
   let lift = 0;
   for (let v = 0; v < positions.length; v += 3) {
     const i = Math.round((positions[v]! - origin[0]) / cellMm);
     const j = Math.round((positions[v + 2]! - origin[1]) / cellMm);
-    if (i < 0 || j < 0 || i >= columns || j >= rows || Number.isNaN(top[j * columns + i]!))
-      continue;
-    let lowest = Infinity;
-    for (let jj = Math.max(0, j - reach); jj <= Math.min(rows - 1, j + reach); jj++) {
-      for (let ii = Math.max(0, i - reach); ii <= Math.min(columns - 1, i + reach); ii++) {
-        const h = top[jj * columns + ii]!;
-        if (h < lowest) lowest = h;
-      }
-    }
-    const rise = lowest - positions[v + 1]!;
+    if (i < 0 || j < 0 || i >= columns || j >= rows) continue;
+    // NaN outside the base: the comparison fails and the vertex does not constrain.
+    const rise = lowestAround[j * columns + i]! - positions[v + 1]!;
     if (rise > lift) lift = rise;
   }
   return lift;
+}
+
+/**
+ * The place step (design note §4): the base's top, its basins, the figure's contact
+ * footprint, the spot, the figure set on it, and the two merged, the figure first. The
+ * merged mesh keeps the base's origin, so it stands centred on its base like a single file,
+ * and its base is the one measured from the base file.
+ *
+ * @param figure The figure after its own `orientAndPlace`.
+ * @param base The base file after its own `orientAndPlace`.
+ */
+export function placeOnBase(
+  figure: PlacedMesh,
+  base: PlacedMesh,
+  pairing: Pairing,
+  options: PlacementOptions = {},
+): { merged: PlacedMesh; pair: PairResult } {
+  const map = topHeightMap(base.mesh);
+  const contact = contactFootprint(figure.mesh.positions);
+  const choice = chooseSpot(map, findBasins(map), contact);
+  const { positions, placement } = placeFigure(figure.mesh, map, choice, contact, options);
+  const mesh = mergeMeshes({ positions, indices: figure.mesh.indices }, base.mesh);
+  return {
+    merged: { mesh, sizeMm: extentOf(mesh.positions), base: base.base },
+    pair: {
+      pairing,
+      placement,
+      figureVertices: positions.length / 3,
+      figureTriangles: figure.mesh.indices.length / 3,
+    },
+  };
+}
+
+/** Width, height and depth of a mesh's vertices. */
+function extentOf(positions: Float32Array): [number, number, number] {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      const value = positions[i + k]!;
+      if (value < min[k]!) min[k] = value;
+      if (value > max[k]!) max[k] = value;
+    }
+  }
+  return [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!];
 }
 
 /** One mesh of two: the first's vertices and triangles first, then the second's, indices offset. */

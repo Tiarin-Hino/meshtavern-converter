@@ -15,16 +15,7 @@ import {
   type UpDetection,
 } from './orient';
 import { detectPairFile, guessRoles, shapeOfDetection, type PairingOptions } from './pair';
-import {
-  chooseSpot,
-  contactFootprint,
-  findBasins,
-  mergeMeshes,
-  placeFigure,
-  topHeightMap,
-  type PairResult,
-  type PlacementOptions,
-} from './place';
+import { placeOnBase, type PairResult, type PlacementOptions } from './place';
 import { shade } from './shade';
 import { sizeMini, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
@@ -323,31 +314,10 @@ export async function runPipeline(
     const { figure, base, pairing } = oriented;
     const placedPair = run(
       'place',
-      () => {
-        const map = topHeightMap(base.mesh);
-        const contact = contactFootprint(figure.mesh.positions);
-        const choice = chooseSpot(map, findBasins(map), contact);
-        const { positions, placement } = placeFigure(
-          figure.mesh,
-          map,
-          choice,
-          contact,
-          placementOptions,
-        );
-        const mesh = mergeMeshes({ positions, indices: figure.mesh.indices }, base.mesh);
-        const result: PairResult = {
-          pairing,
-          placement,
-          figureVertices: positions.length / 3,
-          figureTriangles: figure.mesh.indices.length / 3,
-        };
-        // The base's origin is kept: the merged mini stands centred on its base like one file.
-        const merged: PlacedMesh = { mesh, sizeMm: extentOf(mesh.positions), base: base.base };
-        return { merged, result };
-      },
+      () => placeOnBase(figure, base, pairing, placementOptions),
       (p) => fileBytes + meshBytes(figure.mesh) + meshBytes(base.mesh) + meshBytes(p.merged.mesh),
     );
-    pair = placedPair.result;
+    pair = placedPair.pair;
     toSize = placedPair.merged;
   }
 
@@ -472,18 +442,4 @@ export async function runPipeline(
       pair,
     },
   };
-}
-
-/** Width, height and depth of a mesh's vertices. */
-function extentOf(positions: Float32Array): [number, number, number] {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < positions.length; i += 3) {
-    for (let k = 0; k < 3; k++) {
-      const value = positions[i + k]!;
-      if (value < min[k]!) min[k] = value;
-      if (value > max[k]!) max[k] = value;
-    }
-  }
-  return [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!];
 }
