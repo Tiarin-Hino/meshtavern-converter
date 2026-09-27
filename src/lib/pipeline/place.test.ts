@@ -174,7 +174,7 @@ describe('findBasins', () => {
   });
 
   it('keeps sculpted texture shallower than a recess out', () => {
-    const rippled = plate(30, 0.25, (x, z) => 3 + 0.15 * Math.sin(x * 2) * Math.cos(z * 1.7));
+    const rippled = plate(30, 0.25, (x, z) => 3 + 0.1 * Math.sin(x * 2) * Math.cos(z * 1.7));
     expect(findBasins(topHeightMap(rippled))).toEqual([]);
   });
 

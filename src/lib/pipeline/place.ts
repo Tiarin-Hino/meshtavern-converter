@@ -162,10 +162,11 @@ export function topHeightMap({ positions, indices }: IndexedMesh): HeightMap {
 }
 
 /**
- * Water at least this deep makes a basin: a printable recess is 0.5–2 mm deep and a layer
- * 0.2 mm, so layer texture and sculpted scratches stay out. _(proposal)_
+ * Water at least this deep makes a basin. The design guessed 0.4 mm (a printable recess is
+ * 0.5–2 mm deep, a layer 0.2 mm); the foot recesses of the corpus bases are 0.3–0.5 mm deep,
+ * so 0.4 missed most of them (2026-09-27, corpus pairs, PR #89). _(proposal)_
  */
-export const RECESS_MIN_DEPTH_MM = 0.4;
+export const RECESS_MIN_DEPTH_MM = 0.25;
 /** Basins smaller than this are dropped: a 1.6 mm peg hole. _(proposal)_ */
 export const RECESS_MIN_AREA_MM2 = 2;
 /** A basin deeper than this, or one through the base, is called a hole; the name is for the user. _(proposal)_ */
