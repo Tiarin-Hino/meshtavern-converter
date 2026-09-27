@@ -51,6 +51,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 
 ## Conventions
 
+- Always respond in English unless explicitly asked otherwise.
 - Scene is Y-up, 1 unit = 1 mm. Print STLs are millimetres, usually Z-up but not always: the up axis is detected from the base on load (with a fallback guess for minis without one), and the user can pick another axis or turn the mini freely and set it down; nothing is turned silently. The result records the orientation as a rotation (`Orientation`), and exported GLBs carry it. Units are guessed from the height and shown; the mini is only scaled when the file is not in mm or the user asks, never silently. Minis stand on y = 0 with the origin at the centre of their base (of the bounding box when they have none). One grid square is 32 mm in mini space (`GRID_SQUARE_MM` in `size.ts`, PM decision, 2026-09-23); a base may be smaller than its footprint. Base and size details are in the Phase 1 spec, story 4.
 - Triangle budgets, sizes and thresholds are named constants, not inline numbers.
 - The canvas has no accessibility tree. Expose state through `window.__mt` and assert on numbers; use screenshots only for "does it look right".
