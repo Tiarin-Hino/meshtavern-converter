@@ -4,6 +4,8 @@ import {
   addBlob,
   generateFigure,
   generateQuadruped,
+  generateRecessBase,
+  RECESS_BASE,
   generateSwarm,
   generateTiltedFigure,
   toYUp,
@@ -56,6 +58,18 @@ describe('generated shapes', () => {
     expect(degenerateTriangles).toBe(0);
     expect(openEdges(mesh.indices, mesh.positions.length / 3)).toBe(0);
     expect(signedVolume(soup) / (Math.PI * 12.5 ** 2 * 3)).toBeCloseTo(1, 1);
+  });
+
+  it('makes a recess base that is closed, faces outward and has the recess taken out', () => {
+    const soup = generateRecessBase();
+    expect(soup.length / 9).toBe(4 * 64 * 64 + 8 * 64 + 16 * 14);
+    const { mesh, degenerateTriangles } = weldVertices(soup);
+    expect(degenerateTriangles).toBe(0);
+    expect(openEdges(mesh.indices, mesh.positions.length / 3)).toBe(0);
+    const { diameterMm, heightMm, recessMm, recessDepthMm } = RECESS_BASE;
+    const volume =
+      Math.PI * ((diameterMm / 2) ** 2 * heightMm - (recessMm / 2) ** 2 * recessDepthMm);
+    expect(signedVolume(soup) / volume).toBeCloseTo(1, 1);
   });
 
   it('gives the same bits every time', () => {

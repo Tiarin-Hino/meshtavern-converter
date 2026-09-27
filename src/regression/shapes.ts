@@ -148,3 +148,86 @@ export function generateTiltedFigure(): Float32Array {
   }
   return soup;
 }
+
+/**
+ * A round base, Z-up on z = 0, with a round recess in the middle of its top: the grid of
+ * `addRoundBase` squeezed into a disc, the rings inside `recessMm` lowered by `recessDepthMm`
+ * and joined to the rest by a wall. `recessMm` must fall on a ring: a multiple of
+ * `diameterMm / cells`. 4 × cells² + 8 × cells + 16 × ring triangles.
+ */
+export function addRecessBase(
+  soup: number[],
+  diameterMm: number,
+  heightMm: number,
+  cells: number,
+  recessMm: number,
+  recessDepthMm: number,
+): void {
+  const radius = diameterMm / 2;
+  const half = cells / 2;
+  const recessRing = Math.round((recessMm / diameterMm) * half);
+  const onDisc = (i: number, j: number): [number, number] => {
+    const u = -1 + (2 * i) / cells;
+    const v = -1 + (2 * j) / cells;
+    const ring = Math.max(Math.abs(u), Math.abs(v));
+    if (ring === 0) return [0, 0];
+    const scale = (ring * radius) / Math.sqrt(u * u + v * v);
+    return [u * scale, v * scale];
+  };
+  const ringOf = (i: number, j: number): number => Math.max(Math.abs(i - half), Math.abs(j - half));
+  const inside: Vec3 = [0, 0, (heightMm - recessDepthMm) / 2];
+  const floor = heightMm - recessDepthMm;
+  for (const bottom of [true, false]) {
+    for (let j = 0; j < cells; j++) {
+      for (let i = 0; i < cells; i++) {
+        const inRecess =
+          Math.max(ringOf(i, j), ringOf(i + 1, j), ringOf(i + 1, j + 1), ringOf(i, j + 1)) <=
+          recessRing;
+        const z = bottom ? 0 : inRecess ? floor : heightMm;
+        const [ax, ay] = onDisc(i, j);
+        const [bx, by] = onDisc(i + 1, j);
+        const [cx, cy] = onDisc(i + 1, j + 1);
+        const [dx, dy] = onDisc(i, j + 1);
+        pushOutward(soup, [ax, ay, z], [bx, by, z], [cx, cy, z], inside);
+        pushOutward(soup, [ax, ay, z], [cx, cy, z], [dx, dy, z], inside);
+      }
+    }
+  }
+  const loop = (ring: number): [number, number][] => {
+    const lo = half - ring;
+    const hi = half + ring;
+    const points: [number, number][] = [];
+    for (let i = lo; i < hi; i++) points.push(onDisc(i, lo));
+    for (let j = lo; j < hi; j++) points.push(onDisc(hi, j));
+    for (let i = hi; i > lo; i--) points.push(onDisc(i, hi));
+    for (let j = hi; j > lo; j--) points.push(onDisc(lo, j));
+    return points;
+  };
+  // The outer wall faces away from the axis; the recess wall faces towards it.
+  const wall = (points: [number, number][], from: number, to: number, outward: boolean): void => {
+    for (let k = 0; k < points.length; k++) {
+      const [ax, ay] = points[k]!;
+      const [bx, by] = points[(k + 1) % points.length]!;
+      const side = outward ? 0.5 : 1.5;
+      const solid: Vec3 = [((ax + bx) / 2) * side, ((ay + by) / 2) * side, (from + to) / 2];
+      pushOutward(soup, [ax, ay, from], [bx, by, from], [bx, by, to], solid);
+      pushOutward(soup, [ax, ay, from], [bx, by, to], [ax, ay, to], solid);
+    }
+  };
+  wall(loop(half), 0, heightMm, true);
+  wall(loop(recessRing), floor, heightMm, false);
+}
+
+/** Size of the recess base the regression pair and the page's generated pair stand on. */
+export const RECESS_BASE = { diameterMm: 32, heightMm: 4, recessMm: 14, recessDepthMm: 1 };
+
+/**
+ * A 32 mm round base 4 mm tall with a 14 mm round recess 1 mm deep, Z-up: the base file of
+ * the regression pair (issue #70). 17,120 triangles.
+ */
+export function generateRecessBase(): Float32Array {
+  const soup: number[] = [];
+  const { diameterMm, heightMm, recessMm, recessDepthMm } = RECESS_BASE;
+  addRecessBase(soup, diameterMm, heightMm, 64, recessMm, recessDepthMm);
+  return new Float32Array(soup);
+}
