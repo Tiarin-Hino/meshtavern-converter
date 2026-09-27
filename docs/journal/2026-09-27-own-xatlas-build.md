@@ -40,6 +40,8 @@ Since Phase 0 the unwrap used `xatlas-wasm` 0.1.3: a young package with one main
 
 **Module:** 149,036 bytes (64 KB gzipped), against 289 KB for the package. Two builds with a cold and a warm compiler cache, and the CI build, byte-identical (sha256 `3fc1cddd…`). The CI job takes 53 s.
 
+**As a library (#83):** a throwaway Vite 8.3 project with the packed library converts a 7,200-triangle sheet, baked, KTX2 857,066 bytes, as in #83's check, from a production build (module under `/assets/`) and from the dev server (module straight from `node_modules`). Nothing needed on the consumer's side.
+
 **Same results:** the unit tests of unwrap and bake and the regression baseline pass without a baseline update; charts of the three slowest corpus minis are identical to the package's in every variant (2611, 1496, 4160).
 
 **Variants,** `scripts/measure-xatlas.mjs`, Node 20.19, **development PC**, 3 runs each, the three slowest corpus unwraps (about 60,000 triangles each, in slabs), mean total in s:
