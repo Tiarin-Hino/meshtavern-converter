@@ -59,7 +59,8 @@
     "size": "gargantuan",
     "note": "ancient dragon",
     "upNote": "stands on -z, then turned 45° to the right as seen from the front (PM, 2026-09-25): tilted in the file, so a manual turn; the index holds the axis only",
-    "up": "-z"
+    "up": "-z",
+    "placement": "perches on the top of the spire, wings up, tail hanging down beside the base (PM, by hand in the app, 2026-09-29)"
   },
   "large-creature/large-02": {
     "size": "huge",
