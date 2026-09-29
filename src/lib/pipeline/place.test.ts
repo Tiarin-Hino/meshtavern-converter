@@ -24,6 +24,7 @@ import {
   placeFigure,
   CENTRE_MAX_SHARE,
   guardCentre,
+  decideFigure,
   placeOnBase,
   REGISTERED_TOLERANCE_MM,
   SEAT_BBOX_FILL,
@@ -419,7 +420,11 @@ function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {
     base: baseMesh,
     baseRotation: standing[1]!.detection.orientation.rotation,
   };
-  return placeOnBase(figure, base, pairing, options, files);
+  const result = placeOnBase(figure, base, pairing, options, files);
+  // Decided apart from the placing (#92), the placing is the same to the bit.
+  const decided = decideFigure(figure, base, files);
+  expect(placeOnBase(figure, base, pairing, options, files, undefined, decided)).toEqual(result);
+  return result;
 }
 
 describe('the registration test', () => {
@@ -477,8 +482,15 @@ describe('two candidate up axes', () => {
       shapeOfFile(upright, baseOrientation(upright)),
     ]);
     const baseMesh = { mesh: base, sizeMm: [32, 4, 32] as [number, number, number], base: null };
-    expect(placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing).candidate).toBe(1);
+    const turned = placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing);
+    expect(turned.candidate).toBe(1);
     expect(placeOnBase(standing, baseMesh, pairing, {}, undefined, onItsHead).candidate).toBe(0);
+    // Decided apart from the placing (#92): the same candidate, the same bits.
+    const decided = decideFigure(onItsHead, baseMesh, undefined, standing);
+    expect(decided).toMatchObject({ candidate: 1, registered: null });
+    const again = placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing, decided);
+    expect(again).toEqual(turned);
+    expect(again.merged.mesh.positions).toEqual(turned.merged.mesh.positions);
   });
 
   it('counts the contact vertices within touching distance of the top', () => {
