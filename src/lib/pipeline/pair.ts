@@ -130,7 +130,18 @@ export interface FileOrientation {
  * whose centroid lies within `bandMm` of the lowest point, over the footprint seen from that
  * axis. `sumTriangles` in orient.ts does the same with a band relative to the height.
  */
-export function undersideCoverage(
+export function undersideCoverage(mesh: IndexedMesh, scan: MeshScan, bandMm: number): number[] {
+  const { min, max } = scan;
+  const extent = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+  return undersideArea(mesh, scan, bandMm).map((value, entry) => {
+    const k = entry >> 1;
+    const footprint = extent[(k + 1) % 3]! * extent[(k + 2) % 3]!;
+    return footprint > 0 ? value / footprint : 0;
+  });
+}
+
+/** The same areas in square file units, not as a share of the footprint. */
+export function undersideArea(
   { positions, indices }: IndexedMesh,
   scan: MeshScan,
   bandMm: number,
@@ -162,12 +173,71 @@ export function undersideCoverage(
       }
     }
   }
-  const extent = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-  return area.map((value, entry) => {
-    const k = entry >> 1;
-    const footprint = extent[(k + 1) % 3]! * extent[(k + 2) % 3]!;
-    return footprint > 0 ? value / footprint : 0;
-  });
+  return area;
+}
+
+/**
+ * The soles of a figure made for a separate base are cut flat at one plane where it stood on
+ * it: the most coplanar flat area at an axis extreme, within this band, names its up axis
+ * (issue #90). _(proposal)_
+ */
+export const PRINT_CUT_BAND_MM = 0.3;
+/** A print cut is confident with at least this much flat area... (issue #90) _(proposal)_ */
+export const PRINT_CUT_MIN_MM2 = 1;
+/** ...and this many times the area of any other axis. _(proposal)_ */
+export const PRINT_CUT_MIN_LEAD = 4;
+/**
+ * A weaker cut, with this much area and the lead, is a second candidate when it disagrees with
+ * the up detection: the figure is placed both ways and the one touching the base better stays
+ * (design note §9 step 4). Switched off by setting it to the confident area (the build, PR #89):
+ * with the note's touch share it turned the bat (`flying-01`, right today) upside down, and the
+ * one figure it was meant to turn right (`flying-04`) is a registered pair. The research's 0.3
+ * compared by the surface match, which the design dropped. _(proposal, for the PM)_
+ */
+export const PRINT_CUT_WEAK_MM2 = PRINT_CUT_MIN_MM2;
+
+/** The print-cut axis of a figure, how much flat area it has, and how confident it is. */
+export interface PrintCut {
+  up: UpAxis;
+  areaMm2: number;
+  /** Its area over the runner-up's; Infinity when no other axis has any. */
+  lead: number;
+  strength: 'confident' | 'weak' | 'none';
+}
+
+export function printCut(mesh: IndexedMesh, scan: MeshScan): PrintCut {
+  const area = undersideArea(mesh, scan, PRINT_CUT_BAND_MM);
+  let best = 0;
+  for (let k = 1; k < 6; k++) if (area[k]! > area[best]!) best = k;
+  let second = 0;
+  for (let k = 0; k < 6; k++) if (k !== best && area[k]! > second) second = area[k]!;
+  const areaMm2 = area[best]!;
+  const lead = second > 0 ? areaMm2 / second : areaMm2 > 0 ? Infinity : 0;
+  const strength =
+    lead >= PRINT_CUT_MIN_LEAD && areaMm2 >= PRINT_CUT_MIN_MM2
+      ? 'confident'
+      : lead >= PRINT_CUT_MIN_LEAD && areaMm2 >= PRINT_CUT_WEAK_MM2
+        ? 'weak'
+        : 'none';
+  return { up: UP_AXES[best]!, areaMm2, lead, strength };
+}
+
+/**
+ * The candidate up axes of the figure of a pair (design note §9 step 4): the print cut when it
+ * is confident; the detection and the cut when a weak cut disagrees with it (the pair's
+ * placement then picks); else the detection alone. Each as a detection over the same pass.
+ */
+export function figureUpCandidates(mesh: IndexedMesh, pass: UpDetection): UpDetection[] {
+  const cut = printCut(mesh, pass.scan);
+  const detected = resolveOrientation(mesh, {}, pass);
+  if (cut.strength === 'none' || cut.up === detected.orientation.up) return [detected];
+  const turned = resolveOrientation(mesh, { up: cut.up }, pass);
+  const confidence = Number.isFinite(cut.lead) ? 1 - 1 / cut.lead : 1;
+  const byCut: UpDetection = {
+    ...turned,
+    orientation: { ...turned.orientation, method: 'cut', confidence },
+  };
+  return cut.strength === 'confident' ? [byCut] : [detected, byCut];
 }
 
 /**

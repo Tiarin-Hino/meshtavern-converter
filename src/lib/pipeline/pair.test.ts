@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   addBlob,
+  addBox,
   addRecessBase,
   generateFigure,
   generatePlate,
+  generatePuddleFigure,
   generateRecessBase,
 } from '../../regression/shapes';
 import { addRoundBase } from './base';
@@ -12,6 +14,10 @@ import { resolveOrientation } from './orient';
 import {
   BASE_MAX_ASPECT,
   baseOrientation,
+  figureUpCandidates,
+  printCut,
+  PRINT_CUT_MIN_MM2,
+  PRINT_CUT_WEAK_MM2,
   guessRoles,
   placeOriented,
   shapeOfFile,
@@ -193,3 +199,46 @@ function lowCreatureShape(): FileShape {
   expect(shape.flatUnderside).toBe(false);
   return shape;
 }
+
+/** The figure without a base, with a flat square of `sideMm` at the far end of its file y axis: a print cut facing +y. */
+function figureWithCut(sideMm: number): Float32Array {
+  const figure = generateFigure(false);
+  let maxY = -Infinity;
+  for (let i = 1; i < figure.length; i += 3) if (figure[i]! > maxY) maxY = figure[i]!;
+  const soup: number[] = [];
+  const h = sideMm / 2;
+  addBox(soup, [-h, maxY - 1, 11 - h], [h, maxY + 0.2, 11 + h]);
+  const joined = new Float32Array(figure.length + soup.length);
+  joined.set(figure);
+  joined.set(soup, figure.length);
+  return joined;
+}
+
+describe('the up axis of the figure of a pair', () => {
+  it('takes a confident print cut over the detection', () => {
+    // 9 mm² of flat cut facing +y; the blobs' own flat patches are under 2 mm².
+    const mesh = weldVertices(figureWithCut(3)).mesh;
+    const pass = resolveOrientation(mesh, {});
+    expect(pass.orientation.up).toBe('+z');
+    expect(printCut(mesh, pass.scan)).toMatchObject({ up: '-y', strength: 'confident' });
+    const candidates = figureUpCandidates(mesh, pass);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.orientation).toMatchObject({ up: '-y', method: 'cut' });
+  });
+
+  it('keeps the detection when the cut agrees with it', () => {
+    const mesh = weldVertices(generatePuddleFigure(12)).mesh;
+    const pass = resolveOrientation(mesh, {});
+    expect(printCut(mesh, pass.scan).up).toBe('+z');
+    expect(figureUpCandidates(mesh, pass).map((c) => c.orientation.method)).toEqual(['base']);
+  });
+
+  it('has no second candidate below the confident area', () => {
+    // The weak-cut test is switched off (PR #89): on the corpus it turned the bat upside down,
+    // and the one figure it turned right is a registered pair.
+    expect(PRINT_CUT_WEAK_MM2).toBe(PRINT_CUT_MIN_MM2);
+    const mesh = weldVertices(figureWithCut(3)).mesh;
+    const cut = printCut(mesh, resolveOrientation(mesh, {}).scan);
+    expect(cut.areaMm2).toBeGreaterThan(8);
+  });
+});

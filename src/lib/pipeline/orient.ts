@@ -47,9 +47,10 @@ export interface Orientation {
    * `base`: a flat underside decided, which is reliable. `tallest`: no base, so the taller
    * of the two common conventions (Y-up from sculpting tools, Z-up from slicers) was taken:
    * right for standing figures, wrong for long, low creatures. `manual`: the user's choice.
-   * A detection for minis without a base is open (#72, PR #79).
+   * A detection for minis without a base is open (#72, PR #79). `cut`: the print-cut plane of
+   * a figure made for a separate base (#70, #90), for the figure of a pair only.
    */
-  method: 'base' | 'tallest' | 'manual';
+  method: 'base' | 'tallest' | 'manual' | 'cut';
   /** base: coverage of the footprint. tallest: 0. manual: 1. */
   confidence: number;
   /** File coordinates → scene coordinates (Y-up), before the shift to the base centre and before any scale. */

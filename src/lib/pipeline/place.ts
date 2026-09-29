@@ -879,6 +879,27 @@ export function registeredFigure(
   return { mesh: { positions, indices: files.figure.indices }, heightMm: low };
 }
 
+/** A contact vertex within this height of the base's top touches it. */
+export const TOUCH_MM = 0.3;
+
+/**
+ * How well a placed figure rests on the base: the share of its contact vertices within
+ * `TOUCH_MM` of the top under them. It picks between two candidate up axes of the figure.
+ */
+export function touchShare(positions: Float32Array, points: number[], map: HeightMap): number {
+  const { columns, rows, top, cellMm, origin } = map;
+  if (points.length === 0) return 0;
+  let touching = 0;
+  for (const p of points) {
+    const i = Math.round((positions[p * 3]! - origin[0]) / cellMm);
+    const j = Math.round((positions[p * 3 + 2]! - origin[1]) / cellMm);
+    if (i < 0 || j < 0 || i >= columns || j >= rows) continue;
+    const h = top[j * columns + i]!;
+    if (!Number.isNaN(h) && Math.abs(positions[p * 3 + 1]! - h) <= TOUCH_MM) touching++;
+  }
+  return touching / points.length;
+}
+
 /**
  * The place step (design note §4): the base's top, its basins, the figure's contact
  * footprint, the spot, the figure set on it, and the two merged, the figure first. The
@@ -889,6 +910,8 @@ export function registeredFigure(
  * @param base The base file after its own `orientAndPlace`.
  * @param files The files as welded, for the registration test; left out, it is not run (the
  *   user chose the figure's orientation).
+ * @param alternative The figure turned to a second candidate up axis (design note §9 step 4):
+ *   placed both ways, the one touching the base better stays; `candidate` says which.
  */
 export function placeOnBase(
   figure: PlacedMesh,
@@ -896,10 +919,21 @@ export function placeOnBase(
   pairing: Pairing,
   options: PlacementOptions = {},
   files?: PairFiles,
-): { merged: PlacedMesh; pair: PairResult } {
+  alternative?: PlacedMesh,
+): { merged: PlacedMesh; pair: PairResult; candidate: 0 | 1 } {
   const map = topHeightMap(base.mesh);
   const basins = findBasins(map);
   const registered = files ? registeredFigure(files, base, map) : null;
+  let candidate: 0 | 1 = 0;
+  if (!registered && alternative) {
+    const touch = (mesh: IndexedMesh): number => {
+      const contact = contactFootprint(mesh.positions);
+      const trial = placeFigure(mesh, map, chooseSpot(map, basins, contact), contact);
+      return touchShare(trial.positions, contact.points, map);
+    };
+    if (touch(alternative.mesh) > touch(figure.mesh)) candidate = 1;
+  }
+  if (candidate === 1) figure = alternative!;
   const placing = registered?.mesh ?? figure.mesh;
   const contact = contactFootprint(placing.positions);
   let choice = chooseSpot(map, basins, contact);
@@ -919,6 +953,7 @@ export function placeOnBase(
   const { positions, placement } = placeFigure(placing, map, choice, contact, options);
   const mesh = mergeMeshes({ positions, indices: figure.mesh.indices }, base.mesh);
   return {
+    candidate,
     merged: { mesh, sizeMm: extentOf(mesh.positions), base: base.base },
     pair: {
       pairing,

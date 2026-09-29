@@ -23,6 +23,7 @@ import {
   placeFigure,
   placeOnBase,
   REGISTERED_TOLERANCE_MM,
+  touchShare,
   HEIGHTMAP_CELL_MM,
   RECESS_MIN_AREA_MM2,
   topHeightMap,
@@ -447,6 +448,28 @@ describe('the registration test', () => {
     expect(pair.placement).toMatchObject({ method: 'manual', spot: { kind: 'registered' } });
     // Moved onto the rim: dropped onto it.
     expect(pair.placement.offsetMm[2]).toBeCloseTo(heightMm, 5);
+  });
+});
+
+describe('two candidate up axes', () => {
+  it('keeps the one that rests on the base better', () => {
+    const base = placed(generateRecessBase());
+    const upright = weldVertices(generatePuddleFigure(12)).mesh;
+    const standing = orientAndPlace(upright, '+z', 0);
+    const onItsHead = orientAndPlace(upright, '-z', 0);
+    const pairing = guessRoles([
+      shapeOfFile(upright, baseOrientation(upright)),
+      shapeOfFile(upright, baseOrientation(upright)),
+    ]);
+    const baseMesh = { mesh: base, sizeMm: [32, 4, 32] as [number, number, number], base: null };
+    expect(placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing).candidate).toBe(1);
+    expect(placeOnBase(standing, baseMesh, pairing, {}, undefined, onItsHead).candidate).toBe(0);
+  });
+
+  it('counts the contact vertices within touching distance of the top', () => {
+    const map = topHeightMap(plate(10, 0.5, () => 2));
+    const positions = Float32Array.of(0, 2.1, 0, 1, 2.5, 1, 20, 2, 20);
+    expect(touchShare(positions, [0, 1, 2], map)).toBeCloseTo(1 / 3, 9);
   });
 });
 
