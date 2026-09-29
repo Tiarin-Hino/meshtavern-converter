@@ -7,7 +7,9 @@
   "flying/flying-02": {
     "size": "large",
     "note": "SRD wyvern is Large",
-    "up": "+z"
+    "up": "+y",
+    "upNote": "Was +z (2026-09-25); the PM stood it +y with its base file in the app on 2026-09-29: upright, wings up.",
+    "placement": "with up +y the flattest patch at the middle of the base is right: the PM moved it 2 mm (2026-09-29). The base file is refused by the 2 % detector (a lip 0.2 mm under the flat face); the PM placed it with a repaired copy."
   },
   "flying/flying-03": {
     "size": "tiny",
