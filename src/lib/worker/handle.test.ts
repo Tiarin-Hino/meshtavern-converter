@@ -4,6 +4,7 @@ import { meshBuffers } from '../pipeline/mesh';
 import { BAKE_STEPS, STEPS } from '../pipeline/run';
 import { encodeBinaryStl } from '../pipeline/stl';
 import { generatePuddleFigure, generateRecessBase } from '../../regression/shapes';
+import type { UpAnswer } from '../pipeline/ask';
 import { handleRequest } from './handle';
 import type { ConvertOptions, WorkerResponse } from './protocol';
 
@@ -143,4 +144,40 @@ describe('handleRequest', () => {
     if (swapped.response.type !== 'done') throw new Error('expected done');
     expect(swapped.response.result.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
   }, 60_000);
+});
+
+describe('handleRequest asking which way is up (#92)', () => {
+  const stl = (): ArrayBuffer => encodeBinaryStl(generateBumpySheet(4));
+
+  it('posts a question with the mesh transferred, and goes on when the answer arrives', async () => {
+    const posted: { response: WorkerResponse; transfer?: Transferable[] }[] = [];
+    const answer: UpAnswer = { orientation: { up: '+y' }, confirm: true };
+    await handleRequest(
+      { type: 'convert', id: 5, stl: stl(), options: { bake: 0, ask: {} } },
+      (response, transfer) => {
+        posted.push({ response, transfer });
+        if (response.type !== 'question') return;
+        // An answer for another job is ignored; this job's goes on.
+        void handleRequest(
+          { type: 'answer', id: 6, answer: { orientation: {}, confirm: true } },
+          () => {},
+        );
+        setTimeout(() => void handleRequest({ type: 'answer', id: 5, answer }, () => {}), 0);
+      },
+    );
+    const types = posted.map((p) => p.response.type);
+    expect(types).toEqual(['progress', 'progress', 'progress', 'question', ...types.slice(4)]);
+    const question = posted[3]!;
+    if (question.response.type !== 'question') throw new Error('expected a question');
+    expect(question.transfer).toEqual(meshBuffers(question.response.question.mesh!));
+    const last = posted.at(-1)!;
+    if (last.response.type !== 'done') throw new Error('expected done');
+    expect(last.response.result.orientation).toMatchObject({ up: '+y', method: 'manual' });
+    expect(last.response.result.stats.asked).toHaveLength(1);
+  });
+
+  it('asks nothing without `ask` in the options', async () => {
+    const posted = await collect(stl());
+    expect(posted.some((p) => p.response.type === 'question')).toBe(false);
+  });
 });

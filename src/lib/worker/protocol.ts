@@ -1,3 +1,4 @@
+import type { AskOptions, UpAnswer, UpQuestion } from '../pipeline/ask';
 import type { OrientationOptions } from '../pipeline/orient';
 import type { PairingOptions } from '../pipeline/pair';
 import type { PlacementOptions } from '../pipeline/place';
@@ -28,18 +29,25 @@ export interface ConvertOptions {
   pairing?: PairingOptions;
   /** For a pair: the user moved, turned, raised or lowered the figure, relative to the detection. */
   placement?: PlacementOptions;
+  /** For a pair: the user's axis or turn for the base file; left out, it stands on its underside. */
+  baseOrientation?: OrientationOptions;
+  /**
+   * Stop after the orient step and ask which way is up (#92): the worker posts a `question` and
+   * waits for an `answer`. Set by the client when the page gives it a callback, never by hand.
+   */
+  ask?: AskOptions;
 }
 
 /** Messages between the page and the conversion worker. Every job carries an id so replies can be matched. */
-export type WorkerRequest = {
-  type: 'convert';
-  id: number;
-  stl: ArrayBuffer;
-  options?: ConvertOptions;
-};
+export type WorkerRequest =
+  | { type: 'convert'; id: number; stl: ArrayBuffer; options?: ConvertOptions }
+  /** The answer to the question last asked by job `id`. */
+  | { type: 'answer'; id: number; answer: UpAnswer };
 
 export type WorkerResponse =
   | { type: 'progress'; id: number; progress: Progress }
+  /** The conversion waits until an `answer` with the same id arrives. The mesh's buffers are transferred. */
+  | { type: 'question'; id: number; question: UpQuestion }
   | { type: 'done'; id: number; result: ConversionResult }
   /** A file that did not become a mini: why, for the user, and what happened, for developers. */
   | { type: 'error'; id: number; code: ProblemCode; detail?: string };
