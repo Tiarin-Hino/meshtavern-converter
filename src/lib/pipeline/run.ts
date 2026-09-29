@@ -180,6 +180,10 @@ export interface PipelineOptions {
   placement?: PlacementOptions;
 }
 
+/** Whether the user chose anything about the orientation. */
+const choosesOrientation = (options: OrientationOptions): boolean =>
+  options.up !== undefined || options.rotation !== undefined || options.setDown === true;
+
 /**
  * Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node.
  * A file that cannot become a mini throws a `ConversionProblem` (see problems.ts).
@@ -281,6 +285,8 @@ export async function runPipeline(
           orientation: detection.orientation,
           base: null,
           pairing: null,
+          files: undefined,
+          baseOrientation: null,
         };
       }
       // The roles are guessed from each file standing the way a base would (design note §4.1).
@@ -294,11 +300,21 @@ export async function runPipeline(
       // The figure stands by the up detection, or as the user chose; the pass is not run again.
       const pass = standing[1 - pairing.baseFile]!.detection;
       const figureDetection = resolveOrientation(figureMesh, orientationOptions, pass);
+      const baseStanding = standing[pairing.baseFile]!;
       return {
         figure: placeAs(figureMesh, figureDetection),
         orientation: figureDetection.orientation,
-        base: placeOriented(baseMesh, standing[pairing.baseFile]!),
+        base: placeOriented(baseMesh, baseStanding),
         pairing,
+        // The registration test needs the files as read; a figure turned by the user skips it.
+        files: choosesOrientation(orientationOptions)
+          ? undefined
+          : {
+              figure: figureMesh,
+              base: baseMesh,
+              baseRotation: baseStanding.detection.orientation.rotation,
+            },
+        baseOrientation: baseStanding.detection.orientation,
       };
     },
     (o) =>
@@ -311,15 +327,19 @@ export async function runPipeline(
 
   let pair: PairResult | null = null;
   let toSize: PlacedMesh = oriented.figure;
+  let orientation = oriented.orientation;
   if (oriented.base && oriented.pairing) {
-    const { figure, base, pairing } = oriented;
+    const { figure, base, pairing, files } = oriented;
     const placedPair = run(
       'place',
-      () => placeOnBase(figure, base, pairing, placementOptions),
+      () => placeOnBase(figure, base, pairing, placementOptions, files),
       (p) => fileBytes + meshBytes(figure.mesh) + meshBytes(base.mesh) + meshBytes(p.merged.mesh),
     );
     pair = placedPair.pair;
     toSize = placedPair.merged;
+    // A registered figure stands the way its base does.
+    if (pair.placement.spot.kind === 'registered' && oriented.baseOrientation)
+      orientation = oriented.baseOrientation;
   }
 
   const placed = run(
@@ -413,7 +433,7 @@ export async function runPipeline(
     lods,
     baked,
     sizing: placed.sizing,
-    orientation: oriented.orientation,
+    orientation,
     pair,
     stats: {
       format,
@@ -425,9 +445,9 @@ export async function runPipeline(
       invalidTriangles,
       sizeMm: placed.sizeMm,
       sizing: placed.sizing,
-      up: oriented.orientation.up,
-      upMethod: oriented.orientation.method,
-      orientation: oriented.orientation,
+      up: orientation.up,
+      upMethod: orientation.method,
+      orientation,
       lods: lods.map((lod) => ({
         name: lod.name,
         decidedBy: lod.decidedBy,

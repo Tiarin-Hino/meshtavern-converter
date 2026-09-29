@@ -324,4 +324,22 @@ describe('runPipeline with a base file (#70)', () => {
       runPipeline(figure(), { bake: 0, secondStl: figure(), memoryBudgetBytes: budget }),
     ).rejects.toMatchObject({ code: 'too-large' });
   }, 60_000);
+
+  it('keeps a registered pair where the files put it, standing the way its base does', async () => {
+    // The figure raised onto the recess floor in its own file: the two files share one frame.
+    const soup = generatePuddleFigure(12);
+    for (let i = 2; i < soup.length; i += 3) soup[i] = soup[i]! + 3;
+    const registered = await runPipeline(encodeBinaryStl(soup), { bake: 0, secondStl: base() });
+    expect(registered.pair!.placement.spot.kind).toBe('registered');
+    expect(registered.pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(registered.orientation).toBe(registered.stats.orientation);
+    expect(registered.orientation).toMatchObject({ up: '+z', method: 'base' });
+    // The user's axis for the figure is final: no registration test.
+    const chosen = await runPipeline(encodeBinaryStl(soup), {
+      bake: 0,
+      secondStl: base(),
+      orientation: { up: '+z' },
+    });
+    expect(chosen.pair!.placement.spot.kind).not.toBe('registered');
+  }, 60_000);
 });

@@ -6,11 +6,13 @@ import {
   generatePuddleFigure,
   generateRecessBase,
   generateTabFigure,
+  toYUp,
   RECESS_BASE,
 } from '../../regression/shapes';
 import { addRoundBase } from './base';
 import { weldVertices, type IndexedMesh } from './mesh';
-import { baseOrientation, placeOriented } from './pair';
+import { baseOrientation, guessRoles, placeOriented, shapeOfFile } from './pair';
+import { resolveOrientation, orientAndPlace, coverageFor } from './orient';
 import {
   chooseSpot,
   contactFootprint,
@@ -19,6 +21,8 @@ import {
   flattestPatch,
   mergeMeshes,
   placeFigure,
+  placeOnBase,
+  REGISTERED_TOLERANCE_MM,
   HEIGHTMAP_CELL_MM,
   RECESS_MIN_AREA_MM2,
   topHeightMap,
@@ -365,6 +369,84 @@ describe('placeFigure', () => {
     const sunk = set(generatePuddleFigure(12), generateRecessBase(), { liftMm: -0.5 });
     expect(sunk.placement.offsetMm[2]).toBeCloseTo(lift - 0.5, 6);
     expect(sunk.placement.method).toBe('manual');
+  });
+});
+
+/** A Z-up soup moved by (dx, 0, dz) in the file. */
+function shifted(soup: Float32Array, dx: number, dz: number): Float32Array {
+  const out = new Float32Array(soup);
+  for (let i = 0; i < out.length; i += 3) {
+    out[i] = out[i]! + dx;
+    out[i + 2] = out[i + 2]! + dz;
+  }
+  return out;
+}
+
+/** A figure and base soup through the pair path's orient and place, with the registration test. */
+function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {}) {
+  const figureMesh = weldVertices(figureSoup).mesh;
+  const baseMesh = weldVertices(baseSoup).mesh;
+  const standing = [figureMesh, baseMesh].map((mesh) => baseOrientation(mesh));
+  const pairing = guessRoles([
+    shapeOfFile(figureMesh, standing[0]!),
+    shapeOfFile(baseMesh, standing[1]!),
+  ]);
+  const detection = resolveOrientation(figureMesh, {});
+  const figure = orientAndPlace(
+    figureMesh,
+    detection.orientation.rotation,
+    coverageFor(detection, detection.orientation.up),
+  );
+  const base = placeOriented(baseMesh, standing[1]!);
+  const files = {
+    figure: figureMesh,
+    base: baseMesh,
+    baseRotation: standing[1]!.detection.orientation.rotation,
+  };
+  return placeOnBase(figure, base, pairing, options, files);
+}
+
+describe('the registration test', () => {
+  const { heightMm, recessDepthMm } = RECESS_BASE;
+  const floor = heightMm - recessDepthMm;
+
+  it('keeps a figure the files put on its base', () => {
+    const { pair } = placePair(shifted(generatePuddleFigure(12), 0, floor), generateRecessBase());
+    expect(pair.placement.spot.kind).toBe('registered');
+    expect(pair.placement.offsetMm).toEqual([0, 0, floor]);
+    expect(pair.placement.method).toBe('detected');
+  });
+
+  it('keeps it where the files put it, not in the recess', () => {
+    // On the rim, 9 mm off centre: the seat rule would move it into the recess.
+    const { pair } = placePair(
+      shifted(generatePuddleFigure(12), 9, heightMm),
+      generateRecessBase(),
+    );
+    expect(pair.placement.spot.kind).toBe('registered');
+    expect(pair.placement.offsetMm[0]).toBeCloseTo(9, 5);
+    expect(pair.placement.offsetMm[2]).toBeCloseTo(heightMm, 5);
+  });
+
+  it('works on files exported Y-up, and takes an unregistered pair to the heuristic', () => {
+    const yUp = placePair(
+      toYUp(shifted(generatePuddleFigure(12), 0, floor)),
+      toYUp(generateRecessBase()),
+    );
+    expect(yUp.pair.placement.spot.kind).toBe('registered');
+    // Each file centred on itself: the figure's feet are at the base's floor, 3 mm too low.
+    const apart = placePair(generatePuddleFigure(12), generateRecessBase());
+    expect(apart.pair.placement.spot.kind).toBe('recess');
+    expect(REGISTERED_TOLERANCE_MM).toBe(0.3);
+  });
+
+  it('drops a registered figure again once the user moves it', () => {
+    const { pair } = placePair(shifted(generatePuddleFigure(12), 0, floor), generateRecessBase(), {
+      moveMm: [9, 0],
+    });
+    expect(pair.placement).toMatchObject({ method: 'manual', spot: { kind: 'registered' } });
+    // Moved onto the rim: dropped onto it.
+    expect(pair.placement.offsetMm[2]).toBeCloseTo(heightMm, 5);
   });
 });
 

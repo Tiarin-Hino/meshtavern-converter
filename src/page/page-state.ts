@@ -143,11 +143,13 @@ export function describePlacement(placement: Placement, scale = 1): string {
   const size =
     a - b <= a * ROUND_SPOT ? millimetres(a) : `${millimetres(a).slice(0, -3)} × ${millimetres(b)}`;
   const where =
-    spot.kind === 'flat'
-      ? 'Set on the flattest patch of the top'
-      : spot.kind === 'hole'
-        ? `Set in the ${size} ${a - b <= a * ROUND_SPOT ? 'hole' : 'slot'}`
-        : `Set in the ${size} recess`;
+    spot.kind === 'registered'
+      ? 'Set where the files put it'
+      : spot.kind === 'flat'
+        ? 'Set on the flattest patch of the top'
+        : spot.kind === 'hole'
+          ? `Set in the ${size} ${a - b <= a * ROUND_SPOT ? 'hole' : 'slot'}`
+          : `Set in the ${size} recess`;
   return placement.method === 'manual' ? `${where} · moved by hand` : where;
 }
 

@@ -8,7 +8,8 @@
  * the same place (the regression pair depends on it).
  */
 import type { IndexedMesh } from './mesh';
-import type { PlacedMesh } from './orient';
+import { turnPositions, type PlacedMesh } from './orient';
+import type { Rotation } from './rotation';
 import type { Pairing } from './pair';
 import { restingPoints } from './stance';
 
@@ -187,7 +188,8 @@ export const FLAT_PATCH_TIE_MM = 0.2;
 /** The window searched for the flattest patch is at least this many cells a side. */
 export const FLAT_PATCH_MIN_CELLS = 3;
 
-export type SpotKind = 'hole' | 'recess' | 'flat';
+/** hole and recess: a seat won. flat: the flattest patch. registered: the files' own placement. */
+export type SpotKind = 'hole' | 'recess' | 'flat' | 'registered';
 
 export interface Spot {
   kind: SpotKind;
@@ -443,6 +445,8 @@ export interface Choice {
   basin: Basin | null;
   /** Every basin considered, the chosen one first, then by fit. */
   candidates: Spot[];
+  /** A registered pair: the height the files give the figure, kept unless the user moves or turns it. */
+  keepLiftMm?: number;
 }
 
 /**
@@ -772,7 +776,9 @@ export function placeFigure(
     positions[i + 2] = tz + s * dx + c * dz;
   }
 
-  const drop = dropHeight(positions, map);
+  // A registered figure keeps the files' height; once moved or turned it is dropped again.
+  const kept = choice.keepLiftMm !== undefined && move[0] === 0 && move[1] === 0 && turnDeg === 0;
+  const drop = kept ? choice.keepLiftMm! : dropHeight(positions, map);
   const lift = drop + (options.liftMm ?? 0);
   if (lift !== 0) for (let i = 1; i < positions.length; i += 3) positions[i] = positions[i]! + lift;
 
@@ -830,6 +836,50 @@ export function dropHeight(positions: Float32Array, map: HeightMap): number {
 }
 
 /**
+ * A figure within this distance of resting on the base where its file puts it, in the base's
+ * frame, was exported registered with it. The build's survey: 13 of 40 library pairs that stand
+ * the same way up (design note §4.4). _(proposal)_
+ */
+export const REGISTERED_TOLERANCE_MM = 0.3;
+
+/** The two files as welded, and how the base was turned: what the registration test reads. */
+export interface PairFiles {
+  figure: IndexedMesh;
+  base: IndexedMesh;
+  baseRotation: Rotation;
+}
+
+/**
+ * The registration test (design note §4.4): the figure turned by the base's rotation and shifted
+ * the way the base was placed, then dropped straight down from its own x and z. When the drop
+ * lands within `REGISTERED_TOLERANCE_MM` of the height the files give it, the files were
+ * exported with the figure on the base, and that is the placement. Returns the figure standing
+ * on y = 0 at the files' x and z, and its height in the files; null otherwise.
+ */
+export function registeredFigure(
+  files: PairFiles,
+  base: PlacedMesh,
+  map: HeightMap,
+): { mesh: IndexedMesh; heightMm: number } | null {
+  if (base.mesh.positions.length < 3 || files.figure.positions.length < 3) return null;
+  // The shift the base was placed with: its first vertex turned, against where it ended up.
+  const first = turnPositions(files.base.positions.subarray(0, 3), files.baseRotation);
+  const shift = [0, 1, 2].map((k) => first[k]! - base.mesh.positions[k]!);
+  const positions = turnPositions(files.figure.positions, files.baseRotation);
+  let low = Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] = positions[i]! - shift[0]!;
+    positions[i + 1] = positions[i + 1]! - shift[1]!;
+    positions[i + 2] = positions[i + 2]! - shift[2]!;
+    if (positions[i + 1]! < low) low = positions[i + 1]!;
+  }
+  for (let i = 1; i < positions.length; i += 3) positions[i] = positions[i]! - low;
+  const drop = dropHeight(positions, map);
+  if (!(drop > 0) || Math.abs(low - drop) > REGISTERED_TOLERANCE_MM) return null;
+  return { mesh: { positions, indices: files.figure.indices }, heightMm: low };
+}
+
+/**
  * The place step (design note §4): the base's top, its basins, the figure's contact
  * footprint, the spot, the figure set on it, and the two merged, the figure first. The
  * merged mesh keeps the base's origin, so it stands centred on its base like a single file,
@@ -837,17 +887,36 @@ export function dropHeight(positions: Float32Array, map: HeightMap): number {
  *
  * @param figure The figure after its own `orientAndPlace`.
  * @param base The base file after its own `orientAndPlace`.
+ * @param files The files as welded, for the registration test; left out, it is not run (the
+ *   user chose the figure's orientation).
  */
 export function placeOnBase(
   figure: PlacedMesh,
   base: PlacedMesh,
   pairing: Pairing,
   options: PlacementOptions = {},
+  files?: PairFiles,
 ): { merged: PlacedMesh; pair: PairResult } {
   const map = topHeightMap(base.mesh);
-  const contact = contactFootprint(figure.mesh.positions);
-  const choice = chooseSpot(map, findBasins(map), contact);
-  const { positions, placement } = placeFigure(figure.mesh, map, choice, contact, options);
+  const basins = findBasins(map);
+  const registered = files ? registeredFigure(files, base, map) : null;
+  const placing = registered?.mesh ?? figure.mesh;
+  const contact = contactFootprint(placing.positions);
+  let choice = chooseSpot(map, basins, contact);
+  if (registered)
+    choice = {
+      spot: {
+        kind: 'registered',
+        centre: contact.centre,
+        sizeMm: contact.sizeMm,
+        depthMm: 0,
+        fit: 0,
+      },
+      basin: null,
+      candidates: choice.candidates,
+      keepLiftMm: registered.heightMm,
+    };
+  const { positions, placement } = placeFigure(placing, map, choice, contact, options);
   const mesh = mergeMeshes({ positions, indices: figure.mesh.indices }, base.mesh);
   return {
     merged: { mesh, sizeMm: extentOf(mesh.positions), base: base.base },

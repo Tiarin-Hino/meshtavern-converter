@@ -426,6 +426,35 @@ export function quarterTurnAxis(rotation: Rotation): UpAxis | null {
 }
 
 /**
+ * The positions of a mesh turned by a rotation, nothing else: no shift to the floor or the
+ * base. A quarter turn swaps and negates coordinates exactly, as `orientAndPlace` does.
+ */
+export function turnPositions(source: Float32Array, rotation: Rotation): Float32Array {
+  const axis = quarterTurnAxis(rotation);
+  const positions = new Float32Array(source.length);
+  if (axis) {
+    const rotate = TO_Y_UP[axis];
+    for (let i = 0; i < positions.length; i += 3) {
+      const turned = rotate(source[i]!, source[i + 1]!, source[i + 2]!);
+      positions[i] = turned[0];
+      positions[i + 1] = turned[1];
+      positions[i + 2] = turned[2];
+    }
+    return positions;
+  }
+  const m = toMatrix(rotation);
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = source[i]!;
+    const y = source[i + 1]!;
+    const z = source[i + 2]!;
+    positions[i] = m[0]! * x + m[1]! * y + m[2]! * z;
+    positions[i + 1] = m[3]! * x + m[4]! * y + m[5]! * z;
+    positions[i + 2] = m[6]! * x + m[7]! * y + m[8]! * z;
+  }
+  return positions;
+}
+
+/**
  * Converts a mesh to the scene convention: Y-up, standing on y = 0, with the origin at
  * the centre of its base in x and z (the centre of its bounding box when it has no base),
  * so the table can centre it in its footprint. Units are never changed. Returns a new mesh;
