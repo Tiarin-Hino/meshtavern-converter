@@ -145,11 +145,13 @@ export function describePlacement(placement: Placement, scale = 1): string {
   const where =
     spot.kind === 'registered'
       ? 'Set where the files put it'
-      : spot.kind === 'flat'
-        ? 'Set on the flattest patch of the top'
-        : spot.kind === 'hole'
-          ? `Set in the ${size} ${a - b <= a * ROUND_SPOT ? 'hole' : 'slot'}`
-          : `Set in the ${size} recess`;
+      : spot.centred
+        ? 'Set over the middle of the base'
+        : spot.kind === 'flat'
+          ? 'Set on the flattest patch of the top'
+          : spot.kind === 'hole'
+            ? `Set in the ${size} ${a - b <= a * ROUND_SPOT ? 'hole' : 'slot'}`
+            : `Set in the ${size} recess`;
   return placement.method === 'manual' ? `${where} · moved by hand` : where;
 }
 

@@ -179,8 +179,19 @@ export const HOLE_MIN_DEPTH_MM = 2;
  */
 export const CONTACT_BAND_MIN_MM = 0.5;
 export const CONTACT_BAND_SHARE = 0.03;
-/** The best basin is the spot when it fits at least this well: half the size in each direction. _(proposal)_ */
-export const RECESS_MIN_FIT = 0.25;
+/**
+ * A basin is a seat for this figure when it fits at least this well (`fitOf`: half the size in
+ * each direction)... The note's §4.3 proposed 0.5; its §4.4 keeps the build's 0.25, and the
+ * corpus agrees: at 0.5 `humanoid-03` leaves the spot the sheets called right (PR #89). On a
+ * sculpted top the flood also finds the gaps between cobbles, hence the second test. _(proposal)_
+ */
+export const SEAT_MIN_FIT = 0.25;
+/**
+ * ...and fills at least this share of its bounding box: a seat is compact, a crevice between
+ * cobbles is thin and winding. On the pairs looked at, seats score 0.6–0.87, crevices at most
+ * 0.36 (design note §12). _(proposal)_
+ */
+export const SEAT_BBOX_FILL = 0.4;
 /** Among basins within this fit of the best, the deeper one wins. _(proposal)_ */
 export const FIT_TIE = 0.05;
 /** Among patches within this height range of the flattest, the one nearest the centre wins. _(proposal)_ */
@@ -201,6 +212,8 @@ export interface Spot {
   depthMm: number;
   /** How well the figure's contact footprint fits the spot, 0–1 (§4.4); 0 for a flat patch. */
   fit: number;
+  /** The centre guard moved the figure's box over the middle of the base (§4.4). */
+  centred?: boolean;
 }
 
 /** A basin with the cells it is made of, which the alignment of a slot needs (§4.5). */
@@ -208,6 +221,8 @@ export interface Basin {
   spot: Spot;
   /** Indices into `HeightMap.top`. */
   cells: Uint32Array;
+  /** Its cells over the cells of its bounding box: compact seats fill much of it (§4.3). */
+  bboxFill: number;
 }
 
 /**
@@ -313,6 +328,7 @@ export function findBasins(map: HeightMap): Basin[] {
         fit: 0,
       },
       cells: Uint32Array.from(cells),
+      bboxFill: cells.length / ((i1 - i0 + 1) * (j1 - j0 + 1)),
     });
   }
   return basins;
@@ -450,9 +466,10 @@ export interface Choice {
 }
 
 /**
- * Where the figure goes (design note §4.4): the basin that fits its contact footprint best,
- * when it fits at least `RECESS_MIN_FIT`, the deeper among those within `FIT_TIE` of the
- * best; otherwise the flattest patch of the top the size of the footprint.
+ * Where the figure goes (design note §4.3, §4.4): the seat that fits its contact footprint
+ * best (a basin with a fit of at least `SEAT_MIN_FIT` that fills `SEAT_BBOX_FILL` of its
+ * bounding box), the deeper among those within `FIT_TIE` of the best; otherwise the flattest
+ * patch of the top the size of the footprint. Every basin stays in `candidates` with its fit.
  */
 export function chooseSpot(map: HeightMap, basins: Basin[], contact: Contact): Choice {
   const byFit = basins
@@ -462,10 +479,13 @@ export function chooseSpot(map: HeightMap, basins: Basin[], contact: Contact): C
     }))
     .sort((a, b) => b.basin.spot.fit - a.basin.spot.fit || a.order - b.order)
     .map(({ basin }) => basin);
-  const best = byFit[0]?.spot.fit ?? 0;
-  if (best >= RECESS_MIN_FIT) {
-    let chosen = byFit[0]!;
-    for (const basin of byFit) {
+  const seats = byFit.filter(
+    (basin) => basin.spot.fit >= SEAT_MIN_FIT && basin.bboxFill >= SEAT_BBOX_FILL,
+  );
+  const best = seats[0]?.spot.fit ?? 0;
+  if (seats.length > 0) {
+    let chosen = seats[0]!;
+    for (const basin of seats) {
       if (basin.spot.fit < best - FIT_TIE) break;
       if (basin.spot.depthMm > chosen.spot.depthMm) chosen = basin;
     }
@@ -879,6 +899,70 @@ export function registeredFigure(
   return { mesh: { positions, indices: files.figure.indices }, heightMm: low };
 }
 
+/**
+ * A figure belongs near the middle of its base: when the seat or the flattest patch would put
+ * its box centre further than this share of the base's width from the base's centre, the box
+ * is centred on the base instead and dropped. On every corpus pair the sheets called right the
+ * built rule stays within 25 %, on every one called wrong it is 42–129 % away (design note
+ * §4.4, from the PM's hand placements). _(proposal)_
+ */
+export const CENTRE_MAX_SHARE = 0.3;
+/** A contact footprint wider than this share of the base is extremities (wing tips): centred at once. _(proposal)_ */
+export const WIDE_CONTACT_SHARE = 0.8;
+
+/** The centre of the x/z bounding box of a mesh's vertices. */
+function boxCentre(positions: Float32Array): [number, number] {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i]!;
+    const z = positions[i + 2]!;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  return [(minX + maxX) / 2, (minZ + maxZ) / 2];
+}
+
+/**
+ * The centre guard (design note §4.4): the choice as it is, or, when the figure's box centre
+ * would land further than `CENTRE_MAX_SHARE` of the base's width from the base's centre, or its
+ * contact is wider than `WIDE_CONTACT_SHARE` of the base, the figure's box over the base's
+ * centre (spot `flat`, `centred`, sized like the base).
+ *
+ * @param baseSizeMm The base's footprint, x and z: its measured outline, or its bounding box.
+ */
+export function guardCentre(
+  figure: IndexedMesh,
+  map: HeightMap,
+  choice: Choice,
+  contact: Contact,
+  baseSizeMm: [number, number],
+): Choice {
+  const width = Math.max(baseSizeMm[0], baseSizeMm[1]);
+  const figureCentre = boxCentre(figure.positions);
+  const centred = (): Choice => ({
+    // The contact centre goes where it takes the box centre onto the base's centre.
+    spot: {
+      kind: 'flat',
+      centre: [contact.centre[0] - figureCentre[0], contact.centre[1] - figureCentre[1]],
+      sizeMm: baseSizeMm,
+      depthMm: 0,
+      fit: 0,
+      centred: true,
+    },
+    basin: null,
+    candidates: choice.candidates,
+  });
+  if (Math.max(contact.sizeMm[0], contact.sizeMm[1]) > WIDE_CONTACT_SHARE * width) return centred();
+  const trial = placeFigure(figure, map, choice, contact);
+  const [x, z] = boxCentre(trial.positions);
+  return Math.sqrt(x * x + z * z) > CENTRE_MAX_SHARE * width ? centred() : choice;
+}
+
 /** A contact vertex within this height of the base's top touches it. */
 export const TOUCH_MM = 0.3;
 
@@ -937,6 +1021,12 @@ export function placeOnBase(
   const placing = registered?.mesh ?? figure.mesh;
   const contact = contactFootprint(placing.positions);
   let choice = chooseSpot(map, basins, contact);
+  if (!registered) {
+    const size: [number, number] = base.base
+      ? base.base.footprintMm
+      : [base.sizeMm[0], base.sizeMm[2]];
+    choice = guardCentre(placing, map, choice, contact, size);
+  }
   if (registered)
     choice = {
       spot: {

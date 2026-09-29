@@ -149,6 +149,9 @@ describe('the base section', () => {
       'Set in the 3.2 mm hole',
     );
     expect(describePlacement(placement({ kind: 'registered' }))).toBe('Set where the files put it');
+    expect(describePlacement(placement({ kind: 'flat', centred: true }))).toBe(
+      'Set over the middle of the base',
+    );
     expect(describePlacement(placement({}, 'manual'))).toBe(
       'Set in the 14 × 10 mm recess · moved by hand',
     );

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addBlob,
   generateFigure,
   generatePegFigure,
   generatePlate,
@@ -21,12 +22,16 @@ import {
   flattestPatch,
   mergeMeshes,
   placeFigure,
+  CENTRE_MAX_SHARE,
+  guardCentre,
   placeOnBase,
   REGISTERED_TOLERANCE_MM,
+  SEAT_BBOX_FILL,
   touchShare,
   HEIGHTMAP_CELL_MM,
   RECESS_MIN_AREA_MM2,
   topHeightMap,
+  type Choice,
   type HeightMap,
 } from './place';
 
@@ -470,6 +475,62 @@ describe('two candidate up axes', () => {
     const map = topHeightMap(plate(10, 0.5, () => 2));
     const positions = Float32Array.of(0, 2.1, 0, 1, 2.5, 1, 20, 2, 20);
     expect(touchShare(positions, [0, 1, 2], map)).toBeCloseTo(1 / 3, 9);
+  });
+});
+
+describe('seats and the centre guard', () => {
+  it('does not take a winding crevice for a seat, however well its box fits', () => {
+    // A diagonal groove 0.5 mm deep: its box is 8 × 8 mm, but it fills a quarter of it.
+    const grooved = plate(30, 0.25, (x, z) => (Math.abs(x - z) < 1 && Math.abs(x) < 4 ? 2.5 : 3));
+    const map = topHeightMap(grooved);
+    const basins = findBasins(map);
+    expect(basins).toHaveLength(1);
+    expect(basins[0]!.bboxFill).toBeLessThan(SEAT_BBOX_FILL);
+    const contact = {
+      centre: [0, 0] as [number, number],
+      sizeMm: [7, 7] as [number, number],
+      points: [],
+    };
+    const choice = chooseSpot(map, basins, contact);
+    expect(choice.candidates[0]!.fit).toBeGreaterThan(0.5);
+    expect(choice.spot.kind).toBe('flat');
+  });
+
+  it('centres a figure the chosen spot would put near the rim', () => {
+    const map = topHeightMap(plate(30, 0.5, () => 3));
+    const figure = placed(generatePuddleFigure(12));
+    const contact = contactFootprint(figure.positions);
+    const nearRim: Choice = {
+      spot: { kind: 'recess', centre: [11, 0], sizeMm: [12, 12], depthMm: 1, fit: 1 },
+      basin: null,
+      candidates: [],
+    };
+    // 11 mm off a 30 mm base is 37 %: over the 30 % the guard allows.
+    expect(11 / 30).toBeGreaterThan(CENTRE_MAX_SHARE);
+    const guarded = guardCentre(figure, map, nearRim, contact, [30, 30]);
+    expect(guarded.spot).toMatchObject({ kind: 'flat', centred: true, sizeMm: [30, 30] });
+    const { positions } = placeFigure(figure, map, guarded, contact);
+    const xs = [];
+    for (let i = 0; i < positions.length; i += 3) xs.push(positions[i]!);
+    expect(Math.abs(Math.min(...xs) + Math.max(...xs)) / 2).toBeLessThan(1e-4);
+    // Within the allowance, the choice stands.
+    const nearCentre = {
+      ...nearRim,
+      spot: { ...nearRim.spot, centre: [5, 0] as [number, number] },
+    };
+    expect(guardCentre(figure, map, nearCentre, contact, [30, 30])).toBe(nearCentre);
+  });
+
+  it('centres a figure standing on its extremities over the middle of the base', () => {
+    // Two wing tips 40 mm apart under a body: wider than 80 % of a 32 mm base.
+    const soup: number[] = [];
+    addBlob(soup, [0, 0, 14], [6, 6, 8], 16, 0);
+    for (const x of [-20, 20]) addBlob(soup, [x, 0, 1.5], [1.5, 1.5, 1.5], 8, 0);
+    addBlob(soup, [-10, 0, 8], [11, 1, 1], 12, 0);
+    addBlob(soup, [10, 0, 8], [11, 1, 1], 12, 0);
+    const { pair } = placePair(new Float32Array(soup), generateRecessBase());
+    expect(pair.placement.spot).toMatchObject({ kind: 'flat', centred: true });
+    expect(pair.placement.contactMm[0]).toBeGreaterThan(0.8 * 32);
   });
 });
 
