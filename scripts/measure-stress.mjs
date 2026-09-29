@@ -41,7 +41,7 @@ try {
       args: uncapped ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : [],
     });
     const page = await browser.newPage({ viewport: { width: 1920, height: 1000 } });
-    await page.goto(`http://localhost:${PORT}/?bake=off`);
+    await page.goto(`http://localhost:${PORT}/?bake=off&ask=off`);
     await page.waitForFunction(() => window.__mt?.state.ready === true);
     // The panel and the level chips lie over the canvas: hidden, so the pictures show the minis alone.
     await page.addStyleTag({ content: '#panel, #levels { display: none }' });

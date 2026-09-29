@@ -8,6 +8,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { asDetected, convertAnswering } from './lib/answer-up.mjs';
 
 const PORT = 4181;
 const MB = 1024 ** 2;
@@ -68,11 +69,8 @@ try {
       await page.goto(`http://localhost:${PORT}/`);
       await page.waitForFunction(() => window.__mt?.state.ready === true);
       await page.setInputFiles('#file', file);
-      await page.waitForFunction(
-        () => (window.__mt.state.stats || window.__mt.state.error) && !window.__mt.state.busy,
-        null,
-        { timeout: 600_000 },
-      );
+      // Through the question after the orient step (#92), confirmed as detected: the path people take.
+      await convertAnswering(page, asDetected, 600_000);
       const { stats, errorCode } = await page.evaluate(() => window.__mt.state);
       const measured = peaks(profile);
       const peakOf = (type) =>

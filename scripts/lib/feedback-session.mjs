@@ -5,6 +5,7 @@
 import { Buffer } from 'node:buffer';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { asDetected, convertAnswering } from './answer-up.mjs';
 
 /** A pair that does not finish converting within this is recorded as skipped. */
 export const FEEDBACK_TIMEOUT_MS = 600_000;
@@ -91,14 +92,48 @@ export const recordPath = (outDir, key) =>
   join(outDir, `${key.replace(/[^A-Za-z0-9/_-]+/g, '_')}.json`);
 
 /**
+ * The answers to a pair's questions after the orient step (#92) from its own `up`, `rotation`
+ * and `baseUp`; a proposal that already stands that way is confirmed as it is.
+ */
+export function pickFromPair(pair) {
+  return (question) => {
+    if (question.role === 'base')
+      return pair.baseUp && pair.baseUp !== question.orientation.up ? { up: pair.baseUp } : {};
+    if (pair.rotation) return { rotation: pair.rotation };
+    return pair.up && pair.up !== question.orientation.up ? { up: pair.up } : {};
+  };
+}
+
+/**
+ * Waits for the conversion to end while the PM answers the questions on the page (#92); the
+ * overlay says so while one is open.
+ */
+async function answeredByThePm(page) {
+  await page.waitForFunction(
+    () => {
+      const { question, stats, error, busy } = window.__mt.state;
+      const overlay = document.querySelector('#feedback-overlay');
+      if (overlay)
+        overlay.textContent = question ? 'answer the question on the page' : 'converting…';
+      return (stats || error) && !busy;
+    },
+    null,
+    { timeout: FEEDBACK_TIMEOUT_MS, polling: 250 },
+  );
+}
+
+/**
  * Converts one pair, waits for the verdict, writes the record and its sheet. Returns the verdict,
  * or 'end' when the PM pressed Escape (nothing is written then).
  *
- * @param pair `{ key, figure, base }`: paths to the two files.
- * @param session `{ index, total, commit, outDir, browser, nextVerdict }`.
+ * @param pair `{ key, figure, base }`: paths to the two files; for `up: 'index'` also the
+ *   figure's `up` or `rotation` and the base's `baseUp`.
+ * @param session `{ index, total, commit, outDir, browser, nextVerdict, up }`. `up` is how the
+ *   questions after the orient step are answered: `ask` (the default: the PM answers on the
+ *   page), `detected`, or `index` (the pair's own).
  */
 export async function reviewPair(page, pair, session) {
-  const { index, total, commit, outDir, browser, nextVerdict } = session;
+  const { index, total, commit, outDir, browser, nextVerdict, up = 'ask' } = session;
   const base = {
     key: pair.key,
     figureFile: pair.figure,
@@ -118,11 +153,13 @@ export async function reviewPair(page, pair, session) {
   });
   await page.setInputFiles('#file', [pair.figure, pair.base]);
   try {
-    await page.waitForFunction(
-      () => (window.__mt.state.stats || window.__mt.state.error) && !window.__mt.state.busy,
-      null,
-      { timeout: FEEDBACK_TIMEOUT_MS },
-    );
+    if (up === 'ask') await answeredByThePm(page);
+    else
+      await convertAnswering(
+        page,
+        up === 'index' ? pickFromPair(pair) : asDetected,
+        FEEDBACK_TIMEOUT_MS,
+      );
   } catch {
     write({ ...base, verdict: 'skipped', note: 'timeout' });
     await page.reload();
@@ -159,6 +196,9 @@ export async function reviewPair(page, pair, session) {
     const { stats, pair: pending } = window.__mt.state;
     return {
       orientation: stats?.orientation ?? null,
+      // How the base file stands and what was confirmed at the questions (#92).
+      baseOrientation: stats?.pair?.baseOrientation ?? null,
+      choices: stats?.choices ?? null,
       pairing: stats?.pair
         ? { baseFile: stats.pair.pairing.baseFile, method: stats.pair.pairing.method }
         : null,
@@ -181,6 +221,8 @@ export async function reviewPair(page, pair, session) {
     ...base,
     verdict,
     orientation: now.orientation,
+    baseOrientation: now.baseOrientation,
+    choices: now.choices,
     pairing: now.pairing,
     detected,
     placed: {

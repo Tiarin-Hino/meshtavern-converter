@@ -8,7 +8,10 @@
 //   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels
 // Sort the corpus into folders named after the kind of mini (see KINDS); files directly in
 // corpus/ count as "unsorted".
-// Usage: npm run corpus -- [--no-bake] [--options "?ktx=1"] [--out <folder under out/>]
+// Every file stops at the question after the orient step (#92), which is answered as detected,
+// or with --up index as scripts/corpus-index.json says (`up`, `rotation`, `baseUp`); the time to
+// it is measured. --options "?ask=off" converts without the question, as before #92.
+// Usage: npm run corpus -- [--no-bake] [--up detected|index] [--options "?ktx=1"] [--out <folder under out/>]
 // Nothing from corpus/ or out/ is ever committed.
 import { execSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -16,6 +19,7 @@ import { cpus, totalmem } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { chromium } from '@playwright/test';
 import { createServer, runnerImport } from 'vite';
+import { asDetected, convertAnswering } from './lib/answer-up.mjs';
 import { baseFileFor, CORPUS, corpusFiles } from './lib/corpus-files.mjs';
 import { loadRecords, scoreAll, scoreReport } from './lib/placements.mjs';
 
@@ -32,6 +36,12 @@ const KINDS = ['humanoid', 'large-creature', 'quadruped', 'flying', 'mounted', '
 const CORPUS_GOAL = [20, 30];
 /** The spec allows the largest mini three minutes on the reference laptop; leave room above that. */
 const CONVERSION_TIMEOUT_MS = 600_000;
+/**
+ * Time from picking a file to its question on screen, on the reference laptop: the issue's
+ * numbers (#92, design note §8). _(proposal)_ Pairs are reported, not held to it (PM decision).
+ */
+const QUESTION_BUDGET_MS = 3_000; // an ordinary mini: one figure on a base of up to 32 mm
+const QUESTION_BUDGET_LARGEST_MS = 15_000; // the largest corpus file
 const VIEWS = [
   { name: 'whole', azimuth: 25, elevation: 12, zoom: 1 },
   { name: 'close-up', azimuth: 25, elevation: 8, zoom: 2.6 },
@@ -50,6 +60,26 @@ const bake = !args.includes('--no-bake');
 const extra = new URLSearchParams(flag('--options') ?? '');
 if (!bake) extra.set('bake', 'off');
 const address = `http://localhost:${PORT}/?${extra}`;
+/** How the questions are answered: as detected, or as the index says. */
+const up = flag('--up') ?? 'detected';
+if (!['detected', 'index'].includes(up)) throw new Error(`--up ${up}: use detected or index`);
+const expected = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
+
+/**
+ * What a mini's questions are answered with (#92): with --up index, the figure's the index's
+ * `rotation` or `up`, the base's its `baseUp`; a proposal that already stands that way is
+ * confirmed as it is, as a person would, so a pair keeps its registration test.
+ */
+function pickFor(key) {
+  if (up === 'detected') return asDetected;
+  const entry = expected[key] ?? {};
+  return (question) => {
+    if (question.role === 'base')
+      return entry.baseUp && entry.baseUp !== question.orientation.up ? { up: entry.baseUp } : {};
+    if (entry.rotation) return { rotation: entry.rotation };
+    return entry.up && entry.up !== question.orientation.up ? { up: entry.up } : {};
+  };
+}
 const OUT = join('out', flag('--out') ?? 'corpus');
 
 const files = corpusFiles();
@@ -101,11 +131,7 @@ try {
     await page.evaluate(() => Object.assign(window.__mt.state, { stats: null, error: null }));
     await page.setInputFiles('#file', base ? [file, join(CORPUS, base)] : file);
     try {
-      await page.waitForFunction(
-        () => (window.__mt.state.stats || window.__mt.state.error) && !window.__mt.state.busy,
-        null,
-        { timeout: CONVERSION_TIMEOUT_MS },
-      );
+      await convertAnswering(page, pickFor(key), CONVERSION_TIMEOUT_MS);
     } catch {
       mini.error = `did not finish within ${CONVERSION_TIMEOUT_MS / 1000} s`;
       console.log(`${key}: ${mini.error}`);
@@ -115,7 +141,9 @@ try {
       await page.addStyleTag({ content: HIDE_OVERLAY });
       continue;
     }
-    const { stats, baked, error, longestFrameGapMs } = await page.evaluate(() => window.__mt.state);
+    const { stats, baked, error, longestFrameGapMs, questionMs } = await page.evaluate(
+      () => window.__mt.state,
+    );
     if (!stats) {
       mini.error = error;
       console.log(`${key}: could not be converted: ${error}`);
@@ -148,6 +176,8 @@ try {
       sizeMm: stats.sizeMm.map((mm) => round(mm, 2)),
       up: stats.up,
       upMethod: stats.upMethod,
+      // The questions after the orient step (#92), confirmed in this order.
+      asked: stats.asked.map((asked) => ({ role: asked.role, tries: asked.tries })),
       orientation: {
         confidence: round(stats.orientation.confidence, 3),
         tiltDeg: round(stats.orientation.tiltDeg, 1),
@@ -198,6 +228,7 @@ try {
         compactEncodeMs: exported.map((row) => round(row.encodeMs)),
         ktx2EncodeMs: baked?.ktx2EncodeMs == null ? null : round(baked.ktx2EncodeMs),
         longestFrameGapMs: round(longestFrameGapMs),
+        questionMs: questionMs === null ? null : round(questionMs),
         peakBufferMb: round(stats.peakBufferBytes / 1048576),
       },
     });
@@ -324,6 +355,7 @@ const results = {
   date: new Date().toISOString(),
   commit: execSync('git describe --always --dirty').toString().trim(),
   options: extra.size > 0 ? `?${extra}` : 'none',
+  up,
   machine: {
     ...machine,
     cpu: cpus()[0]?.model.trim() ?? 'unknown',
@@ -445,6 +477,48 @@ function pairReport() {
   ].join('\n');
 }
 
+/**
+ * Time from picking the files to the question on screen (#92, design note §8): single files
+ * against the budgets, the largest file against its own; pairs reported.
+ */
+function questionReport() {
+  const timed = converted.filter(([, m]) => m.times.questionMs != null);
+  if (timed.length === 0) return 'Nothing was asked (`--options "?ask=off"`).';
+  const singles = timed.filter(([, m]) => !m.pair);
+  const largest = singles.reduce(
+    (most, row) => (most === null || row[1].stlBytes > most[1].stlBytes ? row : most),
+    null,
+  )?.[0];
+  const budgetOf = ([key, m]) =>
+    m.pair ? null : key === largest ? QUESTION_BUDGET_LARGEST_MS : QUESTION_BUDGET_MS;
+  const over = singles.filter((row) => row[1].times.questionMs > budgetOf(row));
+  const steps = (m) =>
+    ['read', 'weld', 'orient'].reduce((sum, step) => sum + (m.times.steps[step] ?? 0), 0);
+  return [
+    `${singles.length - over.length} of ${singles.length} single files reached the question within the budget (${QUESTION_BUDGET_MS / 1000} s, the largest file ${QUESTION_BUDGET_LARGEST_MS / 1000} s). The budgets are the reference laptop's; this run is ${results.machine.cpu}. Pairs are reported, not held to a budget (PM decision on PR #94).`,
+    table(
+      [
+        'Mini',
+        'Source triangles',
+        'Time to the question',
+        'Budget',
+        'Read + weld + orient',
+        'Questions (tries)',
+      ],
+      timed.map((row) => {
+        const [key, m] = row;
+        const budget = budgetOf(row);
+        const within =
+          budget === null
+            ? 'reported'
+            : `${budget.toLocaleString()} ms${m.times.questionMs > budget ? ' **over**' : ''}`;
+        const asked = m.asked.map((a) => `${a.role} ${a.tries}`).join(', ') || 'none';
+        return `| ${key} | ${m.sourceTriangles.toLocaleString()} | ${m.times.questionMs.toLocaleString()} ms | ${within} | ${steps(m).toLocaleString()} ms | ${asked} |`;
+      }),
+    ),
+  ].join('\n\n');
+}
+
 /** The up directions against the committed index (issue #72): every mismatch and every tilt. */
 function orientationReport() {
   if (!existsSync(INDEX)) return `No ${INDEX}: nothing to check the up directions against.`;
@@ -466,7 +540,7 @@ const missing = KINDS.filter((kind) => !kinds.includes(kind));
 
 const md = `# Corpus results
 
-${results.date} · commit ${results.commit} · options \`${results.options}\`
+${results.date} · commit ${results.commit} · options \`${results.options}\` · questions answered ${up === 'index' ? 'as the index says' : 'as detected'}
 ${results.machine.gpu} · ${results.machine.cpu} · ${results.machine.memoryGb} GB · ${results.machine.browser}
 
 ## Corpus coverage
@@ -480,6 +554,10 @@ ${results.machine.gpu} · ${results.machine.cpu} · ${results.machine.memoryGb} 
 ## Orientation
 
 ${orientationReport()}
+
+## Time to the question
+
+${questionReport()}
 
 ## Size suggestions
 
