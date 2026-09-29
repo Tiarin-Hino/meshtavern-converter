@@ -399,8 +399,8 @@ function shifted(soup: Float32Array, dx: number, dz: number): Float32Array {
   return out;
 }
 
-/** A figure and base soup through the pair path's orient and place, with the registration test. */
-function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {}) {
+/** A figure and base soup through the pair path's orient step, as `placeOnBase` gets them. */
+function orientPair(figureSoup: Float32Array, baseSoup: Float32Array) {
   const figureMesh = weldVertices(figureSoup).mesh;
   const baseMesh = weldVertices(baseSoup).mesh;
   const standing = [figureMesh, baseMesh].map((mesh) => baseOrientation(mesh));
@@ -420,12 +420,37 @@ function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {
     base: baseMesh,
     baseRotation: standing[1]!.detection.orientation.rotation,
   };
-  const result = placeOnBase(figure, base, pairing, options, files);
-  // Decided apart from the placing (#92), the placing is the same to the bit.
-  const decided = decideFigure(figure, base, files);
-  expect(placeOnBase(figure, base, pairing, options, files, undefined, decided)).toEqual(result);
-  return result;
+  return { figure, base, pairing, files };
 }
+
+/** A figure and base soup through the pair path's orient and place, with the registration test. */
+function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {}) {
+  const { figure, base, pairing, files } = orientPair(figureSoup, baseSoup);
+  return placeOnBase(figure, base, pairing, options, files);
+}
+
+describe('the decision apart from the placing (#92)', () => {
+  it('places to the same bits with the decision passed in, registered or not', () => {
+    const { heightMm, recessDepthMm } = RECESS_BASE;
+    const registered = shifted(generatePuddleFigure(12), 0, heightMm - recessDepthMm);
+    for (const soup of [registered, generatePuddleFigure(12)]) {
+      const { figure, base, pairing, files } = orientPair(soup, generateRecessBase());
+      const decided = decideFigure(figure, base, files);
+      expect(decided.registered !== null).toBe(soup === registered);
+      const placed = placeOnBase(figure, base, pairing, { moveMm: [1, 0] }, files);
+      const again = placeOnBase(
+        figure,
+        base,
+        pairing,
+        { moveMm: [1, 0] },
+        files,
+        undefined,
+        decided,
+      );
+      expect(again).toEqual(placed);
+    }
+  }, 60_000);
+});
 
 describe('the registration test', () => {
   const { heightMm, recessDepthMm } = RECESS_BASE;
