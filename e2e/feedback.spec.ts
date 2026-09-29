@@ -27,7 +27,7 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
   const outDir = testInfo.outputPath('feedback');
   const pair = (key: string) => ({ key, figure, base });
 
-  await page.goto('/?dev&bake=off');
+  await page.goto('/?dev&bake=off&ask=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   const nextVerdict = await installFeedback(page);
   const session = { index: 1, total: 4, commit: 'test', outDir, browser, nextVerdict };
