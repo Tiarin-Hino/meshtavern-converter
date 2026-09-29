@@ -15,12 +15,17 @@ export interface PageOptions {
    * opening a GLB, the compressed download. Independent of `bake` and `ktx`.
    */
   dev: boolean;
+  /**
+   * `?ask=off`: never stop to ask which way is up; convert as before #92. Default true: a file
+   * that is new to the person is asked about after the orient step.
+   */
+  ask: boolean;
   /** One message per option that was ignored. */
   problems: string[];
 }
 
 const BAKE_SIZES = [256, 512, 1024, 2048, 4096];
-const KNOWN = ['bake', 'ktx', 'settle', 'dev'];
+const KNOWN = ['bake', 'ktx', 'settle', 'dev', 'ask'];
 
 export function parsePageOptions(search: string): PageOptions {
   const parameters = new URLSearchParams(search);
@@ -43,6 +48,10 @@ export function parsePageOptions(search: string): PageOptions {
     else problems.push(`ktx=${ktxValue} ignored: use off, ${DETAIL_EFFORTS.join(', ')}`);
   }
 
+  const askValue = parameters.get('ask');
+  const ask = askValue !== 'off';
+  if (askValue !== null && ask) problems.push(`ask=${askValue} ignored: use off`);
+
   for (const key of parameters.keys()) {
     if (!KNOWN.includes(key)) problems.push(`unknown option "${key}" ignored`);
   }
@@ -50,5 +59,5 @@ export function parsePageOptions(search: string): PageOptions {
   if (/%(?![0-9a-f]{2})/i.test(search)) {
     problems.push('the address contains a stray "%": options are separated by "&"');
   }
-  return { bake, ktx, dev: parameters.has('dev'), problems };
+  return { bake, ktx, dev: parameters.has('dev'), ask, problems };
 }

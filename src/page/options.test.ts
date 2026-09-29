@@ -8,7 +8,16 @@ describe('parsePageOptions', () => {
       bake: 'auto',
       ktx: DETAIL_EFFORT,
       dev: false,
+      ask: true,
       problems: [],
+    });
+  });
+
+  it('stops asking which way is up with ask=off, and reports any other value', () => {
+    expect(parsePageOptions('?ask=off')).toMatchObject({ ask: false, problems: [] });
+    expect(parsePageOptions('?ask=on')).toMatchObject({
+      ask: true,
+      problems: ['ask=on ignored: use off'],
     });
   });
 
