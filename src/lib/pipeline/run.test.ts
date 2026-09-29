@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { KTX2_ZSTANDARD, readKtx2Header } from './compress';
 import { generateBumpySheet } from './generate';
-import { BAKE_STEPS, runPipeline, STEPS, type Progress } from './run';
+import type { AskUp, UpAnswer, UpQuestion } from './ask';
+import type { OrientationOptions } from './orient';
+import { BAKE_STEPS, runPipeline, STEPS, type ConversionResult, type Progress } from './run';
+import type { Rotation } from './rotation';
 import { PLAIN_BASE_HEIGHT_MM } from './base';
 import { encodeBinaryStl } from './stl';
 import {
@@ -341,5 +344,177 @@ describe('runPipeline with a base file (#70)', () => {
       orientation: { up: '+z' },
     });
     expect(chosen.pair!.placement.spot.kind).not.toBe('registered');
+  }, 60_000);
+});
+
+/** An `askUp` that answers from a list, in order, and keeps every question it was asked. */
+function answering(...answers: UpAnswer[]): AskUp & { questions: UpQuestion[] } {
+  const questions: UpQuestion[] = [];
+  const ask = (question: UpQuestion): Promise<UpAnswer> => {
+    questions.push(question);
+    const answer = answers.shift();
+    if (!answer)
+      return Promise.reject(new Error(`no answer left for question ${questions.length}`));
+    return Promise.resolve(answer);
+  };
+  return Object.assign(ask, { questions });
+}
+
+const confirm = (orientation: OrientationOptions = {}): UpAnswer => ({
+  orientation,
+  confirm: true,
+});
+const tryOut = (orientation: OrientationOptions = {}): UpAnswer => ({
+  orientation,
+  confirm: false,
+});
+
+/** The bytes of a typed array, to compare two meshes bit for bit. */
+const bits = (array: Float32Array | Uint32Array): Uint8Array =>
+  new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+
+function expectSameMini(a: ConversionResult, b: ConversionResult): void {
+  expect(bits(a.mesh.positions)).toEqual(bits(b.mesh.positions));
+  expect(bits(a.mesh.indices)).toEqual(bits(b.mesh.indices));
+  expect(a.lods.length).toBe(b.lods.length);
+  a.lods.forEach((lod, k) => {
+    expect(bits(lod.mesh.positions)).toEqual(bits(b.lods[k]!.mesh.positions));
+    expect(bits(lod.mesh.indices)).toEqual(bits(b.lods[k]!.mesh.indices));
+  });
+  expect(a.orientation).toEqual(b.orientation);
+  expect(a.pair).toEqual(b.pair);
+}
+
+/** The generated figure without a base, stored lying: its up is +x, and the detection takes +z. */
+function lyingFigure(): ArrayBuffer {
+  const soup = generateFigure(false);
+  const lying = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) {
+    lying[i] = soup[i + 2]!;
+    lying[i + 1] = soup[i + 1]!;
+    lying[i + 2] = 0 - soup[i]!;
+  }
+  return encodeBinaryStl(lying);
+}
+
+describe('runPipeline asking which way is up (#92)', () => {
+  const upright = (): ArrayBuffer => encodeBinaryStl(generateFigure(true));
+
+  it('without a callback asks nothing; confirming the proposal at once gives the same bits', async () => {
+    const plain = await runPipeline(upright(), { bake: 0 });
+    expect(plain.stats.asked).toEqual([]);
+    expect(plain.choices).toEqual({ orientation: {} });
+    expect(plain.stats.choices).toBe(plain.choices);
+
+    const ask = answering(confirm());
+    const asked = await runPipeline(upright(), { bake: 0, askUp: ask });
+    expectSameMini(asked, plain);
+    expect(ask.questions).toHaveLength(1);
+    const [question] = ask.questions;
+    expect(question).toMatchObject({ role: 'mini', file: 0, reason: 'base', warnings: [] });
+    expect(question!.orientation).toEqual(plain.orientation);
+    expect(question!.base).toMatchObject({ shape: 'round' });
+    expect(question!.mesh!.indices.length).toBe(plain.stats.triangles * 3);
+    // The box of the turned file, before any shift: 25 mm across, as tall as the mini.
+    expect(question!.box.max[0] - question!.box.min[0]).toBeCloseTo(25, 0);
+    expect(question!.box.max[1] - question!.box.min[1]).toBeCloseTo(plain.stats.sizeMm[1], 4);
+    expect(asked.stats.asked).toEqual([{ role: 'mini', tries: 0, waitedMs: expect.any(Number) }]);
+    expect(asked.stats.timings.map((t) => t.step)).toEqual([...ONE_FILE_STEPS]);
+  }, 60_000);
+
+  it('shows an axis tried at the question and converts once with it', async () => {
+    const ask = answering(tryOut({ up: '+x' }), confirm({ up: '+x' }));
+    const progress: Progress[] = [];
+    const result = await runPipeline(lyingFigure(), {
+      bake: 0,
+      askUp: ask,
+      onProgress: (p) => progress.push(p),
+    });
+    const [first, second] = ask.questions;
+    expect(first).toMatchObject({
+      reason: 'tallest',
+      orientation: { up: '+z', method: 'tallest' },
+    });
+    expect(first!.mesh).toBeDefined();
+    expect(second).toMatchObject({ reason: 'chosen', orientation: { up: '+x', method: 'manual' } });
+    expect(second!.mesh).toBeUndefined();
+    // Standing on +x: about 30 mm tall.
+    expect(result.orientation).toMatchObject({ up: '+x', method: 'manual' });
+    expect(result.stats.sizeMm[1]).toBeGreaterThan(29);
+    expect(result.choices).toEqual({ orientation: { up: '+x' } });
+    expect(result.stats.asked).toEqual([{ role: 'mini', tries: 1, waitedMs: expect.any(Number) }]);
+    // One entry per step, and each step announced once.
+    expect(result.stats.timings.map((t) => t.step)).toEqual([...ONE_FILE_STEPS]);
+    expect(progress.map((p) => p.step)).toEqual([...ONE_FILE_STEPS]);
+  }, 60_000);
+
+  it('keeps a rotation to the bit, and reports setting down', async () => {
+    // Not one of the six ways: a quarter turn about x and a little more.
+    const rotation: Rotation = [-0.7, 0.1, 0.05, 0.7];
+    const turned = await runPipeline(lyingFigure(), {
+      bake: 0,
+      askUp: answering(confirm({ rotation })),
+    });
+    expect(turned.orientation.method).toBe('manual');
+    expect(turned.orientation.rotation.every((value, i) => Object.is(value, rotation[i]))).toBe(
+      true,
+    );
+    expect(turned.choices.orientation.rotation).toBe(rotation);
+
+    const setDown = { up: '+z', setDown: true } as const;
+    const ask = answering(tryOut(setDown), confirm(setDown));
+    const result = await runPipeline(tiltedTable(), { bake: 0, askUp: ask });
+    // The 3-4-5 turn: the table rests 36.87° off its axis.
+    expect(ask.questions[1]!.orientation.setDownDeg).toBeGreaterThan(30);
+    expect(result.orientation.setDownDeg).toBe(ask.questions[1]!.orientation.setDownDeg);
+  }, 60_000);
+
+  it('asks with the axis a conversion came with, and Reset brings the detection back', async () => {
+    const ask = answering(tryOut({}), confirm({}));
+    const result = await runPipeline(upright(), {
+      bake: 0,
+      orientation: { up: '+y' },
+      askUp: ask,
+    });
+    expect(ask.questions[0]).toMatchObject({ reason: 'chosen', orientation: { up: '+y' } });
+    expect(ask.questions[1]).toMatchObject({ reason: 'base', orientation: { up: '+z' } });
+    expect(result.orientation).toMatchObject({ up: '+z', method: 'base' });
+    expect(result.choices).toEqual({ orientation: {} });
+  }, 60_000);
+
+  it('asks nothing when the file is not to be asked about', async () => {
+    const ask = answering();
+    const result = await runPipeline(upright(), { bake: 0, askUp: ask, ask: { up: false } });
+    expect(ask.questions).toHaveLength(0);
+    expect(result.stats.asked).toEqual([]);
+  }, 60_000);
+
+  it('sends a copy: detaching it changes nothing, and the choices convert the same mini again', async () => {
+    const ask: AskUp = (question) => {
+      // What a worker does when it posts the question: the buffers go to the page.
+      const { positions, indices } = question.mesh!;
+      structuredClone(question.mesh, { transfer: [positions.buffer, indices.buffer] });
+      expect(question.mesh!.positions.length).toBe(0);
+      return Promise.resolve(confirm({ up: '+x' }));
+    };
+    const result = await runPipeline(lyingFigure(), { bake: 0, askUp: ask });
+    expect(result.orientation.up).toBe('+x');
+    const again = await runPipeline(lyingFigure(), { bake: 0, ...result.choices });
+    expectSameMini(again, result);
+  }, 60_000);
+
+  it('ends with the error of a rejecting callback, and a person’s wait is in no step', async () => {
+    const refusing: AskUp = () => Promise.reject(new Error('the page went away'));
+    await expect(runPipeline(upright(), { bake: 0, askUp: refusing })).rejects.toThrow(
+      'the page went away',
+    );
+
+    const WAIT_MS = 500;
+    const slow: AskUp = () =>
+      new Promise((resolve) => setTimeout(() => resolve(confirm()), WAIT_MS));
+    const { stats } = await runPipeline(upright(), { bake: 0, askUp: slow });
+    expect(stats.asked[0]!.waitedMs).toBeGreaterThanOrEqual(WAIT_MS - 5);
+    expect(stats.timings.find((t) => t.step === 'orient')!.ms).toBeLessThan(WAIT_MS);
+    expect(stats.totalMs).toBeCloseTo(stats.timings.reduce((sum, t) => sum + t.ms, 0));
   }, 60_000);
 });
