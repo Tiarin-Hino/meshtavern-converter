@@ -185,6 +185,17 @@ declare global {
       resetPlacement: () => void;
       /** Converts the figure alone again, without its base. */
       removeBase: () => Promise<void>;
+      /**
+       * Where the figure of the pair on screen stands, with the placement being tried out: its
+       * box centre (x, z) and lowest point in the base file's frame and units, and its turn.
+       * Null without a pair. What `npm run feedback` records (design note §13).
+       */
+      figurePlacement: () => {
+        figureCentreMm: [number, number];
+        figureLowestMm: number;
+        yawDeg: number;
+        offsetMm: [number, number, number];
+      } | null;
       startStress: (count: number, forcedLod?: number | null, textureBudgetMb?: number) => void;
       /**
        * Remembers the converted mini for mixed stress scenes. With a pool, `startStress`
@@ -1072,6 +1083,47 @@ async function applyPlacement(): Promise<void> {
   await reconvert();
 }
 
+/**
+ * The figure's box centre and lowest point in the base file's frame, the pending preview
+ * included: the figure's vertices of the full-detail mesh, back to file units, turned about the
+ * contact centre, moved and lifted as the preview shows them.
+ */
+function figurePlacement(): ReturnType<Window['__mt']['figurePlacement']> {
+  const pair = state.stats?.pair;
+  const mesh = levels[0];
+  if (!pair || !mesh || !state.stats) return null;
+  const scale = state.stats.sizing.scale;
+  const pending = state.pair ?? { moveMm: [0, 0], liftMm: 0, turnDeg: 0 };
+  const [cx, cz, lift] = pair.placement.offsetMm;
+  // As the viewer turns the figure part: a three.js rotation.y about the contact centre.
+  const theta = (pending.turnDeg * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  let minY = Infinity;
+  for (let v = 0; v < pair.figureVertices; v++) {
+    const dx = mesh.positions[v * 3]! / scale - cx;
+    const dz = mesh.positions[v * 3 + 2]! / scale - cz;
+    const x = cx + pending.moveMm[0] + dx * cos + dz * sin;
+    const z = cz + pending.moveMm[1] - dx * sin + dz * cos;
+    const y = mesh.positions[v * 3 + 1]! / scale + pending.liftMm;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+    if (y < minY) minY = y;
+  }
+  return {
+    figureCentreMm: [(minX + maxX) / 2, (minZ + maxZ) / 2],
+    figureLowestMm: minY,
+    yawDeg: pair.placement.yawDeg + pending.turnDeg,
+    offsetMm: [cx + pending.moveMm[0], cz + pending.moveMm[1], lift + pending.liftMm],
+  };
+}
+
 /** The name downloads carry: the figure's, without .stl. */
 function downloadName(): string {
   return (figureSource()?.name ?? state.fileName ?? 'mini').replace(/\.stl$/i, '');
@@ -1202,6 +1254,7 @@ window.__mt = {
   applyPlacement,
   resetPlacement: () => showPlacement(null),
   removeBase,
+  figurePlacement,
   setUp,
   turn,
   applyTurn: () => applyTurn(false),
