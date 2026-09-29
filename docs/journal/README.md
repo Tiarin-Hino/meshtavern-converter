@@ -87,7 +87,7 @@ Numbers name the device, using the names the specs use. The ones so far:
 
 Use these in `topics` so posts can be gathered by grep. Add a new one only when none fits, and add it here.
 
-`stl-import`, `orientation`, `lod`, `look`, `unwrap`, `bake`, `textures`, `compression`, `export`, `worker`, `performance`, `devices`, `testing`, `regression`, `tooling`, `workflow`, `planning`, `ui`
+`stl-import`, `orientation`, `placement`, `lod`, `look`, `unwrap`, `bake`, `textures`, `compression`, `export`, `worker`, `performance`, `devices`, `testing`, `regression`, `tooling`, `workflow`, `planning`, `ui`
 
 ## Phase summaries
 

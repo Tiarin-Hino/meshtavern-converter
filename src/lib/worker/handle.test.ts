@@ -3,8 +3,12 @@ import { generateBumpySheet } from '../pipeline/generate';
 import { meshBuffers } from '../pipeline/mesh';
 import { BAKE_STEPS, STEPS } from '../pipeline/run';
 import { encodeBinaryStl } from '../pipeline/stl';
+import { generatePuddleFigure, generateRecessBase } from '../../regression/shapes';
 import { handleRequest } from './handle';
 import type { ConvertOptions, WorkerResponse } from './protocol';
+
+/** The steps of a single file: `place` runs for a figure with its base file only. */
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
 
 /** Without baking unless a test asks for it: the unwrapper takes seconds to load and warm up. */
 async function collect(stl: ArrayBuffer, id = 7, options: ConvertOptions = { bake: 0 }) {
@@ -18,11 +22,14 @@ async function collect(stl: ArrayBuffer, id = 7, options: ConvertOptions = { bak
 describe('handleRequest', () => {
   it('posts one progress message per step, in order, then the result', async () => {
     const posted = await collect(encodeBinaryStl(generateBumpySheet(4)));
-    expect(posted.map((p) => p.response.type)).toEqual([...STEPS.map(() => 'progress'), 'done']);
+    expect(posted.map((p) => p.response.type)).toEqual([
+      ...ONE_FILE_STEPS.map(() => 'progress'),
+      'done',
+    ]);
     const progress = posted.flatMap((p) =>
       p.response.type === 'progress' ? [p.response.progress] : [],
     );
-    expect(progress.map((p) => p.step)).toEqual([...STEPS]);
+    expect(progress.map((p) => p.step)).toEqual([...ONE_FILE_STEPS]);
     expect(progress.map((p) => p.percent)).toEqual([0, 14, 29, 43, 57, 71, 86]);
   });
 
@@ -68,7 +75,7 @@ describe('handleRequest', () => {
     expect(stats.triangles).toBe(32);
     expect(stats.vertices).toBe(25);
     expect(stats.sizeMm[0]).toBeCloseTo(50);
-    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(stats.timings.map((t) => t.step)).toEqual([...ONE_FILE_STEPS]);
     expect(stats.peakBufferBytes).toBeGreaterThan(0);
     expect(stats.lods.map((lod) => lod.triangles)).toEqual(lods.map((lod) => lod.triangles));
     expect(last.transfer).toEqual([mesh, ...lods.map((lod) => lod.mesh)].flatMap(meshBuffers));
@@ -88,7 +95,7 @@ describe('handleRequest', () => {
     const last = posted.at(-1)!;
     if (last.response.type !== 'done') throw new Error('expected done');
     const { baked, stats } = last.response.result;
-    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS, ...BAKE_STEPS]);
+    expect(stats.timings.map((t) => t.step)).toEqual([...ONE_FILE_STEPS, ...BAKE_STEPS]);
     expect(baked?.detail).toBeNull();
     expect(last.transfer).toContain(baked!.ktx2!.buffer);
     expect(last.transfer).toContain(baked!.mesh.uvs!.buffer);
@@ -112,4 +119,28 @@ describe('handleRequest', () => {
     const posted = await collect(undefined as unknown as ArrayBuffer);
     expect(posted.at(-1)!.response).toMatchObject({ type: 'error', id: 7 });
   });
+
+  it('converts a figure with its base file, with the swap and the placement passed through', async () => {
+    const posted = await collect(encodeBinaryStl(generatePuddleFigure(12)), 3, {
+      bake: 0,
+      secondStl: encodeBinaryStl(generateRecessBase()),
+      placement: { moveMm: [1, 0] },
+    });
+    const last = posted.at(-1)!;
+    if (last.response.type !== 'done') throw new Error('expected done');
+    const { pair, stats } = last.response.result;
+    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(pair).toMatchObject({ pairing: { baseFile: 1 }, placement: { method: 'manual' } });
+    expect(pair!.placement.offsetMm[0]).toBe(1);
+
+    const swapped = (
+      await collect(encodeBinaryStl(generatePuddleFigure(12)), 4, {
+        bake: 0,
+        secondStl: encodeBinaryStl(generateRecessBase()),
+        pairing: { swap: true },
+      })
+    ).at(-1)!;
+    if (swapped.response.type !== 'done') throw new Error('expected done');
+    expect(swapped.response.result.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
+  }, 60_000);
 });

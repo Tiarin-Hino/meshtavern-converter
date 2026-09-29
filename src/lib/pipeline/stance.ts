@@ -140,14 +140,15 @@ function leastSlope(
 }
 
 /**
- * The points that rest on the floor when up is `up`: within `band` (a share of the
- * height along `up`) of the lowest point. Indices into the point list. Story 10 (#70) finds
- * the feet with it.
+ * The points that rest on the floor when up is `up`: within `band` of the lowest point, a
+ * share of the height along `up`, or a distance in file units when `unit` is `'mm'` (story
+ * 10, #70, finds the feet with it). Indices into the point list.
  */
 export function restingPoints(
   points: Float32Array | Float64Array,
   up: Vec3,
   band: number,
+  unit: 'share' | 'mm' = 'share',
 ): number[] {
   const count = points.length / 3;
   let low = Infinity;
@@ -157,7 +158,7 @@ export function restingPoints(
     if (h < low) low = h;
     if (h > high) high = h;
   }
-  const limit = low + (high - low) * band;
+  const limit = low + (unit === 'mm' ? band : (high - low) * band);
   const resting: number[] = [];
   for (let i = 0; i < count; i++) {
     const h = points[i * 3]! * up[0] + points[i * 3 + 1]! * up[1] + points[i * 3 + 2]! * up[2];

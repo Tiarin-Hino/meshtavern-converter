@@ -46,6 +46,9 @@ export {
   turnAngleDeg,
   type Rotation,
 } from './pipeline/rotation';
+// A figure with its base file: which is the base and where the figure was set (issue #70).
+export type { Pairing, PairingOptions, PairWarning } from './pipeline/pair';
+export type { Placement, PlacementOptions, Spot, SpotKind, PairResult } from './pipeline/place';
 // Size: units, creature size, base, footprint (issue #44).
 export {
   CREATURE_SIZES,

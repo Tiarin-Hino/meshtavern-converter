@@ -3,23 +3,45 @@ import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
-import { checkFits } from './memory';
+import { checkFits, checkNeeded, estimatePairBytes } from './memory';
 import {
   coverageFor,
   orientAndPlace,
   resolveOrientation,
   type Orientation,
   type OrientationOptions,
+  type PlacedMesh,
   type UpAxis,
+  type UpDetection,
 } from './orient';
+import {
+  baseOrientation,
+  figureUpCandidates,
+  guessRoles,
+  placeOriented,
+  shapeOfFile,
+  type Pairing,
+  type PairingOptions,
+} from './pair';
+import { placeOnBase, type PairFiles, type PairResult, type PlacementOptions } from './place';
 import { shade } from './shade';
-import { sizeMini, type Sizing, type SizingOptions } from './size';
+import { sizeMini, type BaseMeasurement, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
 import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
-export const STEPS = ['read', 'weld', 'orient', 'size', 'simplify', 'shade', 'levels'] as const;
+/** Every step in order. `place` runs only for a figure with its base file (#70). */
+export const STEPS = [
+  'read',
+  'weld',
+  'orient',
+  'place',
+  'size',
+  'simplify',
+  'shade',
+  'levels',
+] as const;
 /** The steps that turn the table level into a baked mini. They run unless baking is switched off. */
 export const BAKE_STEPS = ['unwrap', 'bake', 'compress'] as const;
 export type BakeStepName = (typeof BAKE_STEPS)[number];
@@ -79,6 +101,8 @@ export interface ConversionStats {
   peakHeapBytes: number | null;
   /** Set when baking was wanted but the mini keeps the per-vertex look instead, and why. */
   bakeSkipped: BakeSkipped | null;
+  /** A figure with its base file: which was the base and where the figure was set. Null for one file. */
+  pair: PairResult | null;
 }
 
 export type BakeSkipped =
@@ -113,8 +137,10 @@ export interface ConversionResult {
   baked?: Baked;
   /** The same object as `stats.sizing`. */
   sizing: Sizing;
-  /** The same object as `stats.orientation`. */
+  /** The same object as `stats.orientation`: the figure's, for a pair. */
   orientation: Orientation;
+  /** The same object as `stats.pair`. */
+  pair: PairResult | null;
   stats: ConversionStats;
 }
 
@@ -148,6 +174,128 @@ export interface PipelineOptions {
    * whose estimate is larger is refused before anything is read. Unset: no check.
    */
   memoryBudgetBytes?: number;
+  /** The second STL of a figure-plus-base pair. Which one is the base is guessed unless `pairing.swap`. */
+  secondStl?: ArrayBuffer;
+  /** For a pair: the user swapped figure and base. */
+  pairing?: PairingOptions;
+  /** For a pair: the user moved, turned, raised or lowered the figure on its base. */
+  placement?: PlacementOptions;
+}
+
+/** Whether the user chose anything about the orientation. */
+const choosesOrientation = (options: OrientationOptions): boolean =>
+  options.up !== undefined || options.rotation !== undefined || options.setDown === true;
+
+const placeAs = (mesh: IndexedMesh, detection: UpDetection): PlacedMesh => {
+  const { orientation } = detection;
+  return orientAndPlace(mesh, orientation.rotation, coverageFor(detection, orientation.up));
+};
+
+/** A figure and its base file after the orient step: who is who, and how each stands. */
+interface OrientedPair {
+  figure: PlacedMesh;
+  orientation: Orientation;
+  /** The figure turned to a second candidate up axis, when there is one (design note §9 step 4). */
+  alternative: { placed: PlacedMesh; orientation: Orientation } | undefined;
+  base: PlacedMesh;
+  pairing: Pairing;
+  /** The files as welded, for the registration test; undefined when the user chose the figure's axis. */
+  files: PairFiles | undefined;
+  baseOrientation: Orientation;
+}
+
+/**
+ * The orient step for a pair (design note §4.1): each file stands the way a base would, the
+ * roles follow, the base stands on its underside and the figure as the user chose, else by its
+ * print cut or the up detection.
+ */
+function orientPair(
+  meshes: [IndexedMesh, IndexedMesh],
+  orientationOptions: OrientationOptions,
+  pairingOptions: PairingOptions,
+): OrientedPair {
+  const standing = meshes.map((mesh) => baseOrientation(mesh));
+  const pairing = guessRoles(
+    [shapeOfFile(meshes[0], standing[0]!), shapeOfFile(meshes[1], standing[1]!)],
+    pairingOptions,
+  );
+  const figureMesh = meshes[1 - pairing.baseFile]!;
+  const baseMesh = meshes[pairing.baseFile]!;
+  // A second candidate is placed by the place step; the pass is not run again.
+  const pass = standing[1 - pairing.baseFile]!.detection;
+  const chosen = choosesOrientation(orientationOptions);
+  const candidates = chosen
+    ? [resolveOrientation(figureMesh, orientationOptions, pass)]
+    : figureUpCandidates(figureMesh, pass);
+  const figureDetection = candidates[0]!;
+  const baseStanding = standing[pairing.baseFile]!;
+  return {
+    figure: placeAs(figureMesh, figureDetection),
+    orientation: figureDetection.orientation,
+    alternative: candidates[1] && {
+      placed: placeAs(figureMesh, candidates[1]),
+      orientation: candidates[1].orientation,
+    },
+    base: placeOriented(baseMesh, baseStanding),
+    pairing,
+    // A figure turned by the user skips the registration test.
+    files: chosen
+      ? undefined
+      : {
+          figure: figureMesh,
+          base: baseMesh,
+          baseRotation: baseStanding.detection.orientation.rotation,
+        },
+    baseOrientation: baseStanding.detection.orientation,
+  };
+}
+
+/** The place step for a pair, and the orientation the figure ends up with. */
+function placeOrientedPair(
+  oriented: OrientedPair,
+  placementOptions: PlacementOptions,
+): { merged: PlacedMesh; pair: PairResult; orientation: Orientation } {
+  const { figure, base, pairing, files, alternative } = oriented;
+  const placed = placeOnBase(figure, base, pairing, placementOptions, files, alternative?.placed);
+  let orientation = oriented.orientation;
+  if (placed.candidate === 1 && alternative) orientation = alternative.orientation;
+  // A registered figure stands the way its base does.
+  if (placed.pair.placement.spot.kind === 'registered') orientation = oriented.baseOrientation;
+  return { ...placed, orientation };
+}
+
+/** Where a figure was set on its base, without the steps after placing (development and tooling). */
+export interface PairPlacement {
+  pair: PairResult;
+  /** The figure's orientation. */
+  orientation: Orientation;
+  /** The merged mesh in the base file's units, standing on y = 0 centred on the base. */
+  mesh: IndexedMesh;
+  /** The base as measured from the base file; null when it has none. */
+  base: BaseMeasurement | null;
+}
+
+/**
+ * The pair path up to and including the place step: read, weld, orient, place, with the same
+ * options as `runPipeline`. For the placement score (`npm run score-placements`, the corpus
+ * report): what a conversion would place, in seconds rather than minutes on a large figure.
+ */
+export function placePairOnly(
+  stl: ArrayBuffer,
+  secondStl: ArrayBuffer,
+  options: Pick<PipelineOptions, 'orientation' | 'pairing' | 'placement'> = {},
+): PairPlacement {
+  const meshes = [stl, secondStl].map(
+    (file) => weldVertices(dropInvalidTriangles(readStlTriangles(file)).soup).mesh,
+  ) as [IndexedMesh, IndexedMesh];
+  const oriented = orientPair(meshes, options.orientation ?? {}, options.pairing ?? {});
+  const placed = placeOrientedPair(oriented, options.placement ?? {});
+  return {
+    pair: placed.pair,
+    orientation: placed.orientation,
+    mesh: placed.merged.mesh,
+    base: placed.merged.base,
+  };
 }
 
 /**
@@ -164,13 +312,24 @@ export async function runPipeline(
     compress = DETAIL_EFFORT,
     maxTextureSize,
     memoryBudgetBytes,
+    secondStl,
+    pairing: pairingOptions = {},
+    placement: placementOptions = {},
   }: PipelineOptions = {},
 ): Promise<ConversionResult> {
   const format = sniffStl(new Uint8Array(stl), stl.byteLength);
-  if (memoryBudgetBytes !== undefined) checkFits(stl.byteLength, format, memoryBudgetBytes);
+  const files = secondStl ? [stl, secondStl] : [stl];
+  if (memoryBudgetBytes !== undefined) {
+    if (secondStl) {
+      const secondFormat = sniffStl(new Uint8Array(secondStl), secondStl.byteLength);
+      const needed = estimatePairBytes(stl.byteLength, format, secondStl.byteLength, secondFormat);
+      checkNeeded(needed, memoryBudgetBytes);
+    } else checkFits(stl.byteLength, format, memoryBudgetBytes);
+  }
+  const fileBytes = files.reduce((sum, file) => sum + file.byteLength, 0);
 
   const bakeSteps = BAKE_STEPS.filter((step) => step !== 'compress' || compress !== null);
-  const stepCount = STEPS.length + (bakeRequest !== 0 ? bakeSteps.length : 0);
+  const stepCount = STEPS.length - (secondStl ? 0 : 1) + (bakeRequest !== 0 ? bakeSteps.length : 0);
   // Compiling the WebAssembly simplifier is a one-off cost and not part of any step.
   await simplifierReady();
 
@@ -196,42 +355,85 @@ export async function runPipeline(
     return end(result, liveBytes(result));
   };
 
-  const { soup, invalidTriangles } = run(
+  // With a base file, read, weld and orient each run over both files inside their step.
+  const reads = run(
     'read',
-    () => dropInvalidTriangles(readStlTriangles(stl)),
-    (s) => stl.byteLength + s.soup.byteLength * 2,
+    () => files.map((file) => dropInvalidTriangles(readStlTriangles(file))),
+    (r) => fileBytes + r.reduce((sum, read) => sum + read.soup.byteLength * 2, 0),
+  );
+  const soupBytes = reads.reduce((sum, read) => sum + read.soup.byteLength, 0);
+  const invalidTriangles = reads.reduce((sum, read) => sum + read.invalidTriangles, 0);
+  const sourceTriangles = reads.reduce(
+    (sum, read) => sum + read.soup.length / 9 + read.invalidTriangles,
+    0,
   );
   // While welding, the soup, the hash table and the per-corner scratch arrays coexist:
   // roughly three more soup-sized allocations.
-  const welded = run(
+  const welds = run(
     'weld',
-    () => weldVertices(soup),
-    (w) => stl.byteLength + soup.byteLength * 4 + meshBytes(w.mesh),
+    () => reads.map((read) => weldVertices(read.soup)),
+    (w) => fileBytes + soupBytes * 4 + w.reduce((sum, weld) => sum + meshBytes(weld.mesh), 0),
   );
-  if (welded.mesh.indices.length === 0) {
+  welds.forEach((weld, k) => {
+    if (weld.mesh.indices.length > 0) return;
+    const read = reads[k]!;
+    const which = secondStl ? ` in file ${k + 1}` : '';
     throw new ConversionProblem(
       'no-surface',
-      `${soup.length / 9 + invalidTriangles} triangles, none usable`,
+      `${read.soup.length / 9 + read.invalidTriangles} triangles${which}, none usable`,
     );
-  }
+  });
+  const weldedBytes = welds.reduce((sum, weld) => sum + meshBytes(weld.mesh), 0);
+
   const oriented = run(
     'orient',
-    () => {
-      const detection = resolveOrientation(welded.mesh, orientationOptions);
-      const { orientation } = detection;
-      const coverage = coverageFor(detection, orientation.up);
-      return { ...orientAndPlace(welded.mesh, orientation.rotation, coverage), orientation };
+    ():
+      | OrientedPair
+      | { figure: PlacedMesh; orientation: Orientation; base: null; pairing: null } => {
+      if (!secondStl) {
+        const detection = resolveOrientation(welds[0]!.mesh, orientationOptions);
+        return {
+          figure: placeAs(welds[0]!.mesh, detection),
+          orientation: detection.orientation,
+          base: null,
+          pairing: null,
+        };
+      }
+      return orientPair(
+        welds.map((weld) => weld.mesh) as [IndexedMesh, IndexedMesh],
+        orientationOptions,
+        pairingOptions,
+      );
     },
-    (p) => stl.byteLength + soup.byteLength + meshBytes(welded.mesh) + p.mesh.positions.byteLength,
+    (o) =>
+      fileBytes +
+      soupBytes +
+      weldedBytes +
+      o.figure.mesh.positions.byteLength +
+      (o.base?.mesh.positions.byteLength ?? 0),
   );
+
+  let pair: PairResult | null = null;
+  let toSize: PlacedMesh = oriented.figure;
+  let orientation = oriented.orientation;
+  if (oriented.base && oriented.pairing) {
+    const { figure, base } = oriented;
+    const placedPair = run(
+      'place',
+      () => placeOrientedPair(oriented, placementOptions),
+      (p) => fileBytes + meshBytes(figure.mesh) + meshBytes(base!.mesh) + meshBytes(p.merged.mesh),
+    );
+    pair = placedPair.pair;
+    toSize = placedPair.merged;
+    orientation = placedPair.orientation;
+  }
+
   const placed = run(
     'size',
-    () => sizeMini(oriented, sizingOptions),
+    // A pair has its base: the plain one is never added.
+    () => sizeMini(toSize, pair ? { ...sizingOptions, plainBase: false } : sizingOptions),
     // A scaled mesh is a copy; the oriented one is dropped once this step is done.
-    (s) =>
-      stl.byteLength +
-      meshBytes(oriented.mesh) +
-      (s.mesh === oriented.mesh ? 0 : meshBytes(s.mesh)),
+    (s) => fileBytes + meshBytes(toSize.mesh) + (s.mesh === toSize.mesh ? 0 : meshBytes(s.mesh)),
   );
   const close = run(
     'simplify',
@@ -317,20 +519,21 @@ export async function runPipeline(
     lods,
     baked,
     sizing: placed.sizing,
-    orientation: oriented.orientation,
+    orientation,
+    pair,
     stats: {
       format,
-      sourceTriangles: soup.length / 9 + invalidTriangles,
+      sourceTriangles,
       triangles: placed.mesh.indices.length / 3,
       vertices: placed.mesh.positions.length / 3,
-      degenerateTriangles: welded.degenerateTriangles,
-      duplicateTriangles: welded.duplicateTriangles,
+      degenerateTriangles: welds.reduce((sum, weld) => sum + weld.degenerateTriangles, 0),
+      duplicateTriangles: welds.reduce((sum, weld) => sum + weld.duplicateTriangles, 0),
       invalidTriangles,
       sizeMm: placed.sizeMm,
       sizing: placed.sizing,
-      up: oriented.orientation.up,
-      upMethod: oriented.orientation.method,
-      orientation: oriented.orientation,
+      up: orientation.up,
+      upMethod: orientation.method,
+      orientation,
       lods: lods.map((lod) => ({
         name: lod.name,
         decidedBy: lod.decidedBy,
@@ -343,6 +546,7 @@ export async function runPipeline(
       peakBufferBytes,
       peakHeapBytes,
       bakeSkipped,
+      pair,
     },
   };
 }

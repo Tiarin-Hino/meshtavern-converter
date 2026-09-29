@@ -90,5 +90,6 @@ describe('restingPoints', () => {
       [3, 0, 0.6],
     ]);
     expect(restingPoints(points, [0, 0, 1], 0.05)).toEqual([0, 1]);
+    expect(restingPoints(points, [0, 0, 1], 0.6, 'mm')).toEqual([0, 1, 3]);
   });
 });

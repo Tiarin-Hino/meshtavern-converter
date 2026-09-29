@@ -47,9 +47,10 @@ export interface Orientation {
    * `base`: a flat underside decided, which is reliable. `tallest`: no base, so the taller
    * of the two common conventions (Y-up from sculpting tools, Z-up from slicers) was taken:
    * right for standing figures, wrong for long, low creatures. `manual`: the user's choice.
-   * A detection for minis without a base is open (#72, PR #79).
+   * A detection for minis without a base is open (#72, PR #79). `cut`: the print-cut plane of
+   * a figure made for a separate base (#70, #90), for the figure of a pair only.
    */
-  method: 'base' | 'tallest' | 'manual';
+  method: 'base' | 'tallest' | 'manual' | 'cut';
   /** base: coverage of the footprint. tallest: 0. manual: 1. */
   confidence: number;
   /** File coordinates → scene coordinates (Y-up), before the shift to the base centre and before any scale. */
@@ -348,12 +349,18 @@ function levelled(
  * The orient step's decision (design note §3): the detection, or what the user chose.
  * A forced axis or rotation is kept as given, and set down only when `setDown` asks for
  * it; a forced axis with a base on it is never levelled.
+ *
+ * @param scanned The pass over this mesh from an earlier call, so it is not run twice
+ *   (0.6 s on the largest corpus file): the pair path detects first, then applies the options.
  */
 export function resolveOrientation(
   mesh: IndexedMesh,
   options: OrientationOptions = {},
+  scanned?: Omit<UpDetection, 'orientation'>,
 ): UpDetection {
-  const pass = scanMesh(mesh);
+  const pass = scanned
+    ? { coverageByAxis: scanned.coverageByAxis, scan: scanned.scan }
+    : scanMesh(mesh);
   const { positions } = mesh;
   const hasBase = (up: UpAxis): boolean => coverageFor(pass, up) >= MIN_BASE_COVERAGE;
   const setsDown = options.setDown === true && positions.length > 0;
@@ -417,6 +424,35 @@ export function quarterTurnAxis(rotation: Rotation): UpAxis | null {
     if (q.every((value, i) => value === 0 - rotation[i]!)) return up;
   }
   return null;
+}
+
+/**
+ * The positions of a mesh turned by a rotation, nothing else: no shift to the floor or the
+ * base. A quarter turn swaps and negates coordinates exactly, as `orientAndPlace` does.
+ */
+export function turnPositions(source: Float32Array, rotation: Rotation): Float32Array {
+  const axis = quarterTurnAxis(rotation);
+  const positions = new Float32Array(source.length);
+  if (axis) {
+    const rotate = TO_Y_UP[axis];
+    for (let i = 0; i < positions.length; i += 3) {
+      const turned = rotate(source[i]!, source[i + 1]!, source[i + 2]!);
+      positions[i] = turned[0];
+      positions[i + 1] = turned[1];
+      positions[i + 2] = turned[2];
+    }
+    return positions;
+  }
+  const m = toMatrix(rotation);
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = source[i]!;
+    const y = source[i + 1]!;
+    const z = source[i + 2]!;
+    positions[i] = m[0]! * x + m[1]! * y + m[2]! * z;
+    positions[i + 1] = m[3]! * x + m[4]! * y + m[5]! * z;
+    positions[i + 2] = m[6]! * x + m[7]! * y + m[8]! * z;
+  }
+  return positions;
 }
 
 /**

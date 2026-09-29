@@ -11,6 +11,9 @@ import { ConversionProblem, PROBLEM_MESSAGES, type ProblemCode } from './problem
 import { runPipeline, STEPS, type ConversionResult, type Progress } from './run';
 import { encodeAsciiStl, encodeBinaryStl } from './stl';
 
+/** The steps of a single file: `place` runs for a figure with its base file only. */
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
+
 type Vec3 = [number, number, number];
 const BAKE = 256;
 const ascii = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
@@ -162,6 +165,6 @@ describe('files that are not clean', () => {
     expect(code).toBe('too-large');
     expect(steps).toEqual([]);
     const fits = await runPipeline(stl, { bake: 0, memoryBudgetBytes: needed });
-    expect(fits.stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(fits.stats.timings.map((t) => t.step)).toEqual([...ONE_FILE_STEPS]);
   });
 });

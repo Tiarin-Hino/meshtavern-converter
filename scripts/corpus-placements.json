@@ -1,0 +1,34 @@
+{
+  "flying/flying-02": {
+    "verdict": "placed",
+    "date": "2026-09-29",
+    "orientation": { "up": "+y" },
+    "placed": { "figureCentreMm": [-0.91, 2.51], "figureLowestMm": 4.33, "yawDeg": 0 },
+    "source": "the PM in the page with a repaired copy of the base (lip pressed flat); the build of d193bcb put it on the flattest patch at the middle and the PM moved it 2 mm; the numbers are that automatic placement re-run, so position is good to about 2 mm",
+    "note": "the axis is the only problem: no print cut, the detector says +z"
+  },
+  "large-creature/large-01": {
+    "verdict": "placed",
+    "date": "2026-09-29",
+    "orientation": { "up": "-y" },
+    "placed": { "figureCentreMm": [0.66, 4.76], "figureLowestMm": 2.1, "yawDeg": 0 },
+    "source": "the PM in the page (moved 43 mm, lowered 44.5 mm from the built spot), read back from the page and kept as a merged STL by the research; the numbers are that file's figure box",
+    "note": "perches on the top of the spire, wings and tail over the edge; claws sink into the rock a little"
+  },
+  "large-creature/large-03": {
+    "verdict": "right",
+    "date": "2026-09-29",
+    "orientation": { "up": "+y" },
+    "placed": { "figureCentreMm": [9.68, -1.76], "figureLowestMm": 4.42, "yawDeg": 0.91 },
+    "source": "the PM with a repaired copy of the base: right as built (d193bcb), no move; the numbers are that placement re-run",
+    "note": "the original base is refused by the 2 % detector, its underside sits 1 to 1.5 mm above the rim"
+  },
+  "mounted/mounted-03": {
+    "verdict": "placed",
+    "date": "2026-09-29",
+    "orientation": { "up": "+y" },
+    "placed": null,
+    "source": "the PM in the page: up +y, Set down 3.2°, moved 29 mm from the flattest patch and raised 5 mm; only the size of the move was kept, not its direction, so there is no position to score until it is recorded again with npm run feedback",
+    "note": "stands on the rock, front high; the 3.2° Set down was a couple of degrees too much"
+  }
+}

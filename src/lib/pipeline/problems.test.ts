@@ -34,7 +34,7 @@ describe('problems', () => {
 
   it('says what to do in every message, without technical words', () => {
     for (const message of Object.values(PROBLEM_MESSAGES)) {
-      expect(message).toMatch(/again|smaller|reduced|device/);
+      expect(message).toMatch(/again|smaller|reduced|device|Drop/);
       expect(message).not.toMatch(/buffer|array|heap|wasm|worker|exception|NaN|manifold/i);
     }
   });

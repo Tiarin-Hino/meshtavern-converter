@@ -7,7 +7,9 @@
   "flying/flying-02": {
     "size": "large",
     "note": "SRD wyvern is Large",
-    "up": "+z"
+    "up": "+y",
+    "upNote": "Was +z (2026-09-25); the PM stood it +y with its base file in the app on 2026-09-29: upright, wings up.",
+    "placementNote": "with up +y the flattest patch at the middle of the base is right: the PM moved it 2 mm (2026-09-29). The base file is refused by the 2 % detector (a lip 0.2 mm under the flat face); the PM placed it with a repaired copy."
   },
   "flying/flying-03": {
     "size": "tiny",
@@ -58,8 +60,9 @@
   "large-creature/large-01": {
     "size": "gargantuan",
     "note": "ancient dragon",
-    "upNote": "stands on -z, then turned 45° to the right as seen from the front (PM, 2026-09-25): tilted in the file, so a manual turn; the index holds the axis only",
-    "up": "-z"
+    "upNote": "Was -z, then turned 45° to the right as seen from the front (PM, 2026-09-25); the PM stood it -y with its base file in the app on 2026-09-29 (scripts/corpus-placements.json)",
+    "up": "-y",
+    "placementNote": "perches on the top of the spire, wings up, tail hanging down beside the base (PM, by hand in the app, 2026-09-29)"
   },
   "large-creature/large-02": {
     "size": "huge",
@@ -69,7 +72,8 @@
   "large-creature/large-03": {
     "size": "huge",
     "note": "a giant",
-    "up": "+y"
+    "up": "+y",
+    "placementNote": "right as built once the base is accepted: flattest patch, no move needed (PM, 2026-09-29, with a repaired copy of the base; the original is refused by the 2 % detector, its underside sits 1 to 1.5 mm above the rim)"
   },
   "mounted/mounted-01": {
     "size": "large",
@@ -84,7 +88,8 @@
   "mounted/mounted-03": {
     "size": "large",
     "note": "rider on a horse",
-    "up": "+y"
+    "up": "+y",
+    "placementNote": "stands on the rock with its front high and its hindquarters low: up +y, moved 29 mm from the flattest patch and raised 5 mm by the PM in the app (2026-09-29); the 3.2 degree Set down was a little too much, a couple of degrees back would be right"
   },
   "quadruped/B-001": {
     "size": "large",

@@ -56,6 +56,7 @@ describe('the library entries', () => {
       'encodeBinaryStl',
       'generateBumpySheet',
       'meshBuffers',
+      'placePairOnly',
       'pushOutward',
       'runPipeline',
       'weldVertices',
