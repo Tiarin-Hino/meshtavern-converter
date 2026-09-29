@@ -37,6 +37,13 @@ const VIEWS = [
   { name: 'close-up', azimuth: 25, elevation: 8, zoom: 2.6 },
 ];
 
+/** The views of a placement sheet (#70): how the figure sits on its base, at full detail. */
+const PLACEMENT_VIEWS = [
+  { name: 'front low', azimuth: 25, elevation: 8, zoom: 1.3 },
+  { name: 'side', azimuth: 115, elevation: 12, zoom: 1.3 },
+  { name: 'from above', azimuth: 25, elevation: 55, zoom: 1.3 },
+];
+
 const args = process.argv.slice(2);
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const bake = !args.includes('--no-bake');
@@ -269,13 +276,6 @@ function spotWords(spot) {
   if (spot.kind === 'registered') return 'set where the files put it';
   return spot.kind === 'flat' ? 'set on the flattest patch' : `set in the ${spot.kind}`;
 }
-
-/** The views of a placement sheet (#70): how the figure sits on its base, at full detail. */
-const PLACEMENT_VIEWS = [
-  { name: 'front low', azimuth: 25, elevation: 8, zoom: 1.3 },
-  { name: 'side', azimuth: 115, elevation: 12, zoom: 1.3 },
-  { name: 'from above', azimuth: 25, elevation: 55, zoom: 1.3 },
-];
 
 /** Writes `<key>-placement.png`: the pair at full detail from three sides, one column per run. */
 async function placementSheet(page, browser, key, mini) {
