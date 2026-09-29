@@ -72,7 +72,8 @@
   "large-creature/large-03": {
     "size": "huge",
     "note": "a giant",
-    "up": "+y"
+    "up": "+y",
+    "placement": "right as built once the base is accepted: flattest patch, no move needed (PM, 2026-09-29, with a repaired copy of the base; the original is refused by the 2 % detector, its underside sits 1 to 1.5 mm above the rim)"
   },
   "mounted/mounted-01": {
     "size": "large",
