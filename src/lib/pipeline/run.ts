@@ -14,7 +14,13 @@ import {
   type UpAxis,
   type UpDetection,
 } from './orient';
-import { detectPairFile, guessRoles, shapeOfDetection, type PairingOptions } from './pair';
+import {
+  baseOrientation,
+  guessRoles,
+  placeOriented,
+  shapeOfFile,
+  type PairingOptions,
+} from './pair';
 import { placeOnBase, type PairResult, type PlacementOptions } from './place';
 import { shade } from './shade';
 import { sizeMini, type Sizing, type SizingOptions } from './size';
@@ -174,10 +180,6 @@ export interface PipelineOptions {
   placement?: PlacementOptions;
 }
 
-/** Whether the user chose anything about the orientation. */
-const choosesOrientation = (options: OrientationOptions): boolean =>
-  options.up !== undefined || options.rotation !== undefined || options.setDown === true;
-
 /**
  * Runs every pipeline step on one STL. DOM-free, so it works in a worker and in Node.
  * A file that cannot become a mini throws a `ConversionProblem` (see problems.ts).
@@ -281,22 +283,21 @@ export async function runPipeline(
           pairing: null,
         };
       }
-      // The roles are guessed from each file's own detection; the user's orientation is the figure's.
-      const detections = welds.map((weld) => detectPairFile(weld.mesh));
+      // The roles are guessed from each file standing the way a base would (design note §4.1).
+      const standing = welds.map((weld) => baseOrientation(weld.mesh));
       const pairing = guessRoles(
-        [shapeOfDetection(detections[0]!), shapeOfDetection(detections[1]!)],
+        [shapeOfFile(welds[0]!.mesh, standing[0]!), shapeOfFile(welds[1]!.mesh, standing[1]!)],
         pairingOptions,
       );
       const figureMesh = welds[1 - pairing.baseFile]!.mesh;
       const baseMesh = welds[pairing.baseFile]!.mesh;
-      const plain = detections[1 - pairing.baseFile]!;
-      const figureDetection = choosesOrientation(orientationOptions)
-        ? resolveOrientation(figureMesh, orientationOptions, plain)
-        : plain;
+      // The figure stands by the up detection, or as the user chose; the pass is not run again.
+      const pass = standing[1 - pairing.baseFile]!.detection;
+      const figureDetection = resolveOrientation(figureMesh, orientationOptions, pass);
       return {
         figure: placeAs(figureMesh, figureDetection),
         orientation: figureDetection.orientation,
-        base: placeAs(baseMesh, detections[pairing.baseFile]!),
+        base: placeOriented(baseMesh, standing[pairing.baseFile]!),
         pairing,
       };
     },

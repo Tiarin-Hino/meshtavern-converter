@@ -1,23 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import {
   addBlob,
+  addRecessBase,
   generateFigure,
   generatePlate,
   generateRecessBase,
 } from '../../regression/shapes';
 import { addRoundBase } from './base';
 import { weldVertices } from './mesh';
-import { coverageFor, orientAndPlace, resolveOrientation } from './orient';
-import { BASE_MAX_ASPECT, detectPairFile, fileShape, guessRoles, type FileShape } from './pair';
+import { resolveOrientation } from './orient';
+import {
+  BASE_MAX_ASPECT,
+  baseOrientation,
+  guessRoles,
+  placeOriented,
+  shapeOfFile,
+  UNDERSIDE_BAND_MM,
+  type FileShape,
+} from './pair';
 import { ConversionProblem } from './problems';
+import { angleDeg, apply, fileUp, fromAxisAngle } from './rotation';
 
-/** The shape the pipeline sees for a Z-up soup: its own detection, then placed. */
+/** The shape the pipeline sees for a Z-up soup, standing as `baseOrientation` stands it. */
 function shapeOf(soup: Float32Array): FileShape {
   const mesh = weldVertices(soup).mesh;
-  const detection = detectPairFile(mesh);
-  const { orientation } = detection;
-  const placed = orientAndPlace(mesh, orientation.rotation, coverageFor(detection, orientation.up));
-  return fileShape(orientation, placed.sizeMm);
+  return shapeOfFile(mesh, baseOrientation(mesh));
 }
 
 function roundBase(diameterMm: number, heightMm: number): Float32Array {
@@ -33,32 +40,93 @@ function lowCreature(): Float32Array {
   return new Float32Array(soup);
 }
 
+/** A Z-up soup turned upside down about x: z → height − z, y → −y. */
+function upsideDown(soup: Float32Array, heightMm: number): Float32Array {
+  const out = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) {
+    out[i] = soup[i]!;
+    out[i + 1] = 0 - soup[i + 1]!;
+    out[i + 2] = heightMm - soup[i + 2]!;
+  }
+  return out;
+}
+
+/**
+ * A 32 mm base 4 mm tall with a hollow underside: a 1 mm rim around an inner face 1 mm up,
+ * so the faces on the floor cover 12 % of the footprint, under `MIN_BASE_COVERAGE`.
+ */
+function hollowBase(): Float32Array {
+  const soup: number[] = [];
+  addRecessBase(soup, 32, 4, 64, 30, 1);
+  return upsideDown(new Float32Array(soup), 4);
+}
+
 const figure = shapeOf(generateFigure(false));
 const figureOnBase = shapeOf(generateFigure(true));
 const base = shapeOf(roundBase(32, 4));
 
-describe('detectPairFile', () => {
+describe('baseOrientation', () => {
+  it('finds a hollow underside the height-relative band misses', () => {
+    const mesh = weldVertices(hollowBase()).mesh;
+    // The height-relative band sees the flat top as the underside and stands it upside down.
+    expect(resolveOrientation(mesh, {}).orientation.up).toBe('-z');
+    const oriented = baseOrientation(mesh);
+    expect(oriented).toMatchObject({ how: 'band', flatUnderside: true });
+    expect(oriented.detection.orientation.up).toBe('+z');
+    expect(UNDERSIDE_BAND_MM).toBe(2);
+    // Measured from its rim: a 32 mm round base.
+    expect(placeOriented(mesh, oriented).base).toMatchObject({ shape: 'round' });
+  });
+
   it('stands a square base on its underside, not on the wall the single-file detection picks', () => {
     const mesh = weldVertices(generatePlate(25, 3, 0.5, () => false)).mesh;
     expect(resolveOrientation(mesh, {}).orientation.up).toBe('+x');
-    expect(detectPairFile(mesh).orientation).toMatchObject({ up: '+z', method: 'base' });
+    expect(baseOrientation(mesh).detection.orientation).toMatchObject({ up: '+z', method: 'base' });
   });
 
-  it('takes the underside over a top with a recess in it', () => {
-    // The recess base upside down: its full underside faces +z, the recess -z.
-    const upright = generateRecessBase();
-    const soup = new Float32Array(upright.length);
+  it('takes a hollowed side as the underside when both sides are flat', () => {
+    const hollow = weldVertices(hollowBase()).mesh;
+    expect(baseOrientation(hollow).detection.orientation.up).toBe('+z');
+    const turned = weldVertices(upsideDown(hollowBase(), 4)).mesh;
+    expect(baseOrientation(turned).detection.orientation.up).toBe('-z');
+  });
+
+  it('keeps a plain disc with a seat on top the right way up', () => {
+    // The recess covers 19 % of the footprint: a seat, not a hollow underside.
+    const upright = weldVertices(generateRecessBase()).mesh;
+    expect(baseOrientation(upright).detection.orientation.up).toBe('+z');
+  });
+
+  it('stands a base exported tilted on its dominant plane', () => {
+    // A round base under a dome, tilted by 26° about x: no face is near an axis.
+    const soup: number[] = [];
+    addRoundBase(soup, [0, 0], 32, 3, 24);
+    addBlob(soup, [0, 0, 7], [14, 14, 6], 24, 0);
+    const turn = fromAxisAngle([1, 0, 0], 26);
+    const tilted = new Float32Array(soup.length);
     for (let i = 0; i < soup.length; i += 3) {
-      soup[i] = upright[i]!;
-      soup[i + 1] = 0 - upright[i + 1]!;
-      soup[i + 2] = 4 - upright[i + 2]!;
+      const [x, y, z] = apply(turn, [soup[i]!, soup[i + 1]!, soup[i + 2]!]);
+      tilted[i] = x;
+      tilted[i + 1] = y;
+      tilted[i + 2] = z;
     }
-    expect(detectPairFile(weldVertices(soup).mesh).orientation.up).toBe('-z');
+    const mesh = weldVertices(tilted).mesh;
+    const oriented = baseOrientation(mesh);
+    expect(oriented).toMatchObject({ how: 'dominant-plane', flatUnderside: true });
+    // Up in the file is the base's tilted +z.
+    expect(
+      angleDeg(fileUp(oriented.detection.orientation.rotation), apply(turn, [0, 0, 1])),
+    ).toBeLessThan(1);
+    const placed = placeOriented(mesh, oriented);
+    expect(placed.base?.shape).toBe('round');
+    expect(placed.base?.diameterMm).toBeCloseTo(32, 0);
   });
 
-  it('keeps the detection of a figure', () => {
-    const mesh = weldVertices(generateFigure(true)).mesh;
-    expect(detectPairFile(mesh)).toEqual(resolveOrientation(mesh, {}));
+  it('keeps the detection of a figure without an underside', () => {
+    const mesh = weldVertices(generateFigure(false)).mesh;
+    const oriented = baseOrientation(mesh);
+    expect(oriented).toMatchObject({ how: 'detector', flatUnderside: false });
+    expect(oriented.detection).toEqual(resolveOrientation(mesh, {}));
   });
 });
 

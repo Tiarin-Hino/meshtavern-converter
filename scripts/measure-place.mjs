@@ -28,8 +28,9 @@ const { addRecessBase, RECESS_BASE } = await load('./src/regression/shapes.ts');
 const { PLACE_BUDGET_MS, placeOnBase } = await load('./src/lib/pipeline/place.ts');
 const { readStlTriangles } = await load('./src/lib/pipeline/stl.ts');
 const { weldVertices, dropInvalidTriangles } = await load('./src/lib/pipeline/mesh.ts');
-const { coverageFor, orientAndPlace } = await load('./src/lib/pipeline/orient.ts');
-const { detectPairFile, guessRoles, shapeOfDetection } = await load('./src/lib/pipeline/pair.ts');
+const { baseOrientation, guessRoles, placeOriented, shapeOfFile } = await load(
+  './src/lib/pipeline/pair.ts',
+);
 
 const toBuffer = (bytes) =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -79,16 +80,14 @@ if (full) {
   const meshes = [figureStl(), baseStl()].map(
     (stl) => weldVertices(dropInvalidTriangles(readStlTriangles(stl)).soup).mesh,
   );
-  const detections = meshes.map((mesh) => detectPairFile(mesh));
-  const pairing = guessRoles([shapeOfDetection(detections[0]), shapeOfDetection(detections[1])]);
-  const [figure, base] = [1 - pairing.baseFile, pairing.baseFile].map((k) => {
-    const { orientation } = detections[k];
-    return orientAndPlace(
-      meshes[k],
-      orientation.rotation,
-      coverageFor(detections[k], orientation.up),
-    );
-  });
+  const standing = meshes.map((mesh) => baseOrientation(mesh));
+  const pairing = guessRoles([
+    shapeOfFile(meshes[0], standing[0]),
+    shapeOfFile(meshes[1], standing[1]),
+  ]);
+  const [figure, base] = [1 - pairing.baseFile, pairing.baseFile].map((k) =>
+    placeOriented(meshes[k], standing[k]),
+  );
   const triangles = (figure.mesh.indices.length + base.mesh.indices.length) / 3;
   console.log(`${triangles} triangles after welding; base is file ${pairing.baseFile + 1}`);
   for (let run = 1; run <= runs; run++) {

@@ -78,8 +78,15 @@ export function convexHullArea(xz: Float64Array): number {
  * detection's one pass over the triangles (`detectUpAxis` in orient.ts). This only
  * collects the floor outline: the x/z extent of the vertices within `RESTING_BAND` of the
  * floor. Null without a base.
+ *
+ * @param bandMm The floor band as a distance instead: the base file of a pair, whose hollow
+ *   underside leaves only a rim or a lip within 2 % of the height (#70).
  */
-export function measureBase({ positions }: IndexedMesh, coverage: number): MeasuredBase | null {
+export function measureBase(
+  { positions }: IndexedMesh,
+  coverage: number,
+  bandMm?: number,
+): MeasuredBase | null {
   if (positions.length === 0 || !(coverage >= MIN_BASE_COVERAGE)) return null;
   let floor = Infinity;
   let top = -Infinity;
@@ -88,7 +95,7 @@ export function measureBase({ positions }: IndexedMesh, coverage: number): Measu
     if (y < floor) floor = y;
     if (y > top) top = y;
   }
-  const band = (top - floor) * RESTING_BAND;
+  const band = bandMm ?? (top - floor) * RESTING_BAND;
 
   let count = 0;
   for (let i = 1; i < positions.length; i += 3) if (positions[i]! - floor <= band) count++;

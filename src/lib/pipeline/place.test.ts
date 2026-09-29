@@ -10,8 +10,7 @@ import {
 } from '../../regression/shapes';
 import { addRoundBase } from './base';
 import { weldVertices, type IndexedMesh } from './mesh';
-import { coverageFor, orientAndPlace } from './orient';
-import { detectPairFile } from './pair';
+import { baseOrientation, placeOriented } from './pair';
 import {
   chooseSpot,
   contactFootprint,
@@ -29,9 +28,7 @@ import {
 /** A Z-up soup as the pipeline leaves it: welded, oriented by its own detection, placed. */
 function placed(soup: Float32Array): IndexedMesh {
   const mesh = weldVertices(soup).mesh;
-  const detection = detectPairFile(mesh);
-  const { orientation } = detection;
-  return orientAndPlace(mesh, orientation.rotation, coverageFor(detection, orientation.up)).mesh;
+  return placeOriented(mesh, baseOrientation(mesh)).mesh;
 }
 
 function roundBase(diameterMm: number, heightMm: number): Float32Array {

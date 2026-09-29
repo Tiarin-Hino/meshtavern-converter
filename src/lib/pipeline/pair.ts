@@ -3,18 +3,32 @@
  * which of the two is the base, guessed from the shapes. Where the figure is set down on
  * the base is place.ts.
  */
-import { MIN_BASE_COVERAGE } from './base';
+import { measureBase, MIN_BASE_COVERAGE, type Vec3 } from './base';
 import type { IndexedMesh } from './mesh';
 import {
+  coverageFor,
+  LEVEL_TOLERANCE_DEG,
+  orientAndPlace,
   resolveOrientation,
   TO_Y_UP,
   UP_AXES,
+  type MeshScan,
   type Orientation,
+  type PlacedMesh,
   type UpAxis,
   type UpDetection,
 } from './orient';
+import { findBasins, topHeightMap } from './place';
 import { ConversionProblem } from './problems';
-import { AXIS_ROTATION } from './rotation';
+import {
+  angleDeg,
+  AXIS_ROTATION,
+  axisVector,
+  fileUp,
+  fromTo,
+  nearestUpAxis,
+  normalise,
+} from './rotation';
 
 /**
  * Both files have a flat underside: the one lower than this (height over the longer side of
@@ -56,44 +70,6 @@ export interface PairingOptions {
 }
 
 /**
- * The up detection of one file of a pair. A base file on its own is a flat slab, and a slab
- * has a flat face on more sides than its underside: the wall of a square base covers the
- * whole of its side's footprint, as much as the underside covers the top view, and wins the
- * single-file detection. So among the axes with a flat underside, the one along which the
- * file is thinnest is taken, and on that line the side with the larger coverage (the
- * underside rather than a top with a recess in it). A figure has a flat underside on one
- * axis at most and keeps its detection.
- */
-export function detectPairFile(mesh: IndexedMesh): UpDetection {
-  const detection = resolveOrientation(mesh, {});
-  const { coverageByAxis, scan } = detection;
-  const extent = [0, 1, 2].map((axis) => scan.max[axis]! - scan.min[axis]!);
-  let best = -1;
-  for (let candidate = 0; candidate < UP_AXES.length; candidate++) {
-    if (!(coverageByAxis[candidate]! >= MIN_BASE_COVERAGE)) continue;
-    if (best < 0) {
-      best = candidate;
-      continue;
-    }
-    const thinner = extent[candidate >> 1]! < extent[best >> 1]!;
-    const sameLine = candidate >> 1 === best >> 1;
-    if (thinner || (sameLine && coverageByAxis[candidate]! > coverageByAxis[best]!))
-      best = candidate;
-  }
-  if (best < 0 || UP_AXES[best] === detection.orientation.up) return detection;
-  const up = UP_AXES[best]!;
-  const orientation: Orientation = {
-    up,
-    method: 'base',
-    confidence: coverageByAxis[best]!,
-    rotation: AXIS_ROTATION[up],
-    tiltDeg: 0,
-    setDownDeg: 0,
-  };
-  return { ...detection, orientation };
-}
-
-/**
  * The shape of one file after its own detection and placing: a flat underside is what the
  * detection calls a base (`method === 'base'`).
  *
@@ -112,13 +88,322 @@ export function fileShape(orientation: Orientation, sizeMm: [number, number, num
 }
 
 /**
- * The shape of a file from its detection alone (`detectPairFile`): its orientation is a
- * quarter turn, so its size after placing is its bounding box with the axes exchanged.
+ * The underside of a base is found within this distance of the lowest point, not within a
+ * share of the height: base undersides are hollow (a rim on the floor, the inner face 1–1.5 mm
+ * up), and the 2 % band of a 5 mm base (0.1 mm) sees only the rim. 2 mm finds 860 of 864
+ * library bases (design note §12). _(proposal)_
  */
-export function shapeOfDetection({ orientation, scan }: UpDetection): FileShape {
+export const UNDERSIDE_BAND_MM = 2;
+/**
+ * A base exported tilted has no axis-aligned underside; its dominant plane is taken as the
+ * underside when it holds at least this share of the surface area. _(proposal)_
+ */
+export const DOMINANT_PLANE_SHARE = 0.1;
+/**
+ * Two opposite sides of a base whose underside coverages are this close are a plain disc with
+ * a flat top: the side with the larger basins (hollowed, lettered) is the underside. _(proposal)_
+ */
+export const UNDERSIDE_TIE = 0.1;
+/**
+ * ...and only when that side's basins cover at least this share of the footprint: a hollowed
+ * underside is one basin inside a rim, a seat for the figure on a plain top is much smaller
+ * (the 14 mm recess of the generated base is 19 %). _(proposal, the build's refinement of §12's
+ * tie-break: without it a plain disc with a seat on top comes out upside down)_
+ */
+export const HOLLOW_MIN_SHARE = 0.5;
+/** Normals within this angle of an axis or of the dominant plane count as facing it. */
+const FACING_COS = Math.cos((10 * Math.PI) / 180);
+
+/** How one file of a pair stands, and whether it has what a base needs (design note §4.1). */
+export interface FileOrientation {
+  /** The orientation and the one pass over the triangles, as `resolveOrientation` returns it. */
+  detection: UpDetection;
+  /** `band`: a flat underside within `UNDERSIDE_BAND_MM`. `dominant-plane`: a tilted export. `detector`: neither, the up detection's guess. */
+  how: 'band' | 'dominant-plane' | 'detector';
+  flatUnderside: boolean;
+  /** The underside's coverage of the footprint: what `orientAndPlace` measures the base with. */
+  coverage: number;
+}
+
+/**
+ * Per entry of `UP_AXES`, the area of faces within 10° of pointing down along that up axis
+ * whose centroid lies within `bandMm` of the lowest point, over the footprint seen from that
+ * axis. `sumTriangles` in orient.ts does the same with a band relative to the height.
+ */
+export function undersideCoverage(
+  { positions, indices }: IndexedMesh,
+  scan: MeshScan,
+  bandMm: number,
+): number[] {
   const { min, max } = scan;
-  const turned = TO_Y_UP[orientation.up](max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-  return fileShape(orientation, [Math.abs(turned[0]), Math.abs(turned[1]), Math.abs(turned[2])]);
+  const area = [0, 0, 0, 0, 0, 0];
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t]! * 3;
+    const b = indices[t + 1]! * 3;
+    const c = indices[t + 2]! * 3;
+    const ux = positions[b]! - positions[a]!;
+    const uy = positions[b + 1]! - positions[a + 1]!;
+    const uz = positions[b + 2]! - positions[a + 2]!;
+    const vx = positions[c]! - positions[a]!;
+    const vy = positions[c + 1]! - positions[a + 1]!;
+    const vz = positions[c + 2]! - positions[a + 2]!;
+    const n = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+    const area2 = Math.sqrt(n[0]! * n[0]! + n[1]! * n[1]! + n[2]! * n[2]!);
+    if (area2 === 0) continue;
+    const flat = FACING_COS * area2;
+    for (let k = 0; k < 3; k++) {
+      // Facing -k on the lowest plane of k means +k is up (entry 2k), and the other way round.
+      if (n[k]! <= -flat) {
+        const centroid = (positions[a + k]! + positions[b + k]! + positions[c + k]!) / 3;
+        if (centroid - min[k]! <= bandMm) area[2 * k] = area[2 * k]! + area2 / 2;
+      } else if (n[k]! >= flat) {
+        const centroid = (positions[a + k]! + positions[b + k]! + positions[c + k]!) / 3;
+        if (max[k]! - centroid <= bandMm) area[2 * k + 1] = area[2 * k + 1]! + area2 / 2;
+      }
+    }
+  }
+  const extent = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+  return area.map((value, entry) => {
+    const k = entry >> 1;
+    const footprint = extent[(k + 1) % 3]! * extent[(k + 2) % 3]!;
+    return footprint > 0 ? value / footprint : 0;
+  });
+}
+
+/**
+ * The direction with the most face area within 10° of it: normals binned on a cube-sphere
+ * (12 × 12 cells a face, by area), the best bin's direction refined twice as the area-weighted
+ * mean of the normals within 10° of it. For a base exported at an angle this is its
+ * underside's outward normal. `share` is that area over the whole surface.
+ */
+export function dominantPlane({ positions, indices }: IndexedMesh): {
+  normal: Vec3;
+  share: number;
+} {
+  const CELLS = 12;
+  const bins = new Float64Array(6 * CELLS * CELLS);
+  const count = indices.length / 3;
+  const normals = new Float64Array(count * 3);
+  const areas = new Float64Array(count);
+  let total = 0;
+  const cell = (value: number): number =>
+    Math.min(CELLS - 1, Math.floor(((value + 1) / 2) * CELLS));
+  for (let t = 0; t < count; t++) {
+    const a = indices[t * 3]! * 3;
+    const b = indices[t * 3 + 1]! * 3;
+    const c = indices[t * 3 + 2]! * 3;
+    const ux = positions[b]! - positions[a]!;
+    const uy = positions[b + 1]! - positions[a + 1]!;
+    const uz = positions[b + 2]! - positions[a + 2]!;
+    const vx = positions[c]! - positions[a]!;
+    const vy = positions[c + 1]! - positions[a + 1]!;
+    const vz = positions[c + 2]! - positions[a + 2]!;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    const area2 = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (area2 === 0) continue;
+    const x = nx / area2;
+    const y = ny / area2;
+    const z = nz / area2;
+    normals[t * 3] = x;
+    normals[t * 3 + 1] = y;
+    normals[t * 3 + 2] = z;
+    areas[t] = area2 / 2;
+    total += area2 / 2;
+    const ax = Math.abs(x);
+    const ay = Math.abs(y);
+    const az = Math.abs(z);
+    let bin: number;
+    if (ax >= ay && ax >= az)
+      bin = (x > 0 ? 0 : 1) * CELLS * CELLS + cell(z / ax) * CELLS + cell(y / ax);
+    else if (ay >= az) bin = (y > 0 ? 2 : 3) * CELLS * CELLS + cell(z / ay) * CELLS + cell(x / ay);
+    else bin = (z > 0 ? 4 : 5) * CELLS * CELLS + cell(y / az) * CELLS + cell(x / az);
+    bins[bin] = bins[bin]! + area2 / 2;
+  }
+  let best = 0;
+  for (let i = 1; i < bins.length; i++) if (bins[i]! > bins[best]!) best = i;
+  const face = Math.floor(best / (CELLS * CELLS));
+  const j = Math.floor((best % (CELLS * CELLS)) / CELLS);
+  const i = best % CELLS;
+  const u = -1 + ((i + 0.5) * 2) / CELLS;
+  const v = -1 + ((j + 0.5) * 2) / CELLS;
+  const sign = face % 2 === 0 ? 1 : -1;
+  let dir: Vec3 = face < 2 ? [sign, u, v] : face < 4 ? [u, sign, v] : [u, v, sign];
+  dir = normalise(dir);
+  let share = 0;
+  // Two passes over the faces facing the plane; the third only over those that lie in it, within
+  // `UNDERSIDE_BAND_MM` of the extreme, so faces inside the base that face the same way (a part
+  // that pokes into it) do not tilt the plane.
+  for (let pass = 0; pass < 3; pass++) {
+    let extreme = -Infinity;
+    if (pass === 2)
+      for (let v = 0; v < positions.length; v += 3) {
+        const h = positions[v]! * dir[0] + positions[v + 1]! * dir[1] + positions[v + 2]! * dir[2];
+        if (h > extreme) extreme = h;
+      }
+    let sx = 0;
+    let sy = 0;
+    let sz = 0;
+    let near = 0;
+    for (let t = 0; t < count; t++) {
+      const d =
+        normals[t * 3]! * dir[0] + normals[t * 3 + 1]! * dir[1] + normals[t * 3 + 2]! * dir[2];
+      if (d < FACING_COS) continue;
+      if (pass === 2) {
+        const a = indices[t * 3]! * 3;
+        const h = positions[a]! * dir[0] + positions[a + 1]! * dir[1] + positions[a + 2]! * dir[2];
+        if (extreme - h > UNDERSIDE_BAND_MM) continue;
+      }
+      sx += normals[t * 3]! * areas[t]!;
+      sy += normals[t * 3 + 1]! * areas[t]!;
+      sz += normals[t * 3 + 2]! * areas[t]!;
+      near += areas[t]!;
+    }
+    if (near === 0) break;
+    dir = normalise([sx, sy, sz]);
+    if (pass < 2) share = near / total;
+  }
+  return { normal: dir, share };
+}
+
+/** The area of the basins on the top of a mesh standing Y-up: how hollowed that side is. */
+function basinArea(mesh: IndexedMesh): number {
+  const map = topHeightMap(mesh);
+  return findBasins(map).reduce((sum, basin) => sum + basin.cells.length, 0) * map.cellMm ** 2;
+}
+
+const OPPOSITE: Record<UpAxis, UpAxis> = {
+  '+x': '-x',
+  '-x': '+x',
+  '+y': '-y',
+  '-y': '+y',
+  '+z': '-z',
+  '-z': '+z',
+};
+
+/**
+ * How a file of a pair stands, the way a base needs it (design note §4.1, §12):
+ *
+ * 1. A flat underside within `UNDERSIDE_BAND_MM` of the lowest point, covering
+ *    `MIN_BASE_COVERAGE` of the footprint. A slab has one on more sides than its underside (the
+ *    wall of a square base covers its side footprint), so of several the thinnest axis wins,
+ *    and on that axis the side with the larger coverage. When the two sides are within
+ *    `UNDERSIDE_TIE` (a plain disc, flat on both faces), the underside is the side whose
+ *    basins cover more, when they cover `HOLLOW_MIN_SHARE` of the footprint: a hollowed
+ *    underside inside a rim.
+ * 2. Otherwise a dominant plane with `DOMINANT_PLANE_SHARE` of the area, more than
+ *    `LEVEL_TOLERANCE_DEG` off every axis: a base exported tilted.
+ * 3. Otherwise the up detection's guess, and no flat underside.
+ */
+export function baseOrientation(mesh: IndexedMesh): FileOrientation {
+  const detection = resolveOrientation(mesh, {});
+  const { scan } = detection;
+  const coverage = undersideCoverage(mesh, scan, UNDERSIDE_BAND_MM);
+  const extent = [0, 1, 2].map((axis) => scan.max[axis]! - scan.min[axis]!);
+  let best = -1;
+  for (let candidate = 0; candidate < UP_AXES.length; candidate++) {
+    if (!(coverage[candidate]! >= MIN_BASE_COVERAGE)) continue;
+    if (
+      best < 0 ||
+      extent[candidate >> 1]! < extent[best >> 1]! ||
+      (candidate >> 1 === best >> 1 && coverage[candidate]! > coverage[best]!)
+    )
+      best = candidate;
+  }
+  if (best >= 0) {
+    let up = UP_AXES[best]!;
+    const other = OPPOSITE[up];
+    const otherCoverage = coverage[UP_AXES.indexOf(other)]!;
+    if (otherCoverage >= MIN_BASE_COVERAGE && coverage[best]! - otherCoverage <= UNDERSIDE_TIE) {
+      // Standing on `up`, the underside is the top of the mesh turned the other way.
+      const underside = (side: UpAxis): number =>
+        basinArea(orientAndPlace(mesh, OPPOSITE[side], 0).mesh);
+      const k = best >> 1;
+      const footprint = extent[(k + 1) % 3]! * extent[(k + 2) % 3]!;
+      const [here, there] = [underside(up), underside(other)];
+      // Only a hollow covering much of the footprint says underside; a seat on a plain disc's top
+      // or a logo is small, and then the coverage decides.
+      if (there > here && there >= HOLLOW_MIN_SHARE * footprint) up = other;
+    }
+    const upCoverage = coverage[UP_AXES.indexOf(up)]!;
+    return {
+      detection: { ...detection, orientation: quarterTurnOrientation(up, upCoverage) },
+      how: 'band',
+      flatUnderside: true,
+      coverage: upCoverage,
+    };
+  }
+  const plane = dominantPlane(mesh);
+  const offAxis = UP_AXES.every(
+    (axis) => angleDeg(plane.normal, axisVector(axis)) > LEVEL_TOLERANCE_DEG,
+  );
+  if (plane.share >= DOMINANT_PLANE_SHARE && offAxis) {
+    const rotation = fromTo(plane.normal, [0, -1, 0]);
+    const orientation: Orientation = {
+      up: nearestUpAxis(rotation),
+      method: 'base',
+      confidence: plane.share,
+      rotation,
+      tiltDeg: angleDeg(fileUp(rotation), axisVector(nearestUpAxis(rotation))),
+      setDownDeg: 0,
+    };
+    return {
+      detection: { ...detection, orientation },
+      how: 'dominant-plane',
+      flatUnderside: true,
+      coverage: plane.share,
+    };
+  }
+  return { detection, how: 'detector', flatUnderside: false, coverage: 0 };
+}
+
+function quarterTurnOrientation(up: UpAxis, confidence: number): Orientation {
+  return { up, method: 'base', confidence, rotation: AXIS_ROTATION[up], tiltDeg: 0, setDownDeg: 0 };
+}
+
+/**
+ * A file of a pair placed as it stands: Y-up on y = 0, centred on its base. A base's outline is
+ * measured within `UNDERSIDE_BAND_MM` of the floor, like its underside was found: the rim or lip
+ * of a hollow underside alone would give a base a few millimetres wide. A tilted export is not
+ * a quarter turn, so `orientAndPlace` does not measure it at all; it is measured here too.
+ */
+export function placeOriented(mesh: IndexedMesh, oriented: FileOrientation): PlacedMesh {
+  const { orientation } = oriented.detection;
+  if (oriented.how === 'detector')
+    return orientAndPlace(
+      mesh,
+      orientation.rotation,
+      coverageFor(oriented.detection, orientation.up),
+    );
+  const coverage = Math.max(oriented.coverage, MIN_BASE_COVERAGE);
+  const placed = orientAndPlace(mesh, orientation.rotation, coverage);
+  const measured = measureBase(placed.mesh, coverage, UNDERSIDE_BAND_MM);
+  if (!measured) return placed;
+  const [x, z] = measured.centre;
+  const positions = placed.mesh.positions;
+  if (x !== 0 || z !== 0)
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i] = positions[i]! - x;
+      positions[i + 2] = positions[i + 2]! - z;
+    }
+  return { ...placed, base: measured.base };
+}
+
+/**
+ * The shape of one file of a pair as `baseOrientation` stands it. A quarter turn only
+ * exchanges the axes of the bounding box; a tilted export is placed to be measured.
+ */
+export function shapeOfFile(mesh: IndexedMesh, oriented: FileOrientation): FileShape {
+  const { orientation, scan } = oriented.detection;
+  let sizeMm: [number, number, number];
+  if (oriented.how === 'dominant-plane') sizeMm = placeOriented(mesh, oriented).sizeMm;
+  else {
+    const { min, max } = scan;
+    const turned = TO_Y_UP[orientation.up](max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+    sizeMm = [Math.abs(turned[0]), Math.abs(turned[1]), Math.abs(turned[2])];
+  }
+  return { ...fileShape(orientation, sizeMm), flatUnderside: oriented.flatUnderside };
 }
 
 /**
