@@ -958,8 +958,15 @@ export function guardCentre(
     candidates: choice.candidates,
   });
   if (Math.max(contact.sizeMm[0], contact.sizeMm[1]) > WIDE_CONTACT_SHARE * width) return centred();
-  const trial = placeFigure(figure, map, choice, contact);
-  const [x, z] = boxCentre(trial.positions);
+  // Without a turn the figure only moves by the contact centre's shift, box centre included;
+  // a seat that turns it is placed for real.
+  const [x, z] =
+    choice.basin === null
+      ? [
+          figureCentre[0] + choice.spot.centre[0] - contact.centre[0],
+          figureCentre[1] + choice.spot.centre[1] - contact.centre[1],
+        ]
+      : boxCentre(placeFigure(figure, map, choice, contact).positions);
   return Math.sqrt(x * x + z * z) > CENTRE_MAX_SHARE * width ? centred() : choice;
 }
 
