@@ -9,11 +9,13 @@ import {
   coverageFor,
   LEVEL_TOLERANCE_DEG,
   orientAndPlace,
+  quarterTurnAxis,
   resolveOrientation,
   TO_Y_UP,
   UP_AXES,
   type MeshScan,
   type Orientation,
+  type OrientationOptions,
   type PlacedMesh,
   type UpAxis,
   type UpDetection,
@@ -118,8 +120,11 @@ const FACING_COS = Math.cos((10 * Math.PI) / 180);
 export interface FileOrientation {
   /** The orientation and the one pass over the triangles, as `resolveOrientation` returns it. */
   detection: UpDetection;
-  /** `band`: a flat underside within `UNDERSIDE_BAND_MM`. `dominant-plane`: a tilted export. `detector`: neither, the up detection's guess. */
-  how: 'band' | 'dominant-plane' | 'detector';
+  /**
+   * `band`: a flat underside within `UNDERSIDE_BAND_MM`. `dominant-plane`: a tilted export.
+   * `detector`: neither, the up detection's guess. `chosen`: the user's axis or turn (#92).
+   */
+  how: 'band' | 'dominant-plane' | 'detector' | 'chosen';
   flatUnderside: boolean;
   /** The underside's coverage of the footprint: what `orientAndPlace` measures the base with. */
   coverage: number;
@@ -428,6 +433,26 @@ export function baseOrientation(mesh: IndexedMesh): FileOrientation {
   return { detection, how: 'detector', flatUnderside: false, coverage: 0 };
 }
 
+/**
+ * How a base file stands when the user chose its axis or turn (issue #92, design note §4.2). On a
+ * quarter turn, its underside is measured in the 2 mm band like a detected one; any other
+ * rotation is taken as the base's underside, because the user said so, and is measured after
+ * placing, as a tilted export is.
+ *
+ * @param pass The one pass over the file's triangles, from `baseOrientation`.
+ */
+export function chosenBase(
+  mesh: IndexedMesh,
+  options: OrientationOptions,
+  pass: Omit<UpDetection, 'orientation'>,
+): FileOrientation {
+  const detection = resolveOrientation(mesh, options, pass);
+  const axis = quarterTurnAxis(detection.orientation.rotation);
+  if (!axis) return { detection, how: 'chosen', flatUnderside: true, coverage: MIN_BASE_COVERAGE };
+  const coverage = undersideCoverage(mesh, pass.scan, UNDERSIDE_BAND_MM)[UP_AXES.indexOf(axis)]!;
+  return { detection, how: 'chosen', flatUnderside: coverage >= MIN_BASE_COVERAGE, coverage };
+}
+
 function quarterTurnOrientation(up: UpAxis, confidence: number): Orientation {
   return { up, method: 'base', confidence, rotation: AXIS_ROTATION[up], tiltDeg: 0, setDownDeg: 0 };
 }
@@ -467,7 +492,9 @@ export function placeOriented(mesh: IndexedMesh, oriented: FileOrientation): Pla
 export function shapeOfFile(mesh: IndexedMesh, oriented: FileOrientation): FileShape {
   const { orientation, scan } = oriented.detection;
   let sizeMm: [number, number, number];
-  if (oriented.how === 'dominant-plane') sizeMm = placeOriented(mesh, oriented).sizeMm;
+  // A turn that is not a quarter turn exchanges no axes: the file is placed to be measured.
+  if (oriented.how === 'dominant-plane' || !quarterTurnAxis(orientation.rotation))
+    sizeMm = placeOriented(mesh, oriented).sizeMm;
   else {
     const { min, max } = scan;
     const turned = TO_Y_UP[orientation.up](max[0] - min[0], max[1] - min[1], max[2] - min[2]);

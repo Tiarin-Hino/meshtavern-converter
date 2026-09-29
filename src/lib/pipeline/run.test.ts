@@ -4,7 +4,7 @@ import { generateBumpySheet } from './generate';
 import type { AskUp, UpAnswer, UpQuestion } from './ask';
 import type { OrientationOptions } from './orient';
 import { BAKE_STEPS, runPipeline, STEPS, type ConversionResult, type Progress } from './run';
-import type { Rotation } from './rotation';
+import { AXIS_ROTATION, fromAxisAngle, multiply, type Rotation } from './rotation';
 import { PLAIN_BASE_HEIGHT_MM } from './base';
 import { encodeBinaryStl } from './stl';
 import {
@@ -326,6 +326,40 @@ describe('runPipeline with a base file (#70)', () => {
     await expect(
       runPipeline(figure(), { bake: 0, secondStl: figure(), memoryBudgetBytes: budget }),
     ).rejects.toMatchObject({ code: 'too-large' });
+  }, 60_000);
+
+  it('stands the base as the user chose: turned over, or turned freely (#92)', async () => {
+    const detected = await runPipeline(figure(), { bake: 0, secondStl: base() });
+    expect(detected.pair!.baseOrientation).toMatchObject({ up: '+z', method: 'base' });
+    expect(detected.choices).toEqual({ orientation: {}, baseOrientation: {}, pairing: {} });
+    const unchanged = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      baseOrientation: {},
+    });
+    expectSameMini(unchanged, detected);
+
+    // Upside down, the flat underside is the top the figure stands on, 4 mm up.
+    const over = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      baseOrientation: { up: '-z' },
+    });
+    expect(over.pair!.baseOrientation).toMatchObject({ up: '-z', method: 'manual' });
+    expect(over.pair!.pairing.files[1]).toMatchObject({ up: '-z', upMethod: 'manual' });
+    expect(over.pair!.placement.spot.kind).toBe('flat');
+    expect(over.pair!.placement.offsetMm[2]).toBeCloseTo(4, 3);
+    expect(over.sizing.base).toMatchObject({ shape: 'round' });
+    expect(over.sizing.base!.diameterMm).toBeCloseTo(32, 0);
+
+    const rotation = multiply(fromAxisAngle([1, 0, 0], 5), AXIS_ROTATION['+z']);
+    const tilted = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      baseOrientation: { rotation },
+    });
+    expect(tilted.pair!.baseOrientation.rotation).toBe(rotation);
+    expect(tilted.choices.baseOrientation).toEqual({ rotation });
   }, 60_000);
 
   it('keeps a registered pair where the files put it, standing the way its base does', async () => {

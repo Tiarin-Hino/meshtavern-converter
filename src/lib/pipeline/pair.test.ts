@@ -14,6 +14,7 @@ import { resolveOrientation } from './orient';
 import {
   BASE_MAX_ASPECT,
   baseOrientation,
+  chosenBase,
   figureUpCandidates,
   printCut,
   PRINT_CUT_MIN_MM2,
@@ -25,7 +26,7 @@ import {
   type FileShape,
 } from './pair';
 import { ConversionProblem } from './problems';
-import { angleDeg, apply, fileUp, fromAxisAngle } from './rotation';
+import { angleDeg, apply, AXIS_ROTATION, fileUp, fromAxisAngle, multiply } from './rotation';
 
 /** The shape the pipeline sees for a Z-up soup, standing as `baseOrientation` stands it. */
 function shapeOf(soup: Float32Array): FileShape {
@@ -133,6 +134,38 @@ describe('baseOrientation', () => {
     const oriented = baseOrientation(mesh);
     expect(oriented).toMatchObject({ how: 'detector', flatUnderside: false });
     expect(oriented.detection).toEqual(resolveOrientation(mesh, {}));
+  });
+});
+
+describe('chosenBase (#92)', () => {
+  const mesh = weldVertices(generateRecessBase()).mesh;
+  const { detection } = baseOrientation(mesh);
+
+  it('measures a base turned over in the 2 mm band: its top, recess and all, is the underside', () => {
+    const turned = chosenBase(mesh, { up: '-z' }, detection);
+    expect(turned).toMatchObject({ how: 'chosen', flatUnderside: true });
+    expect(turned.detection.orientation).toMatchObject({ up: '-z', method: 'manual' });
+    // The top ring and the recess floor 1 mm below it: the whole disc.
+    expect(turned.coverage).toBeGreaterThan(0.7);
+    const placed = placeOriented(mesh, turned);
+    expect(placed.base).toMatchObject({ shape: 'round' });
+    expect(placed.base!.diameterMm).toBeCloseTo(32, 0);
+  });
+
+  it('sees no flat underside on a file that has none', () => {
+    const figure = weldVertices(generateFigure(false)).mesh;
+    const chosen = chosenBase(figure, { up: '+z' }, baseOrientation(figure).detection);
+    expect(chosen).toMatchObject({ how: 'chosen', flatUnderside: false });
+  });
+
+  it('takes a free turn as the underside, measured after placing', () => {
+    const rotation = multiply(fromAxisAngle([1, 0, 0], 5), AXIS_ROTATION['+z']);
+    const tilted = chosenBase(mesh, { rotation }, detection);
+    expect(tilted).toMatchObject({ how: 'chosen', flatUnderside: true });
+    expect(tilted.detection.orientation.rotation).toBe(rotation);
+    // Its shape is measured as it stands: 4 mm high plus the tilt over 32 mm.
+    const shape = shapeOfFile(mesh, tilted);
+    expect(shape.sizeMm[1]).toBeGreaterThan(4 + 32 * Math.sin((5 * Math.PI) / 180) - 0.5);
   });
 });
 

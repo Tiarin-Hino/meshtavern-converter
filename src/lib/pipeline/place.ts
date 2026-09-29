@@ -8,7 +8,7 @@
  * the same place (the regression pair depends on it).
  */
 import type { IndexedMesh } from './mesh';
-import { turnPositions, type PlacedMesh } from './orient';
+import { turnPositions, type Orientation, type PlacedMesh } from './orient';
 import type { Rotation } from './rotation';
 import type { Pairing } from './pair';
 import { restingPoints } from './stance';
@@ -677,6 +677,8 @@ export interface PairResult {
   /** The merged full-detail mesh lists the figure's vertices and triangles first: the page splits it there for the preview (§6). */
   figureVertices: number;
   figureTriangles: number;
+  /** How the base file stands: its detection, or the user's choice (#92). */
+  baseOrientation: Orientation;
 }
 
 /**
@@ -1019,7 +1021,7 @@ export function placeOnBase(
   options: PlacementOptions = {},
   files?: PairFiles,
   alternative?: PlacedMesh,
-): { merged: PlacedMesh; pair: PairResult; candidate: 0 | 1 } {
+): { merged: PlacedMesh; pair: Omit<PairResult, 'baseOrientation'>; candidate: 0 | 1 } {
   const map = topHeightMap(base.mesh);
   const basins = findBasins(map);
   const registered = files ? registeredFigure(files, base, map) : null;

@@ -28,10 +28,12 @@ import {
 } from './orient';
 import {
   baseOrientation,
+  chosenBase,
   figureUpCandidates,
   guessRoles,
   placeOriented,
   shapeOfFile,
+  type FileShape,
   type Pairing,
   type PairingOptions,
 } from './pair';
@@ -207,6 +209,8 @@ export interface PipelineOptions {
   pairing?: PairingOptions;
   /** For a pair: the user moved, turned, raised or lowered the figure on its base. */
   placement?: PlacementOptions;
+  /** For a pair: the user's axis or turn for the base file. Left out, the base stands by its underside (#70). */
+  baseOrientation?: OrientationOptions;
   /** Stops after the orient step and asks which way is up (#92). Left out, nothing is asked: the path of today. */
   askUp?: AskUp;
   /** With `askUp`: which files are asked about. */
@@ -265,22 +269,27 @@ function orientPair(
   meshes: [IndexedMesh, IndexedMesh],
   orientationOptions: OrientationOptions,
   pairingOptions: PairingOptions,
+  baseOptions: OrientationOptions,
 ): OrientedPair {
   const standing = meshes.map((mesh) => baseOrientation(mesh));
-  const pairing = guessRoles(
+  const guessed = guessRoles(
     [shapeOfFile(meshes[0], standing[0]!), shapeOfFile(meshes[1], standing[1]!)],
     pairingOptions,
   );
-  const figureMesh = meshes[1 - pairing.baseFile]!;
-  const baseMesh = meshes[pairing.baseFile]!;
+  const figureMesh = meshes[1 - guessed.baseFile]!;
+  const baseMesh = meshes[guessed.baseFile]!;
+  // The user's axis or turn for the base (#92); its shape is recorded as it then stands.
+  const baseStanding = choosesOrientation(baseOptions)
+    ? chosenBase(baseMesh, baseOptions, standing[guessed.baseFile]!.detection)
+    : standing[guessed.baseFile]!;
+  const pairing = withFileShape(guessed, guessed.baseFile, shapeOfFile(baseMesh, baseStanding));
   // A second candidate is placed by the place step; the pass is not run again.
-  const pass = standing[1 - pairing.baseFile]!.detection;
+  const pass = standing[1 - guessed.baseFile]!.detection;
   const chosen = choosesOrientation(orientationOptions);
   const candidates = chosen
     ? [resolveOrientation(figureMesh, orientationOptions, pass)]
     : figureUpCandidates(figureMesh, pass);
   const figureDetection = candidates[0]!;
-  const baseStanding = standing[pairing.baseFile]!;
   return {
     figure: placeAs(figureMesh, figureDetection),
     orientation: figureDetection.orientation,
@@ -302,6 +311,14 @@ function orientPair(
   };
 }
 
+/** The pairing with one file's shape replaced: how that file finally stands. */
+function withFileShape(pairing: Pairing, file: 0 | 1, shape: FileShape): Pairing {
+  if (pairing.files[file] === shape) return pairing;
+  const files: [FileShape, FileShape] = [...pairing.files];
+  files[file] = shape;
+  return { ...pairing, files };
+}
+
 /** The place step for a pair, and the orientation the figure ends up with. */
 function placeOrientedPair(
   oriented: OrientedPair,
@@ -313,7 +330,8 @@ function placeOrientedPair(
   if (placed.candidate === 1 && alternative) orientation = alternative.orientation;
   // A registered figure stands the way its base does.
   if (placed.pair.placement.spot.kind === 'registered') orientation = oriented.baseOrientation;
-  return { ...placed, orientation };
+  const pair: PairResult = { ...placed.pair, baseOrientation: oriented.baseOrientation };
+  return { merged: placed.merged, pair, orientation };
 }
 
 /** Where a figure was set on its base, without the steps after placing (development and tooling). */
@@ -335,12 +353,17 @@ export interface PairPlacement {
 export function placePairOnly(
   stl: ArrayBuffer,
   secondStl: ArrayBuffer,
-  options: Pick<PipelineOptions, 'orientation' | 'pairing' | 'placement'> = {},
+  options: Pick<PipelineOptions, 'orientation' | 'pairing' | 'placement' | 'baseOrientation'> = {},
 ): PairPlacement {
   const meshes = [stl, secondStl].map(
     (file) => weldVertices(dropInvalidTriangles(readStlTriangles(file)).soup).mesh,
   ) as [IndexedMesh, IndexedMesh];
-  const oriented = orientPair(meshes, options.orientation ?? {}, options.pairing ?? {});
+  const oriented = orientPair(
+    meshes,
+    options.orientation ?? {},
+    options.pairing ?? {},
+    options.baseOrientation ?? {},
+  );
   const placed = placeOrientedPair(oriented, options.placement ?? {});
   return {
     pair: placed.pair,
@@ -367,6 +390,7 @@ export async function runPipeline(
     secondStl,
     pairing: pairingOptions = {},
     placement: placementOptions = {},
+    baseOrientation: baseOrientationOptions = {},
     askUp,
     ask: askOptions = {},
   }: PipelineOptions = {},
@@ -497,7 +521,11 @@ export async function runPipeline(
     figure.mesh.positions.byteLength +
     (base?.mesh.positions.byteLength ?? 0);
   let choices: UpChoices = secondStl
-    ? { orientation: orientationOptions, pairing: pairingOptions }
+    ? {
+        orientation: orientationOptions,
+        baseOrientation: baseOrientationOptions,
+        pairing: pairingOptions,
+      }
     : { orientation: orientationOptions };
   let oriented:
     OrientedPair | { figure: PlacedMesh; orientation: Orientation; base: null; pairing: null };
@@ -525,6 +553,7 @@ export async function runPipeline(
           welds.map((weld) => weld.mesh) as [IndexedMesh, IndexedMesh],
           orientationOptions,
           pairingOptions,
+          baseOrientationOptions,
         ),
       (o) => orientedBytes(o.figure, o.base),
     );
