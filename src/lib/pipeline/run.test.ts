@@ -11,6 +11,7 @@ import {
   generateFigure,
   generatePegFigure,
   generatePuddleFigure,
+  generateQuadruped,
   generateRecessBase,
   generateSwarm,
 } from '../../regression/shapes';
@@ -550,5 +551,153 @@ describe('runPipeline asking which way is up (#92)', () => {
     expect(stats.asked[0]!.waitedMs).toBeGreaterThanOrEqual(WAIT_MS - 5);
     expect(stats.timings.find((t) => t.step === 'orient')!.ms).toBeLessThan(WAIT_MS);
     expect(stats.totalMs).toBeCloseTo(stats.timings.reduce((sum, t) => sum + t.ms, 0));
+  }, 60_000);
+});
+
+describe('runPipeline asking about a pair (#92)', () => {
+  const figure = (): ArrayBuffer => encodeBinaryStl(generatePuddleFigure(12));
+  const base = (): ArrayBuffer => encodeBinaryStl(generateRecessBase());
+  const swap: UpAnswer = { orientation: {}, confirm: false, swap: true };
+
+  /** The puddle figure raised onto the recess floor in its own file: the two files share one frame. */
+  function registeredFigure(): ArrayBuffer {
+    const soup = generatePuddleFigure(12);
+    for (let i = 2; i < soup.length; i += 3) soup[i] = soup[i]! + 3;
+    return encodeBinaryStl(soup);
+  }
+
+  it('asks about the base, then the figure; confirming both converts as without asking', async () => {
+    const plain = await runPipeline(figure(), { bake: 0, secondStl: base() });
+    const ask = answering(confirm(), confirm());
+    const asked = await runPipeline(figure(), { bake: 0, secondStl: base(), askUp: ask });
+    expectSameMini(asked, plain);
+    const [baseQuestion, figureQuestion] = ask.questions;
+    expect(baseQuestion).toMatchObject({
+      role: 'base',
+      file: 1,
+      reason: 'underside',
+      orientation: { up: '+z', method: 'base' },
+      warnings: ['figure-has-its-own-base'],
+    });
+    expect(baseQuestion!.base).toMatchObject({ shape: 'round' });
+    expect(baseQuestion!.mesh!.indices.length).toBe(generateRecessBase().length / 3);
+    expect(figureQuestion).toMatchObject({ role: 'figure', file: 0, reason: 'base' });
+    expect(figureQuestion!.mesh).toBeDefined();
+    expect(asked.stats.asked.map((a) => [a.role, a.tries])).toEqual([
+      ['base', 0],
+      ['figure', 0],
+    ]);
+    expect(asked.choices).toEqual({ orientation: {}, baseOrientation: {}, pairing: {} });
+    expect(asked.pair!.pairing.method).toBe('guessed');
+    expect(asked.stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+  }, 60_000);
+
+  it('shows a registered figure the way its base stands; a changed figure is not registered', async () => {
+    const ask = answering(confirm(), confirm());
+    const registered = await runPipeline(registeredFigure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+    });
+    expect(ask.questions[1]).toMatchObject({ role: 'figure', reason: 'registered' });
+    expect(ask.questions[1]!.orientation.rotation).toEqual(ask.questions[0]!.orientation.rotation);
+    expect(registered.pair!.placement.spot.kind).toBe('registered');
+
+    const changed = await runPipeline(registeredFigure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: answering(confirm(), confirm({ up: '+z' })),
+    });
+    expect(changed.pair!.placement.spot.kind).not.toBe('registered');
+    expect(changed.orientation).toMatchObject({ up: '+z', method: 'manual' });
+  }, 60_000);
+
+  it('tests the figure against the base as it was confirmed', async () => {
+    // The base turned over: the files no longer meet where they did.
+    const ask = answering(tryOut({ up: '-z' }), confirm({ up: '-z' }), confirm());
+    const result = await runPipeline(registeredFigure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+    });
+    expect(ask.questions[1]).toMatchObject({ role: 'base', reason: 'chosen' });
+    expect(ask.questions[1]!.mesh).toBeUndefined();
+    expect(ask.questions[2]).toMatchObject({ role: 'figure', reason: 'base' });
+    expect(result.pair!.placement.spot.kind).toBe('flat');
+    expect(result.pair!.baseOrientation).toMatchObject({ up: '-z', method: 'manual' });
+    expect(result.choices).toEqual({
+      orientation: {},
+      baseOrientation: { up: '-z' },
+      pairing: {},
+    });
+    expect(result.stats.asked.map((a) => [a.role, a.tries])).toEqual([
+      ['base', 1],
+      ['figure', 0],
+    ]);
+  }, 60_000);
+
+  it('starts again with the other file as the base after a swap, at either question', async () => {
+    const atBase = answering(swap, confirm(), confirm());
+    const swappedAtBase = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: atBase,
+    });
+    expect(atBase.questions.map((q) => [q.role, q.file, q.mesh !== undefined])).toEqual([
+      ['base', 1, true],
+      ['base', 0, true],
+      // The recess base's mesh went to the page with the first question.
+      ['figure', 1, false],
+    ]);
+    expect(swappedAtBase.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
+    expect(swappedAtBase.choices.pairing).toEqual({ swap: true });
+
+    const atFigure = answering(confirm(), swap, confirm(), confirm());
+    const swappedAtFigure = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: atFigure,
+    });
+    expect(atFigure.questions.map((q) => [q.role, q.file])).toEqual([
+      ['base', 1],
+      ['figure', 0],
+      ['base', 0],
+      ['figure', 1],
+    ]);
+    expect(swappedAtFigure.choices.pairing).toEqual({ swap: true });
+    expectSameMini(swappedAtFigure, swappedAtBase);
+  }, 60_000);
+
+  it('asks which file is the base when neither has a flat underside, and keeps the answer', async () => {
+    const standing = (): ArrayBuffer => encodeBinaryStl(generateFigure(false));
+    const low = (): ArrayBuffer => encodeBinaryStl(generateQuadruped());
+    await expect(runPipeline(standing(), { bake: 0, secondStl: low() })).rejects.toMatchObject({
+      code: 'not-a-pair',
+    });
+
+    const ask = answering(confirm(), confirm());
+    const proposed = await runPipeline(standing(), { bake: 0, secondStl: low(), askUp: ask });
+    expect(ask.questions[0]).toMatchObject({
+      role: 'base',
+      file: 1,
+      reason: 'guess',
+      warnings: ['no-flat-underside'],
+    });
+    expect(proposed.pair!.pairing).toMatchObject({
+      baseFile: 1,
+      method: 'manual',
+      warnings: ['no-flat-underside'],
+    });
+    expect(proposed.choices.pairing).toEqual({ baseFile: 1 });
+    const again = await runPipeline(standing(), { bake: 0, secondStl: low(), ...proposed.choices });
+    expectSameMini(again, proposed);
+
+    const swapped = await runPipeline(standing(), {
+      bake: 0,
+      secondStl: low(),
+      askUp: answering(swap, confirm(), confirm()),
+    });
+    expect(swapped.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
+    expect(swapped.choices.pairing).toEqual({ baseFile: 0 });
   }, 60_000);
 });

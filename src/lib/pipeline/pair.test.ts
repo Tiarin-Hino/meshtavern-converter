@@ -215,6 +215,31 @@ describe('guessRoles', () => {
     expect(refuse).toThrow(/Neither of these files has a flat underside/);
   });
 
+  it('proposes the lower, wider of two files without a flat underside, when asked to (#92)', () => {
+    const low = lowCreatureShape();
+    expect(guessRoles([figure, low], {}, 'propose')).toEqual({
+      baseFile: 1,
+      method: 'guessed',
+      warnings: ['no-flat-underside'],
+      files: [figure, low],
+    });
+    expect(guessRoles([low, figure], {}, 'propose').baseFile).toBe(0);
+    expect(guessRoles([figure, figure], {}, 'propose').baseFile).toBe(1);
+  });
+
+  it('takes the file named as the base, and never refuses then (#92)', () => {
+    expect(guessRoles([figure, lowCreatureShape()], { baseFile: 0 })).toMatchObject({
+      baseFile: 0,
+      method: 'manual',
+      warnings: ['no-flat-underside'],
+    });
+    expect(guessRoles([figure, base], { baseFile: 0, swap: true })).toMatchObject({
+      baseFile: 0,
+      method: 'manual',
+      warnings: [],
+    });
+  });
+
   it('swaps the roles on request and keeps the warnings as seen', () => {
     expect(guessRoles([figure, base], { swap: true })).toMatchObject({
       baseFile: 0,

@@ -44,7 +44,9 @@ export type PairWarning =
   /** Both files have a flat underside and are low and wide; the lower one was taken as the base. */
   | 'both-look-like-bases'
   /** The figure has a flat underside of its own (an integral base); it was set on the base anyway. */
-  | 'figure-has-its-own-base';
+  | 'figure-has-its-own-base'
+  /** Neither file has a flat underside; the lower, wider one was taken as the base until the person says otherwise (#92). */
+  | 'no-flat-underside';
 
 export interface FileShape {
   /** Width, height and depth in file units after the file's own orientation. */
@@ -69,6 +71,8 @@ export interface Pairing {
 export interface PairingOptions {
   /** The other file is the base: the user swapped the guess. */
   swap?: boolean;
+  /** This file is the base, whatever the shapes say: 0 the first given, 1 the second. Overrides the guess and `swap` (#92). */
+  baseFile?: 0 | 1;
 }
 
 /**
@@ -508,8 +512,17 @@ export function shapeOfFile(mesh: IndexedMesh, oriented: FileOrientation): FileS
  * aspect; with two, the lower aspect, with a warning; with none, a `not-a-pair` problem,
  * because two figures cannot be set on each other. `swap` exchanges the roles after the guess;
  * the warnings stay as computed.
+ *
+ * @param whenNone What happens when neither file has a flat underside (#92, design note
+ *   docs/design/up-before-reduce.md §4.2): `refuse`, or `propose` the lower, wider one as the
+ *   base with the warning `no-flat-underside`, for a person to confirm or swap. `baseFile` in the
+ *   options sets the roles without a guess and never refuses.
  */
-export function guessRoles(files: [FileShape, FileShape], options: PairingOptions = {}): Pairing {
+export function guessRoles(
+  files: [FileShape, FileShape],
+  options: PairingOptions = {},
+  whenNone: 'refuse' | 'propose' = 'refuse',
+): Pairing {
   const [a, b] = files;
   let baseFile: 0 | 1;
   const warnings: PairWarning[] = [];
@@ -522,12 +535,18 @@ export function guessRoles(files: [FileShape, FileShape], options: PairingOption
     );
   } else if (a.flatUnderside || b.flatUnderside) {
     baseFile = a.flatUnderside ? 0 : 1;
+  } else if (whenNone === 'propose' || options.baseFile !== undefined) {
+    // Equal aspects: the second file, as the rule for two flat undersides keeps the first as the figure.
+    baseFile = b.aspect <= a.aspect ? 1 : 0;
+    warnings.push('no-flat-underside');
   } else {
     throw new ConversionProblem(
       'not-a-pair',
       `aspects ${a.aspect.toFixed(2)} and ${b.aspect.toFixed(2)}, no flat underside`,
     );
   }
+  if (options.baseFile !== undefined)
+    return { baseFile: options.baseFile, method: 'manual', warnings, files };
   if (options.swap) baseFile = baseFile === 0 ? 1 : 0;
   return { baseFile, method: options.swap ? 'manual' : 'guessed', warnings, files };
 }

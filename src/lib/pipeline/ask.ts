@@ -6,7 +6,7 @@
 import type { Vec3 } from './base';
 import type { IndexedMesh } from './mesh';
 import { quarterTurnAxis, TO_Y_UP, type Orientation, type OrientationOptions } from './orient';
-import type { PairWarning } from './pair';
+import type { FileOrientation, PairWarning } from './pair';
 import { toMatrix, type Rotation } from './rotation';
 import type { BaseMeasurement } from './size';
 
@@ -141,6 +141,20 @@ export function reasonOf(orientation: Orientation): UpReason {
     case 'cut':
       return 'cut';
     case 'manual':
+      return 'chosen';
+  }
+}
+
+/** Why the base file of a pair stands as it does, from how it was stood. */
+export function reasonOfBase(standing: FileOrientation): UpReason {
+  switch (standing.how) {
+    case 'band':
+      return 'underside';
+    case 'dominant-plane':
+      return 'tilted';
+    case 'detector':
+      return 'guess';
+    case 'chosen':
       return 'chosen';
   }
 }
