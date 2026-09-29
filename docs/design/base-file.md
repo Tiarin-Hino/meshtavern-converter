@@ -364,13 +364,87 @@ Built rule right or plausible 10 of 15, wrong 3 (two by the figure's up, one wit
 
 **How this relates to the build's own survey** (PR #89, comments of 2026-09-27, 60 pairs). The two agree where they overlap and each found something the other did not. The build found **registered pairs** (13 of 40 same-way-up pairs stand on their base in the files' own frame) and shallow **foot recesses of 0.3–0.5 mm** (hence `RECESS_MIN_DEPTH_MM` 0.25); this research ran at 0.4 mm and in the files' own axes, so its "59 % have no basin" is "at 0.4 mm" and its dead end (a) is superseded by the build's registration test, which turns both files by the base's up first. This research found the **hollow undersides' cause and cure** (the 2 mm band, 860 of 864, rather than lowering the coverage to 8 %, which the build proposed and which still leaves the rim at 1 % on `flying-02`), the **tilted exports**, the **print-cut plane** (which orients `flying-04`'s figure the right way up without the registration test), and that seats are the minority and **soles key into terrain** (the surface match). Build question 2's upside-down bases (a flat top over a hollow underside, about 10 of 60): under the 2 mm band the underside and a plain flat top come out close (0.76 against up to 0.7), so registration decides when it applies, and otherwise the side whose 2 mm coverage is larger; a "Turn the base over" button is the honest fallback and worth its two lines. Build question 3: in this library the "flat recess" kind is the shallow foot recess (`humanoid-01`, `humanoid-02` by the build's reading), the "sculpted top" kind is most of the corpus, and peg-and-hole stays on the fixtures unless the PM brings a pair.
 
-**What this revision asks of the built code** (for `/continue-pr` once the PM has decided; the built code follows the note of 2026-09-27 and the build's own deviations listed on the PR):
+**What this revision asks of the built code** (PM decision of 2026-09-29, given as "apply all the fixes we discussed": items 1–7 are to be built by `/continue-pr 89`; that reading also answers the build's three questions: yes to the registration test, the 2 mm band rather than a lower coverage, and the peg-and-hole kind on the generated fixture only. The PM can veto any item on the PR):
 
-1. `baseOrientation` in pair.ts: the 2 mm underside band, the dominant plane, and the plain-disc tie-break (§4.1, §12) in place of `detectPairFile`'s coverage rule; the refusal then only when neither file has an underside by that test.
-2. The registration test as the first branch of the placement (§4.4), if the PM says yes.
-3. The figure's up for a pair by the two-candidate rule (§9 step 4), until #90 changes the single-file detection.
-4. Seats by fit and compactness, no flat-floor test (§4.3); `RECESS_MIN_DEPTH_MM` stays 0.25; the one-cell clearance stays; the centre guard of §4.4 (a figure's box centre more than 30 % of the base's width from the middle is centred instead; a contact wider than 80 % of the base is caught before the search).
-5. `SpotKind` gains `registered`; the placement line says "Set where the files put it".
-6. The corpus report writes the pairs' sheets the way `out/research70/scripts/sheets.mjs` does (three views, one column per run), because the sheets decided everything above; the fourteen pairs are in `corpus/`, and `mounted-01` is noted as a three-piece set.
+1. `baseOrientation` in pair.ts: the 2 mm underside band, the dominant plane, and the plain-disc tie-break (§4.1, §12) in place of `detectPairFile`'s coverage rule; the refusal then only when neither file has an underside by that test. The two refused corpus bases are the acceptance: both pairs convert, the giant places right as built, the wyvern with the axis `+y`.
+2. The registration test as the first branch of the placement (§4.4).
+3. The figure's up for a pair by the two-candidate rule (§9 step 4), until #90 changes the single-file detection. Set down is not applied to the figure of a pair unless the user asks.
+4. Seats by fit and compactness, no flat-floor test (§4.3); `RECESS_MIN_DEPTH_MM` stays 0.25; the one-cell clearance stays; the centre guard of §4.4 (a figure's box centre more than 30 % of the base's width from the middle is centred instead; a contact wider than 80 % of the base is caught before the search). The dragon and the beast rider are the acceptance: within `CENTRE_GUARD_ACCEPT_MM = 12` of the recorded placements (§13).
+5. `SpotKind` gains `registered` and the line "Set where the files put it"; the centre guard's line "Set over the middle of the base".
+6. The corpus report writes the pairs' sheets the way `out/research70/scripts/sheets.mjs` does (three views, one column per run) and scores every pair against its recorded placement (§13); the fifteen pairs are in `corpus/`, `mounted-01` noted as a three-piece set.
+7. The feedback mode of §13.
 
 **For the PM to look at** (`out/research70/`): `corpus4/img/*--base-top.png` and `*--figure-bottom.png` for the fourteen corpus pairs (green box: seat or flat spot; cyan: the soles at that spot; orange: the surface match's position), `sample48c/img/` for the 48 sampled pairs with the confident print-cut orientation. The decisions this research asks for are in §10 and on the PR.
+
+## 13. Feedback mode: recording the right placement (PM request, 2026-09-29)
+
+The four placements the PM made by hand this week decided more than every heuristic experiment; the PM wants to do the same over a bigger corpus and keep the data. This section designs that loop so the build does not have to: a script that steps through pairs in the real page, records what the PM does, and a report that scores every rule change against the record.
+
+### 13.1 What is recorded
+
+One JSON file per pair, `out/feedback/<key>.json`, git-ignored (the bigger corpus is the PM's licensed library, and its keys are library paths):
+
+```ts
+export interface PlacementRecord {
+  /** The pair: corpus key (`flying/flying-02`) or a path relative to the library root; never a product name in anything committed. */
+  key: string;
+  figureFile: string;
+  baseFile: string;
+  date: string;
+  /** `right`: the automatic placement stands. `placed`: the PM changed it; the fields below are the PM's. `skipped`: no judgement. `refused`: the page refused the pair (error text kept). */
+  verdict: 'right' | 'placed' | 'skipped' | 'refused';
+  note?: string;
+  /** The figure's orientation as the PM left it: what the pipeline's `Orientation` says (up, method, rotation, tiltDeg). */
+  orientation: Orientation;
+  /** Which file was taken as the base and whether the PM swapped. */
+  pairing: { baseFile: 0 | 1; method: 'guessed' | 'manual' };
+  /** What the page detected before the PM touched anything. */
+  detected: { spot: Spot; offsetMm: [number, number, number]; yawDeg: number };
+  /** The PM's final placement in the base's frame: the pending move, lift and turn on top of the detected offset, and the resulting absolute values. */
+  placed: {
+    moveMm: [number, number];
+    liftMm: number;
+    turnDeg: number;
+    offsetMm: [number, number, number];
+    yawDeg: number;
+  };
+  /** The figure's bounding-box centre in the base's frame after the PM's placement, and the base's footprint: what the centre guard reads. */
+  figureCentreMm: [number, number];
+  baseFootprintMm: [number, number];
+  /** Path of the screenshot taken at the moment of the verdict, three views. */
+  sheet: string;
+  /** The page's version: the commit, so a record made under an older rule is known as such. */
+  commit: string;
+}
+```
+
+For the corpus pairs the same records are promoted, by hand, into a committed `scripts/corpus-placements.json` keyed like the index (the four made this week go in first: dragon, beast rider, wyvern, tormented giant, with the numbers already in §12). The index's `placement` notes stay as the human-readable line.
+
+### 13.2 The loop: `npm run feedback`
+
+`scripts/feedback.mjs`, built like `corpus.mjs` (a `vite preview` server, real Chrome, headed, `?dev&bake=off` so a pair shows in seconds): `npm run feedback -- [--pairs <json>] [--from <key>] [--only <text>] [--redo]`. Without `--pairs` it walks the corpus pairs; with it, a list of `{ key, figure, base }` such as the research's `out/research70/pairs.json` (1,328 library pairs). Pairs that already have a record are skipped unless `--redo`.
+
+For each pair the script drops the two files, waits for the page, and shows a small overlay it injects into the page (not part of the product page: `page.addStyleTag` and `page.evaluate`, removed with the script): `pair 12 of 864 · <key> · R right · S save placement · K skip · N next` and the current placement line. The PM uses the page as it is: the six-way select, the turn buttons, Move by hand, Raise, Lower, Turn, Swap. Keys, caught by a `keydown` listener the script adds and forwards through `page.exposeFunction`:
+
+- **R**: verdict `right`; the record holds the automatic placement; next pair.
+- **S**: verdict `placed`; the record holds `state.stats.orientation`, `state.stats.pair` and the pending `state.pair` exactly as they are (Apply is not needed and not pressed: the pending move is the data); next pair.
+- **K**: `skipped`; **N**: same as K but marked `note: 'next'`; **Escape**: end the session, everything so far is on disk.
+
+On every verdict the script takes the three views of `sheets.mjs` (`showLevel(0)`, `setCamera` front low, side, above) and writes `out/feedback/sheets/<key>.png`, so the record has a picture. A refused pair (error state) is recorded as `refused` with the message and moves on; a pair that does not finish within `FEEDBACK_TIMEOUT_MS = 600_000` likewise as `skipped` with `note: 'timeout'`. The pending state of the page is read the same way the research did (`window.__mt.state.stats.pair.placement` and `state.pair`); no new hook is needed.
+
+### 13.3 Scoring: every rule against the record
+
+`scripts/corpus.mjs` (and a standalone `npm run score-placements -- [--pairs <json>]` that runs the pipeline in Node over the pairs with records, without Chrome, in a minute for the corpus) compare the automatic placement of the current code with each record:
+
+- axis: `orientation.up` equal to the record's;
+- position: the distance in mm between the automatic figure-box centre and the recorded one, in the base's frame;
+- height: the lift difference in mm;
+- yaw: the turn difference in degrees, modulo the figure's symmetry (none assumed: the raw difference).
+
+The report's **Base files** section gets the columns `axis`, `Δ position`, `Δ lift`, `Δ turn` and a summary line: "n of m recorded pairs within `PLACEMENT_MATCH_MM = 12` and the right axis" _(proposal; the two hand placements of §12 sit at 5 and 11 mm)_. That line is the number to move when a rule changes; the sheets are the picture. `npm run baseline:update` is unaffected: records are not part of the regression baseline, because they are the PM's judgement, not the pipeline's determinism.
+
+### 13.4 Build and acceptance
+
+- `scripts/feedback.mjs`, `scripts/score-placements.mjs`, the `feedback` and `score-placements` entries in `package.json`, `scripts/corpus-placements.json` with the four records of §12, the report columns, `CONTRIBUTING.md` (how to run a feedback session, that records of bought minis stay in `out/feedback/`), `CLAUDE.md` (the commands).
+- Acceptance: a feedback session over the fifteen corpus pairs writes fifteen records and fifteen sheets; `R`, `S`, `K` and Escape behave as above (an e2e test drives the page through `window.__mt` and the same keys with a generated pair, and asserts the record's fields); the score over the four promoted records reports the dragon and the beast rider within `PLACEMENT_MATCH_MM` under the centre guard and the wyvern and the giant `right`.
+- Out: any upload or account (the promise stays true: the script runs on the PM's machine and writes to its disk); editing records in the page; a learned model on the records. Those are follow-ups if the record grows.
