@@ -198,7 +198,8 @@ test('asks about the base of a pair, then the figure, and swaps at the question'
   await ended(page);
   const stats = await page.evaluate(() => window.__mt.state.stats!);
   expect(stats.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
-  expect(stats.asked.map((a) => a.role)).toEqual(['base', 'figure']);
+  // In the order confirmed: the first base, confirmed before the swap at the figure, stays listed.
+  expect(stats.asked.map((a) => a.role)).toEqual(['base', 'base', 'figure']);
 });
 
 test('asks which file is the base when neither has a flat underside', async ({ page }) => {
