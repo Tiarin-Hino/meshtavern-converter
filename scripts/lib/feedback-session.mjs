@@ -2,6 +2,7 @@
 // converts the pair, an overlay says what the keys do, the PM corrects the placement with the
 // page's own controls and gives a verdict, and the record and a sheet are written. Used by
 // scripts/feedback.mjs and by e2e/feedback.spec.ts.
+import { Buffer } from 'node:buffer';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -60,15 +61,29 @@ async function sheet(page, browser, path, title) {
       data: toBase64(await page.locator('#viewport').screenshot()),
     });
   }
-  const sheetPage = await browser.newPage({ viewport: { width: 1100, height: 100 } });
-  await sheetPage.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
+  mkdirSync(dirname(path), { recursive: true });
+  const sheetPage = await browser.newPage({ viewport: { width: 1100, height: 400 } });
+  try {
+    await sheetPage.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
     <h3 style="margin:0 0 8px">${title}</h3>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
     ${shots.map((s) => `<figure style="margin:0"><img src="data:image/png;base64,${s.data}" style="width:100%;display:block"><figcaption>${s.caption}</figcaption></figure>`).join('')}
     </div></body>`);
-  mkdirSync(dirname(path), { recursive: true });
-  await sheetPage.screenshot({ path, fullPage: true });
-  await sheetPage.close();
+    await sheetPage.waitForLoadState('load');
+    // A plain screenshot at the content's height: a full-page capture of a freshly built page
+    // fails on CI's software renderer ("Unable to capture screenshot").
+    const height = await sheetPage.evaluate(() => document.documentElement.scrollHeight);
+    await sheetPage.setViewportSize({ width: 1100, height: Math.min(Math.max(height, 100), 4000) });
+    await sheetPage.screenshot({ path });
+  } catch (error) {
+    // The record matters more than its picture: keep the first view alone rather than fail the session.
+    console.warn(
+      `sheet for ${title}: ${error instanceof Error ? error.message : error}; saving the first view only`,
+    );
+    writeFileSync(path, Buffer.from(shots[0].data, 'base64'));
+  } finally {
+    await sheetPage.close();
+  }
 }
 
 /** A key as a file name: folders kept, anything odd replaced. */

@@ -32,7 +32,11 @@ async function loadPair(page: Page): Promise<void> {
     file('figure.stl', generatePuddleFigure(12)),
     file('recess-base.stl', generateRecessBase()),
   ]);
-  await page.waitForFunction(() => window.__mt.state.stats?.pair != null);
+  // The result lands before the conversion counts as finished (the page waits two frames to show
+  // it); the next action must not start while the page is still busy, or it is ignored.
+  await page.waitForFunction(
+    () => window.__mt.state.stats?.pair != null && !window.__mt.state.busy,
+  );
 }
 
 test('sets the generated figure in its recess, and moves it only when applied', async ({
