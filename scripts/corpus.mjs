@@ -15,8 +15,9 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { cpus, totalmem } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { chromium } from '@playwright/test';
-import { createServer } from 'vite';
+import { createServer, runnerImport } from 'vite';
 import { baseFileFor, CORPUS, corpusFiles } from './lib/corpus-files.mjs';
+import { loadRecords, scoreAll, scoreReport } from './lib/placements.mjs';
 
 const PORT = 4179;
 /**
@@ -232,6 +233,7 @@ try {
     mkdirSync(dirname(join(OUT, `${key}.png`)), { recursive: true });
     await sheet.screenshot({ path: join(OUT, `${key}.png`), fullPage: true });
     await sheet.close();
+    if (mini.pair) await placementSheet(page, browser, key, mini);
     console.log(`${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.times.totalMs} ms`);
   }
 } finally {
@@ -247,6 +249,7 @@ function pairFigures(pair) {
     sizeMm: s.sizeMm.map((mm) => round(mm, 2)),
     depthMm: round(s.depthMm, 2),
     fit: round(s.fit, 3),
+    ...(s.centred && { centred: true }),
   });
   return {
     baseFile: pair.pairing.baseFile,
@@ -260,9 +263,61 @@ function pairFigures(pair) {
   };
 }
 
-/** "set in the hole", "set on the flattest patch". */
+/** "set in the hole", "set on the flattest patch", "set where the files put it". */
 function spotWords(spot) {
+  if (spot.centred) return 'set over the middle of the base';
+  if (spot.kind === 'registered') return 'set where the files put it';
   return spot.kind === 'flat' ? 'set on the flattest patch' : `set in the ${spot.kind}`;
+}
+
+/** The views of a placement sheet (#70): how the figure sits on its base, at full detail. */
+const PLACEMENT_VIEWS = [
+  { name: 'front low', azimuth: 25, elevation: 8, zoom: 1.3 },
+  { name: 'side', azimuth: 115, elevation: 12, zoom: 1.3 },
+  { name: 'from above', azimuth: 25, elevation: 55, zoom: 1.3 },
+];
+
+/** Writes `<key>-placement.png`: the pair at full detail from three sides, one column per run. */
+async function placementSheet(page, browser, key, mini) {
+  const shots = [];
+  for (const view of PLACEMENT_VIEWS) {
+    await page.evaluate((v) => {
+      window.__mt.showLevel(0);
+      window.__mt.setCamera(v.azimuth, v.elevation, v.zoom);
+    }, view);
+    await page.waitForTimeout(350);
+    const png = await page.locator('#viewport').screenshot();
+    shots.push({ caption: view.name, data: png.toString('base64') });
+  }
+  const sheet = await browser.newPage({ viewport: { width: 1100, height: 100 } });
+  await sheet.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
+    <h3 style="margin:0 0 8px">${key} on ${basename(mini.baseFile, '.stl')}: ${spotWords(mini.pair.spot)}, lift ${mini.pair.offsetMm[2]} mm, up ${mini.up} (${mini.upMethod})</h3>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+    ${shots.map((s) => `<figure style="margin:0"><img src="data:image/png;base64,${s.data}" style="width:100%;display:block"><figcaption>${s.caption}</figcaption></figure>`).join('')}
+    </div></body>`);
+  await sheet.screenshot({ path: join(OUT, `${key}-placement.png`), fullPage: true });
+  await sheet.close();
+}
+
+// The recorded placements (#70, design note §13): scored in Node with the placement-only path.
+let placementScores = null;
+if (Object.values(minis).some((mini) => mini.baseFile)) {
+  const { placePairOnly } = (await runnerImport('./src/lib/dev.ts', { logLevel: 'silent' })).module;
+  const read = (path) => {
+    const bytes = readFileSync(path);
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  };
+  const corpusPair = (key) => {
+    const mini = minis[key];
+    return mini?.baseFile
+      ? { figure: join(CORPUS, `${key}.stl`), base: join(CORPUS, mini.baseFile) }
+      : null;
+  };
+  placementScores = scoreAll(
+    loadRecords({ feedback: false }),
+    corpusPair,
+    (figure, base, options) => placePairOnly(read(figure), read(base), options),
+  );
 }
 
 const results = {
@@ -380,7 +435,7 @@ function pairReport() {
           .slice(0, 3)
           .map((c) => `${c.kind} ${size(c)}, fit ${c.fit}`)
           .join('; ');
-        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${p.spot.kind} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
+        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${p.spot.centred ? 'centred' : p.spot.kind} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
       }),
     ),
     ...pairs
@@ -433,6 +488,7 @@ ${sizeReport()}
 
 ${pairReport()}
 
+${placementScores === null ? '' : `### Against the recorded placements (scripts/corpus-placements.json)\n\n${scoreReport(placementScores)}\n`}
 ## Changes since the last run
 
 ${
