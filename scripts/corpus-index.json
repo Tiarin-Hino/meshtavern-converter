@@ -85,7 +85,8 @@
   "mounted/mounted-03": {
     "size": "large",
     "note": "rider on a horse",
-    "up": "+y"
+    "up": "+y",
+    "placement": "stands on the rock with its front high and its hindquarters low: up +y, moved 29 mm from the flattest patch and raised 5 mm by the PM in the app (2026-09-29); the 3.2 degree Set down was a little too much, a couple of degrees back would be right"
   },
   "quadruped/B-001": {
     "size": "large",
