@@ -409,7 +409,8 @@ function pairReport() {
   const withBase = Object.entries(minis).filter(([, m]) => m.baseFile);
   if (withBase.length === 0) return 'No figure has a base file next to it (`<name>-base.stl`).';
   const size = (s) => `${s.sizeMm.join(' × ')} mm`;
-  const matches = pairs.filter(([key, m]) => index[key]?.spot === m.pair.spot.kind);
+  const found = (p) => (p.spot.centred ? 'centred' : p.spot.kind);
+  const matches = pairs.filter(([key, m]) => index[key]?.spot === found(m.pair));
   return [
     `${pairs.length} of ${withBase.length} pairs converted; the spot matches the index for ${matches.length}.`,
     '',
@@ -435,7 +436,7 @@ function pairReport() {
           .slice(0, 3)
           .map((c) => `${c.kind} ${size(c)}, fit ${c.fit}`)
           .join('; ');
-        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${p.spot.centred ? 'centred' : p.spot.kind} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
+        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${found(p)} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
       }),
     ),
     ...pairs

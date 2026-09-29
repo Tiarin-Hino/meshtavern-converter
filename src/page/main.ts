@@ -36,7 +36,6 @@ import {
 } from '../lib';
 import { transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
-import { generatePuddleFigure, generateRecessBase } from '../regression/shapes';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { parsePageOptions } from './options';
 import {
@@ -167,8 +166,6 @@ declare global {
        * base diameter, plain base), merged into the ones made so far. `undefined` drops a choice.
        */
       setSizing: (changes: Partial<SizingOptions>) => Promise<void>;
-      /** Converts the generated figure on its puddle together with the generated recess base (#70). */
-      loadGeneratedPair: () => Promise<void>;
       /** Adds a base file to the mini on screen and converts the two as a pair. */
       addBase: (stl: ArrayBuffer, name: string) => Promise<void>;
       /** Converts the pair again with figure and base the other way round. */
@@ -1233,14 +1230,6 @@ window.__mt = {
       encodeBinaryStl(generateBumpySheet(quadsPerSide));
     sources = [{ name: `generated-${quadsPerSide}.stl`, read }];
     choices = { ...noChoices(), sizing };
-    return reconvert();
-  },
-  loadGeneratedPair: () => {
-    sources = [
-      { name: 'figure.stl', read: async () => encodeBinaryStl(generatePuddleFigure(12)) },
-      { name: 'recess-base.stl', read: async () => encodeBinaryStl(generateRecessBase()) },
-    ];
-    choices = noChoices();
     return reconvert();
   },
   addBase: (stl, name) => addBase({ name, read: async () => stl.slice(0) }),

@@ -725,9 +725,9 @@ export function principalAxis(
 /**
  * Sets the figure on its base (design note §4.5), in this order, all about the figure's
  * contact centre: turned so a long contact footprint lies along a long basin (never more
- * than 90°), then by the user's turn; moved onto the spot's centre plus the user's move;
- * dropped straight down until it first touches the top, or the floor beside the base; then
- * raised or sunk by the user's lift. Returns new positions for the figure; the input is
+ * than 90°), then by the user's turn; moved onto the spot's centre plus the user's move; set
+ * at the height where, on the spot and before the user's turn, it first touches the top (or
+ * the floor beside the base); then raised or sunk by the user's lift. Returns new positions for the figure; the input is
  * left untouched.
  *
  * @param figure The figure, Y-up on y = 0 (after its own `orientAndPlace`).
@@ -772,6 +772,7 @@ export function placeFigure(
       s = ux * vz - uz * vx;
     }
   }
+  const [alignC, alignS] = [c, s];
   const turnDeg = options.turnDeg ?? 0;
   if (turnDeg !== 0) {
     // A three.js rotation.y by θ turns x towards -z: sine -sin θ in the sense used here.
@@ -787,22 +788,29 @@ export function placeFigure(
   const [cx, cz] = contact.centre;
   const tx = spot.centre[0] + move[0];
   const tz = spot.centre[1] + move[1];
-  const positions = new Float32Array(source.length);
-  for (let i = 0; i < source.length; i += 3) {
-    const dx = source[i]! - cx;
-    const dz = source[i + 2]! - cz;
-    positions[i] = tx + c * dx - s * dz;
-    positions[i + 1] = source[i + 1]!;
-    positions[i + 2] = tz + s * dx + c * dz;
-  }
+  const placeAt = (x: number, z: number, cos: number, sin: number): Float32Array => {
+    const out = new Float32Array(source.length);
+    for (let i = 0; i < source.length; i += 3) {
+      const dx = source[i]! - cx;
+      const dz = source[i + 2]! - cz;
+      out[i] = x + cos * dx - sin * dz;
+      out[i + 1] = source[i + 1]!;
+      out[i + 2] = z + sin * dx + cos * dz;
+    }
+    return out;
+  };
+  const positions = placeAt(tx, tz, c, s);
 
-  // A registered figure keeps the files' height; once moved or turned it is dropped again.
-  const kept = choice.keepLiftMm !== undefined && move[0] === 0 && move[1] === 0 && turnDeg === 0;
-  const drop = kept ? choice.keepLiftMm! : dropHeight(positions, map);
+  // The height is the detected spot's, moved or turned or not: the page previews a move and a
+  // turn at that height, and Apply keeps what it showed. A registered figure keeps the files'.
+  const moved = move[0] !== 0 || move[1] !== 0 || turnDeg !== 0;
+  const drop =
+    choice.keepLiftMm ??
+    dropHeight(moved ? placeAt(spot.centre[0], spot.centre[1], alignC, alignS) : positions, map);
   const lift = drop + (options.liftMm ?? 0);
   if (lift !== 0) for (let i = 1; i < positions.length; i += 3) positions[i] = positions[i]! + lift;
 
-  const manual = move[0] !== 0 || move[1] !== 0 || (options.liftMm ?? 0) !== 0 || turnDeg !== 0;
+  const manual = moved || (options.liftMm ?? 0) !== 0;
   return {
     positions,
     placement: {

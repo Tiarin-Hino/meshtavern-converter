@@ -26,13 +26,22 @@ async function open(page: Page, search = '?bake=off'): Promise<void> {
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 }
 
+/** Picks the generated figure on its puddle together with the generated recess base. */
+async function loadPair(page: Page): Promise<void> {
+  await page.setInputFiles('#file', [
+    file('figure.stl', generatePuddleFigure(12)),
+    file('recess-base.stl', generateRecessBase()),
+  ]);
+  await page.waitForFunction(() => window.__mt.state.stats?.pair != null);
+}
+
 test('sets the generated figure in its recess, and moves it only when applied', async ({
   page,
 }, testInfo) => {
   // The normal path bakes and compresses, which is slow on CI runners.
   test.setTimeout(240_000);
   await open(page, '');
-  await page.evaluate(() => window.__mt.loadGeneratedPair());
+  await loadPair(page);
   await expect(page.locator('body')).toHaveAttribute('data-state', 'done');
   await expect(page.locator('#heading')).toHaveText('figure + recess-base');
   await expect(page.locator('#placement')).toHaveText('Set in the 13 mm recess');
@@ -79,7 +88,7 @@ test('sets the generated figure in its recess, and moves it only when applied', 
 test('swaps figure and base, and removes the base', async ({ page }) => {
   test.setTimeout(120_000);
   await open(page);
-  await page.evaluate(() => window.__mt.loadGeneratedPair());
+  await loadPair(page);
   await page.evaluate(() => window.__mt.swapPair());
   await expect(page.locator('body')).toHaveAttribute('data-state', 'done');
   const swapped = await page.evaluate(() => window.__mt.state.stats!.pair!.pairing);

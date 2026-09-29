@@ -376,6 +376,16 @@ describe('placeFigure', () => {
     expect(sunk.placement.offsetMm[2]).toBeCloseTo(lift - 0.5, 6);
     expect(sunk.placement.method).toBe('manual');
   });
+
+  it('keeps the previewed height when moved out of the recess onto the rim, or turned', () => {
+    const detected = set(generatePuddleFigure(12), generateRecessBase());
+    const moved = set(generatePuddleFigure(12), generateRecessBase(), {
+      moveMm: [10, 0],
+      turnDeg: 30,
+    });
+    expect(moved.placement.offsetMm[2]).toBe(detected.placement.offsetMm[2]);
+    expect(lowest(moved.positions)).toBe(lowest(detected.positions));
+  });
 });
 
 /** A Z-up soup moved by (dx, 0, dz) in the file. */
@@ -446,13 +456,13 @@ describe('the registration test', () => {
     expect(REGISTERED_TOLERANCE_MM).toBe(0.3);
   });
 
-  it('drops a registered figure again once the user moves it', () => {
+  it('keeps a registered figure at the files height when the user moves it', () => {
     const { pair } = placePair(shifted(generatePuddleFigure(12), 0, floor), generateRecessBase(), {
       moveMm: [9, 0],
     });
     expect(pair.placement).toMatchObject({ method: 'manual', spot: { kind: 'registered' } });
-    // Moved onto the rim: dropped onto it.
-    expect(pair.placement.offsetMm[2]).toBeCloseTo(heightMm, 5);
+    // Moved over the rim: at the height the preview showed, not dropped onto it.
+    expect(pair.placement.offsetMm[2]).toBeCloseTo(floor, 5);
   });
 });
 
