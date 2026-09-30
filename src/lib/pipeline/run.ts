@@ -16,6 +16,7 @@ import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
+import { resolveMark } from './marks';
 import { checkFits, checkNeeded, estimatePairBytes } from './memory';
 import {
   coverageFor,
@@ -41,6 +42,9 @@ import {
 } from './pair';
 import {
   decideFigure,
+  extentOf,
+  mergeMeshes,
+  placeMarked,
   placeOnBase,
   type BaseTop,
   type FigureDecision,
@@ -53,6 +57,7 @@ import { sizeMini, type BaseMeasurement, type Sizing, type SizingOptions } from 
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
+import { angleDeg, axisVector, fileUp, IDENTITY, nearestUpAxis, type Rotation } from './rotation';
 import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
 /** Every step in order. `place` runs only for a figure with its base file (#70). */
@@ -140,6 +145,8 @@ export interface UpChoices {
   baseOrientation?: OrientationOptions;
   /** A pair only. */
   pairing?: PairingOptions;
+  /** A pair placed by marks (#93): the meeting, in file coordinates. */
+  placement?: PlacementOptions;
 }
 
 export type BakeSkipped =
@@ -270,6 +277,8 @@ interface OrientedPair {
   baseOrientation: Orientation;
   /** What the orient step decided about the figure when it asked about it (#92); else the place step decides. */
   decided?: FigureDecision;
+  /** The files as welded, whatever was chosen: what marks are resolved on (#93). */
+  sources: { figure: IndexedMesh; base: IndexedMesh; baseRotation: Rotation };
 }
 
 /** Each file of a pair stood the way a base would (#70), and its shape so: once per conversion. */
@@ -386,8 +395,18 @@ function standFigure(
 }
 
 /** The orient step's result for a pair from how its base and figure stand. */
-function orientedPairOf(base: PairBase, figure: PairFigure): OrientedPair {
+function orientedPairOf(
+  { meshes }: PairStanding,
+  base: PairBase,
+  figure: PairFigure,
+): OrientedPair {
+  const baseFile = base.pairing.baseFile;
   return {
+    sources: {
+      figure: meshes[1 - baseFile]!,
+      base: meshes[baseFile],
+      baseRotation: base.orientation.rotation,
+    },
     figure: figure.figure,
     orientation: figure.own,
     alternative: figure.alternative,
@@ -412,7 +431,7 @@ function orientPair(
 ): OrientedPair {
   const pair = standPair(meshes);
   const base = standBase(pair, pairingOptions, baseOptions, 'refuse');
-  return orientedPairOf(base, standFigure(pair, base, orientationOptions, false));
+  return orientedPairOf(pair, base, standFigure(pair, base, orientationOptions, false));
 }
 
 /** The pairing options after a swap: toggled, or the other file named when there was no guess. */
@@ -430,11 +449,82 @@ function withFileShape(pairing: Pairing, file: 0 | 1, shape: FileShape): Pairing
   return { ...pairing, files };
 }
 
-/** The place step for a pair, and the orientation the figure ends up with. */
-function placeOrientedPair(
+/** A pair's place step, and the orientation the figure ends up with. */
+interface PlacedPair {
+  merged: PlacedMesh;
+  pair: PairResult;
+  orientation: Orientation;
+}
+
+/**
+ * The figure placed on its base by two marks (#93, design note §4.3). It stands as the pair's
+ * rules stood it (the decision of #92, the same with questions or without), and the meeting turns
+ * it from there. The orientation is the composed one, `marked`, unless the meeting is exactly the
+ * identity: then the figure stands as it did.
+ */
+function placeMarkedPair(
   oriented: OrientedPair,
-  placementOptions: PlacementOptions,
-): { merged: PlacedMesh; pair: PairResult; orientation: Orientation } {
+  meeting: NonNullable<PlacementOptions['marks']>,
+): PlacedPair {
+  const { figure, base, pairing, files, alternative, sources } = oriented;
+  const figureFile = 1 - pairing.baseFile;
+  if (meeting.spot.file !== pairing.baseFile || meeting.contact.file !== figureFile)
+    throw new ConversionProblem(
+      'unexpected',
+      `marks on files ${meeting.spot.file} and ${meeting.contact.file}, base ${pairing.baseFile}`,
+    );
+  const decided = oriented.decided ?? decideFigure(figure, base, files, alternative?.placed);
+  const standing = decided.registered
+    ? oriented.baseOrientation
+    : decided.candidate === 1 && alternative
+      ? alternative.orientation
+      : oriented.orientation;
+  const spot = resolveMark(sources.base, meeting.spot.point);
+  const contact = resolveMark(sources.figure, meeting.contact.point);
+  if (!spot || !contact)
+    throw new ConversionProblem('unexpected', 'a mark on a file without triangles');
+  const placed = placeMarked(
+    sources.figure,
+    standing.rotation,
+    base,
+    sources.baseRotation,
+    spot,
+    contact,
+    meeting.liftMm ?? 0,
+    meeting.turnDeg ?? 0,
+  );
+  const mesh = mergeMeshes(
+    { positions: placed.positions, indices: sources.figure.indices },
+    base.mesh,
+  );
+  const identity = placed.meeting.every((value, i) => value === IDENTITY[i]);
+  const up = nearestUpAxis(placed.rotation);
+  const orientation: Orientation = identity
+    ? standing
+    : {
+        up,
+        method: 'marked',
+        confidence: 1,
+        rotation: placed.rotation,
+        tiltDeg: angleDeg(fileUp(placed.rotation), axisVector(up)),
+        setDownDeg: 0,
+      };
+  return {
+    merged: { mesh, sizeMm: extentOf(mesh.positions), base: base.base },
+    pair: {
+      pairing,
+      placement: placed.placement,
+      figureVertices: placed.positions.length / 3,
+      figureTriangles: sources.figure.indices.length / 3,
+      baseOrientation: oriented.baseOrientation,
+    },
+    orientation,
+  };
+}
+
+/** The place step for a pair, and the orientation the figure ends up with. */
+function placeOrientedPair(oriented: OrientedPair, placementOptions: PlacementOptions): PlacedPair {
+  if (placementOptions.marks) return placeMarkedPair(oriented, placementOptions.marks);
   const { figure, base, pairing, files, alternative, decided } = oriented;
   const placed = placeOnBase(
     figure,
@@ -645,6 +735,7 @@ export async function runPipeline(
         orientation: orientationOptions,
         baseOrientation: baseOrientationOptions,
         pairing: pairingOptions,
+        ...(placementOptions.marks && { placement: placementOptions }),
       }
     : { orientation: orientationOptions };
   let oriented:
@@ -746,8 +837,13 @@ export async function runPipeline(
         figure = answered.standing;
         figureChoice = answered.options;
       }
-      oriented = orientedPairOf(confirmedBase, figure);
-      choices = { orientation: figureChoice, baseOrientation: baseChoice, pairing: pairingChoice };
+      oriented = orientedPairOf(pair, confirmedBase, figure);
+      choices = {
+        orientation: figureChoice,
+        baseOrientation: baseChoice,
+        pairing: pairingChoice,
+        ...(placementOptions.marks && { placement: placementOptions }),
+      };
       break;
     }
   }

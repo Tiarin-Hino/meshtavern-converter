@@ -4,6 +4,7 @@ import {
   DEFAULT_LOOK,
   type ConversionStats,
   type LodStats,
+  type PlacementOptions,
   type SpotKind,
   type UpAxis,
 } from '../lib';
@@ -11,11 +12,14 @@ import { generateBumpySheet, runPipeline, encodeBinaryStl } from '../lib/dev';
 import {
   generateBoulder,
   generateFigure,
+  generateHoleBase,
+  generatePegFigure,
   generatePuddleFigure,
   generateQuadruped,
   generateRecessBase,
   generateSwarm,
   generateTiltedFigure,
+  HOLE_BASE,
   toYUp,
 } from './shapes';
 
@@ -31,8 +35,11 @@ export interface RegressionCase {
    * base are detected (#72); the guess stands them on an edge (+y).
    */
   up?: UpAxis;
-  /** A figure with its base file (#70): the base, and the kind of spot the figure must be set in. */
-  pair?: { base: () => Float32Array; spot: SpotKind };
+  /**
+   * A figure with its base file (#70): the base, and the kind of spot the figure must be set in;
+   * `placement` for a pair placed by marks (#93).
+   */
+  pair?: { base: () => Float32Array; spot: SpotKind; placement?: PlacementOptions };
 }
 
 /** Bumpy-sheet size below the close level's floor, so the "small source" path stays covered. */
@@ -56,6 +63,23 @@ export const REGRESSION_CASES: readonly RegressionCase[] = [
     bake: 0,
     up: '+z',
     pair: { base: generateRecessBase, spot: 'recess' },
+  },
+  // The figure's 3 mm peg marked into the blind hole of a plate: its end on the hole's floor (#93).
+  {
+    name: 'peg-marked-in-hole',
+    soup: () => generatePegFigure(3.5),
+    bake: 0,
+    up: '+z',
+    pair: {
+      base: generateHoleBase,
+      spot: 'marked',
+      placement: {
+        marks: {
+          spot: { file: 1, point: [0, 0, HOLE_BASE.floorMm] },
+          contact: { file: 0, point: [0, 0, 0] },
+        },
+      },
+    },
   },
 ];
 
@@ -113,6 +137,7 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
   const { lods, baked, stats } = await runPipeline(stl, {
     bake: testCase.bake,
     secondStl: testCase.pair && encodeBinaryStl(testCase.pair.base()),
+    placement: testCase.pair?.placement,
   });
   const glb = (level: number, compact: boolean): number =>
     encodeGlb(lods[level]!.mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;

@@ -142,6 +142,9 @@ export function reasonOf(orientation: Orientation): UpReason {
       return 'cut';
     case 'manual':
       return 'chosen';
+    // Turned by marks (#93): what the person set.
+    case 'marked':
+      return 'chosen';
   }
 }
 

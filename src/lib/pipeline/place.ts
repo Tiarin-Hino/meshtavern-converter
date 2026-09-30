@@ -7,9 +7,11 @@
  * Deterministic: only + - * / and sqrt on the geometry, so every machine sets the figure in
  * the same place (the regression pair depends on it).
  */
+import type { Vec3 } from './base';
+import { meetingRotation, turnVector, type Mark, type Meeting } from './marks';
 import type { IndexedMesh } from './mesh';
 import { turnPositions, type Orientation, type PlacedMesh } from './orient';
-import type { Rotation } from './rotation';
+import { multiply, toMatrix, type Rotation } from './rotation';
 import type { Pairing } from './pair';
 import { restingPoints } from './stance';
 
@@ -199,8 +201,11 @@ export const FLAT_PATCH_TIE_MM = 0.2;
 /** The window searched for the flattest patch is at least this many cells a side. */
 export const FLAT_PATCH_MIN_CELLS = 3;
 
-/** hole and recess: a seat won. flat: the flattest patch. registered: the files' own placement. */
-export type SpotKind = 'hole' | 'recess' | 'flat' | 'registered';
+/**
+ * hole and recess: a seat won. flat: the flattest patch. registered: the files' own placement.
+ * marked: the person marked where figure and base meet (#93).
+ */
+export type SpotKind = 'hole' | 'recess' | 'flat' | 'registered' | 'marked';
 
 export interface Spot {
   kind: SpotKind;
@@ -652,6 +657,11 @@ export interface PlacementOptions {
   liftMm?: number;
   /** Turns the figure about the vertical, on top of any alignment the detection applied (§4.5). */
   turnDeg?: number;
+  /**
+   * The figure placed on the base by two marks (#93): then `moveMm`, `liftMm` and `turnDeg` are
+   * ignored, the meeting has its own. `spot` is on the base file, `contact` on the figure's.
+   */
+  marks?: Meeting;
 }
 
 export interface Placement {
@@ -665,10 +675,27 @@ export interface Placement {
    * `rotation.y`: counter-clockwise seen from above.
    */
   yawDeg: number;
-  /** `detected`: the heuristic alone. `manual`: the user moved, turned, raised or lowered it. */
-  method: 'detected' | 'manual';
-  /** Every basin that was considered, best first, for the corpus report and tuning. */
+  /**
+   * `detected`: the heuristic alone. `manual`: the user moved, turned, raised or lowered it.
+   * `marked`: the figure was placed by two marks (#93).
+   */
+  method: 'detected' | 'manual' | 'marked';
+  /** Every basin that was considered, best first, for the corpus report and tuning; empty when marked. */
   candidates: Spot[];
+  /** A marked placement: the two marks in the base's frame as they ended, and the rotation applied. */
+  marks?: MarkedMeeting;
+}
+
+/** A meeting of figure and base as resolved (#93, design note §3.4), in the base's placed frame. */
+export interface MarkedMeeting {
+  /** The spot on the base: the point picked and the normal resolved, base file units, base frame (Y-up, y = 0, centred). */
+  spot: Mark;
+  /** The contact where it ended: `spot.point + liftMm × spot.normal`, normal opposite to the spot's. */
+  contact: Mark;
+  /** The figure's standing frame (how it stood at its question) to the base's frame. Identity when a flat sole met a flat floor. */
+  rotation: Rotation;
+  liftMm: number;
+  turnDeg: number;
 }
 
 export interface PairResult {
@@ -1114,8 +1141,75 @@ export function placeOnBase(
   };
 }
 
+/**
+ * The figure set on its base by two marks (#93, design note §4.3): the contact's normal turned
+ * against the spot's, the contact point on the spot point, raised along the spot's normal and
+ * turned about it. Nothing is guessed: the base's top is not read.
+ *
+ * @param figure The figure's welded mesh in its file frame (the union of its parts, #93).
+ * @param figureRotation How the figure stands: its file frame to its standing frame.
+ * @param base The base as placed (`placeOriented`, with its `shift`).
+ * @param baseRotation The base's rotation, file to placed frame.
+ * @param spot The spot resolved on the base file, file coordinates.
+ * @param contact The contact resolved on the figure, in its file frame.
+ * @returns The figure's positions in the base's frame, the placement, and the figure's rotation
+ *   from file to base frame (`multiply(meeting, figureRotation)`).
+ */
+export function placeMarked(
+  figure: IndexedMesh,
+  figureRotation: Rotation,
+  base: PlacedMesh,
+  baseRotation: Rotation,
+  spot: Mark,
+  contact: Mark,
+  liftMm = 0,
+  turnDeg = 0,
+): { positions: Float32Array; placement: Placement; rotation: Rotation; meeting: Rotation } {
+  const shift = base.shift ?? [0, 0, 0];
+  const turnedSpot = turnVector(baseRotation, spot.point);
+  const s: Vec3 = [turnedSpot[0] - shift[0], turnedSpot[1] - shift[1], turnedSpot[2] - shift[2]];
+  const ns = turnVector(baseRotation, spot.normal);
+  const nc = turnVector(figureRotation, contact.normal);
+  const meeting = meetingRotation(nc, ns, turnDeg);
+  const rotation = multiply(meeting, figureRotation);
+  const m = toMatrix(rotation);
+  const [px, py, pz] = contact.point;
+  const target: Vec3 = [s[0] + liftMm * ns[0], s[1] + liftMm * ns[1], s[2] + liftMm * ns[2]];
+  const source = figure.positions;
+  const positions = new Float32Array(source.length);
+  for (let i = 0; i < source.length; i += 3) {
+    const x = source[i]! - px;
+    const y = source[i + 1]! - py;
+    const z = source[i + 2]! - pz;
+    positions[i] = target[0] + m[0]! * x + m[1]! * y + m[2]! * z;
+    positions[i + 1] = target[1] + m[3]! * x + m[4]! * y + m[5]! * z;
+    positions[i + 2] = target[2] + m[6]! * x + m[7]! * y + m[8]! * z;
+  }
+  const opposite: Vec3 = [0 - ns[0], 0 - ns[1], 0 - ns[2]];
+  return {
+    positions,
+    rotation,
+    meeting,
+    placement: {
+      spot: { kind: 'marked', centre: [s[0], s[2]], sizeMm: [0, 0], depthMm: 0, fit: 0 },
+      contactMm: [0, 0],
+      offsetMm: [target[0], target[2], target[1]],
+      yawDeg: turnDeg,
+      method: 'marked',
+      candidates: [],
+      marks: {
+        spot: { point: s, normal: ns },
+        contact: { point: target, normal: opposite },
+        rotation: meeting,
+        liftMm,
+        turnDeg,
+      },
+    },
+  };
+}
+
 /** Width, height and depth of a mesh's vertices. */
-function extentOf(positions: Float32Array): [number, number, number] {
+export function extentOf(positions: Float32Array): [number, number, number] {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < positions.length; i += 3) {

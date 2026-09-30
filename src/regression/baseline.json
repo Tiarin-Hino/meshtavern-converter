@@ -431,5 +431,54 @@
     ],
     "spot": "recess",
     "liftMm": 3
+  },
+  "peg-marked-in-hole": {
+    "sourceTriangles": 139416,
+    "triangles": 139416,
+    "vertices": 70176,
+    "degenerateTriangles": 0,
+    "duplicateTriangles": 0,
+    "invalidTriangles": 0,
+    "sizeMm": [20, 34.63, 20],
+    "up": "+z",
+    "upMethod": "tallest",
+    "tiltDeg": 0,
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": "other",
+      "baseDiameterMm": 20
+    },
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54448,
+        "vertices": 27326,
+        "errorMm": 0.0198939,
+        "glbBytes": 1202548,
+        "compactGlbBytes": 390780
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 35174,
+        "vertices": 17665,
+        "errorMm": 0.049785,
+        "glbBytes": 777748,
+        "compactGlbBytes": 260044
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5330,
+        "vertices": 2689,
+        "errorMm": 0.198406,
+        "glbBytes": 119444,
+        "compactGlbBytes": 43596
+      }
+    ],
+    "spot": "marked",
+    "liftMm": 1
   }
 }

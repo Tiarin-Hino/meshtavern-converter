@@ -486,7 +486,12 @@ export function placeOriented(mesh: IndexedMesh, oriented: FileOrientation): Pla
       positions[i] = positions[i]! - x;
       positions[i + 2] = positions[i + 2]! - z;
     }
-  return { ...placed, base: measured.base };
+  const shift: Vec3 | undefined = placed.shift && [
+    placed.shift[0] + x,
+    placed.shift[1],
+    placed.shift[2] + z,
+  ];
+  return { ...placed, base: measured.base, shift };
 }
 
 /**

@@ -340,3 +340,39 @@ export function generateTabFigure(lengthMm: number): Float32Array {
 export function generatePuddleFigure(diameterMm: number): Float32Array {
   return figureStandingOn(0.8, (soup) => addRoundBase(soup, [0, 0], diameterMm, 0.8, 16));
 }
+
+/** The blind hole of `generateHoleBase`: 3.2 mm across, its floor 1 mm above the underside. */
+export const HOLE_BASE = { sideMm: 20, heightMm: 4, holeMm: 3.2, floorMm: 1 };
+
+/**
+ * A 20 mm square plate 4 mm thick with a blind round hole 3.2 mm across, its floor 1 mm above
+ * the underside: where a peg is marked in (#93). Z-up. The hole's wall is left out, as
+ * `generatePlate` leaves out an opening's walls.
+ */
+export function generateHoleBase(): Float32Array {
+  const { sideMm, heightMm, holeMm, floorMm } = HOLE_BASE;
+  const radius = holeMm / 2;
+  const plate = generatePlate(sideMm, heightMm, 0.2, (x, y) => x * x + y * y < radius * radius);
+  const soup: number[] = Array.from(plate);
+  addRoundBase(soup, [0, 0], holeMm, floorMm, 8);
+  return new Float32Array(soup);
+}
+
+/** The slab of `generateSlopeBase`: turned about x so its top faces (0, -3/5, 4/5), 36.87° off up. */
+export const SLOPE_BASE = { normal: [0, -0.6, 0.8] as Vec3, topCentre: [0, -1.2, 7.2] as Vec3 };
+
+/**
+ * A 30 mm square plate 2 mm thick with a 12 mm slab on it, tilted by the 3-4-5 angle (36.87°)
+ * about x: a sloped rock a figure is marked onto (#93). Z-up; the slab's top centre is
+ * `SLOPE_BASE.topCentre`.
+ */
+export function generateSlopeBase(): Float32Array {
+  const soup: number[] = Array.from(generatePlate(30, 2, 1, () => false));
+  const slab = generatePlate(12, 2, 0.5, () => false);
+  for (let i = 0; i < slab.length; i += 3) {
+    const y = slab[i + 1]!;
+    const z = slab[i + 2]!;
+    soup.push(slab[i]!, 0.8 * y - 0.6 * z, 0.6 * y + 0.8 * z + 5.6);
+  }
+  return new Float32Array(soup);
+}
