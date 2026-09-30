@@ -23,6 +23,14 @@ import {
   ownCopy,
 } from '../lib/three';
 
+/** A pin's ball is at least this big, file mm... _(proposal, #93)_ */
+const PIN_RADIUS_MM = 1.5;
+/** ...and this share of the largest side of what is shown, so it shows on a large mini. _(proposal)_ */
+const PIN_SIZE_SHARE = 0.015;
+/** Spots and contacts, as in style.css (`--pin-spot`, `--pin-contact`). */
+const PIN_COLOURS = { spot: 0xf0b35e, contact: 0x7ee0c3 };
+type Vec3 = [number, number, number];
+
 /** Squares the grid shows along each side. */
 const GRID_SQUARES = 40;
 /**
@@ -103,11 +111,14 @@ export class Viewer {
   private moveGizmo: TransformControls | null = null;
   private onMove: ((moveMm: [number, number]) => void) | null = null;
   /**
-   * The full-detail mesh at the question after the orient step (#92): in file coordinates,
-   * turned by the orientation being asked about and stood on the grid by `holder`, inside the
-   * pivot so a turn previews as it does on a converted mini. Null when no question is shown.
+   * The full-detail meshes at a question (#92, #93): each file's in file coordinates at the
+   * transform the worker gave it, under `holder`, inside the pivot so a turn previews as it
+   * does on a converted mini. Null when no question is shown.
    */
-  private question: { holder: THREE.Group; mesh: THREE.Mesh } | null = null;
+  private question: { holder: THREE.Group; meshes: Map<number, THREE.Mesh> } | null = null;
+  /** The pins at a question (#93), each a child of its file's mesh. */
+  private pins: THREE.Object3D[] = [];
+  private readonly raycaster = new THREE.Raycaster();
   /** The sculpt as the file has it: flat-shaded in the primer's grey, no look yet (PM decision, #92). */
   private readonly questionMaterial = new THREE.MeshStandardMaterial({
     color: new THREE.Color(DEFAULT_LOOK.base),
@@ -259,39 +270,158 @@ export class Viewer {
   }
 
   /**
-   * Shows the full-detail mesh of a file at its question (#92): `mesh` in file coordinates,
-   * turned by `rotation`, standing on the grid with `box` (the turned mesh's box, file units)
-   * centred in x and z. Flat shading needs no normals. The camera frames it as a new mini.
+   * Shows the full-detail meshes of a question (#92, #93): each file's welded mesh in file
+   * coordinates at the transform the worker gave it, flat-shaded, under one holder in the pivot
+   * so a turn being tried out turns them all. A later call with the same files only moves them:
+   * the geometries stay on the GPU; a file not shown before is added, one no longer shown is
+   * removed. With `reframe` the camera frames them as a new mini.
    */
-  showQuestion(mesh: IndexedMesh, rotation: Rotation, box: { min: number[]; max: number[] }): void {
-    this.clear();
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    const shown = new THREE.Mesh(geometry, this.questionMaterial);
-    const holder = new THREE.Group();
-    holder.add(shown);
-    this.question = { holder, mesh: shown };
-    this.pivot.add(holder);
-    this.scene.add(this.pivot);
-    this.turnQuestion(rotation, box);
-    this.gizmo?.attach(this.pivot);
-    this.setCamera(34, 22, 1);
+  showShown(
+    entries: readonly { file: number; mesh: IndexedMesh; rotation: Rotation; translation: Vec3 }[],
+    box: { min: Vec3; max: Vec3 },
+    reframe: boolean,
+  ): void {
+    if (!this.question) {
+      this.clear();
+      const holder = new THREE.Group();
+      this.question = { holder, meshes: new Map() };
+      this.pivot.add(holder);
+      this.scene.add(this.pivot);
+      this.gizmo?.attach(this.pivot);
+    }
+    const { holder, meshes } = this.question;
+    const kept = new Set<number>();
+    for (const { file, mesh, rotation, translation } of entries) {
+      kept.add(file);
+      let shown = meshes.get(file);
+      if (!shown) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+        geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+        shown = new THREE.Mesh(geometry, this.questionMaterial);
+        shown.userData.file = file;
+        holder.add(shown);
+        meshes.set(file, shown);
+      }
+      shown.quaternion.set(...rotation);
+      shown.position.set(...translation);
+    }
+    for (const [file, shown] of meshes) {
+      if (kept.has(file)) continue;
+      holder.remove(shown);
+      shown.geometry.dispose();
+      meshes.delete(file);
+    }
+    const [minX, minY, minZ] = box.min;
+    const [maxX, maxY, maxZ] = box.max;
+    // As `showSingle`: the pivot at half the height, so a turn pivots about the middle; what is
+    // shown is centred across, so a figure laid beside its base stays in the frame.
+    const middle = (minY + maxY) / 2;
+    holder.position.set(0 - (minX + maxX) / 2, 0 - middle, 0 - (minZ + maxZ) / 2);
+    this.pivot.position.set(0, middle, 0);
+    this.pivot.quaternion.copy(this.turn);
+    this.size.set(maxX - minX, maxY - minY, maxZ - minZ);
+    holder.updateMatrixWorld(true);
+    if (reframe) this.setCamera(34, 22, 1);
   }
 
-  /** A later question about the same file: the mesh turns and stands again; the geometry stays on the GPU. */
-  turnQuestion(rotation: Rotation, box: { min: number[]; max: number[] }): void {
+  /**
+   * What a tap at canvas point (x, y) in CSS pixels hits at a question (#93): the nearest
+   * surface of the meshes shown, as the file and the point in its coordinates (the mesh's
+   * local frame is the file's), with the face's normal there. Null when it hits nothing. Three.js
+   * tests every triangle: `PICK_BUDGET_MS` in the design note.
+   */
+  pick(x: number, y: number): { file: number; point: Vec3; normal: Vec3 } | null {
+    if (!this.question) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const pointer = new THREE.Vector2((x / rect.width) * 2 - 1, 0 - ((y / rect.height) * 2 - 1));
+    this.raycaster.setFromCamera(pointer, this.camera);
+    const hits = this.raycaster.intersectObjects([...this.question.meshes.values()], false);
+    const hit = hits[0];
+    if (!hit) return null;
+    const mesh = hit.object as THREE.Mesh;
+    const local = mesh.worldToLocal(hit.point.clone());
+    const normal = hit.face?.normal ?? new THREE.Vector3(0, 1, 0);
+    return {
+      file: mesh.userData.file as number,
+      point: [local.x, local.y, local.z],
+      normal: [normal.x, normal.y, normal.z],
+    };
+  }
+
+  /** Where a file's point is on the canvas, CSS pixels: what a test taps to mark it. Null when the file is not shown. */
+  screenOf(file: number, point: Vec3): [number, number] | null {
+    const mesh = this.question?.meshes.get(file);
+    if (!mesh) return null;
+    this.pivot.updateMatrixWorld(true);
+    const world = mesh.localToWorld(new THREE.Vector3(...point));
+    world.project(this.camera);
+    const rect = this.canvas.getBoundingClientRect();
+    return [((world.x + 1) / 2) * rect.width, ((1 - world.y) / 2) * rect.height];
+  }
+
+  /**
+   * Pins at a question (#93): a ball at each point and a stick along its normal, children of
+   * their file's mesh so they move with the part, drawn over the surfaces so a spot inside a
+   * hole stays visible. Spots and contacts in two colours, proposals paler. The radius follows
+   * the mini's size, at least `PIN_RADIUS_MM`.
+   */
+  setPins(
+    pins: readonly {
+      file: number;
+      point: Vec3;
+      normal: Vec3;
+      kind: 'spot' | 'contact';
+      proposed: boolean;
+    }[],
+  ): void {
+    this.clearPins();
     if (!this.question) return;
-    const [minX, minY, minZ] = box.min as [number, number, number];
-    const [maxX, maxY, maxZ] = box.max as [number, number, number];
-    const height = maxY - minY;
-    this.question.mesh.quaternion.set(...rotation);
-    this.question.mesh.position.set(0 - (minX + maxX) / 2, 0 - minY, 0 - (minZ + maxZ) / 2);
-    // As `showSingle`: the pivot at half the height, so a turn pivots about the middle.
-    this.question.holder.position.set(0, 0 - height / 2, 0);
-    this.pivot.position.set(0, height / 2, 0);
-    this.pivot.quaternion.copy(this.turn);
-    this.size.set(maxX - minX, height, maxZ - minZ);
+    const radius = Math.max(
+      PIN_RADIUS_MM,
+      PIN_SIZE_SHARE * Math.max(this.size.x, this.size.y, this.size.z),
+    );
+    for (const pin of pins) {
+      const mesh = this.question.meshes.get(pin.file);
+      if (!mesh) continue;
+      const material = new THREE.MeshBasicMaterial({
+        color: pin.kind === 'spot' ? PIN_COLOURS.spot : PIN_COLOURS.contact,
+        transparent: true,
+        opacity: pin.proposed ? 0.55 : 1,
+        depthTest: false,
+      });
+      const group = new THREE.Group();
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), material);
+      const length = radius * 3;
+      const stick = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius / 4, radius / 4, length, 8),
+        material,
+      );
+      stick.position.y = length / 2;
+      group.add(ball, stick);
+      group.position.set(...pin.point);
+      group.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(...pin.normal).normalize(),
+      );
+      group.renderOrder = 10;
+      ball.renderOrder = 10;
+      stick.renderOrder = 10;
+      mesh.add(group);
+      this.pins.push(group);
+    }
+  }
+
+  private clearPins(): void {
+    for (const pin of this.pins) {
+      pin.parent?.remove(pin);
+      pin.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose();
+        (mesh.material as THREE.Material | undefined)?.dispose();
+      });
+    }
+    this.pins = [];
   }
 
   /** Adds the single mini to the scene, with the turn being tried out and the gizmo if shown. */
@@ -566,10 +696,11 @@ export class Viewer {
   clear(): void {
     this.gizmo?.detach();
     this.moveGizmo?.detach();
+    this.clearPins();
     if (this.question) {
       this.pivot.remove(this.question.holder);
       this.scene.remove(this.pivot);
-      this.question.mesh.geometry.dispose();
+      for (const mesh of this.question.meshes.values()) mesh.geometry.dispose();
       this.question = null;
     }
     if (this.figure) {

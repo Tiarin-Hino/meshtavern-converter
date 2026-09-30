@@ -1,6 +1,7 @@
 import type {
   ConversionStats,
   PairWarning,
+  PartResult,
   Placement,
   Progress,
   StepName,
@@ -65,7 +66,25 @@ export const COPY = {
   confirmBaseUp: 'Yes, next: the figure',
   askSetDown: 'Set down',
   askReset: 'Reset',
+  // #93: where the parts meet.
+  confirmFigureUp: 'Yes, next: where they meet',
+  noBase: 'No base: these are the parts of one figure',
+  askParts: 'Are the parts where they belong?',
+  partsHint:
+    'Tap the spot on a part that is in place, then the contact on the part that goes there.',
+  confirmParts: 'Yes, the parts are in place',
+  askMeet: 'Is the figure where it belongs on its base?',
+  meetHint: 'Tap the spot on the base, then the contact on the figure.',
+  markMeeting: 'Mark where they meet',
+  markParts: 'Mark where the parts meet',
+  undoMark: 'Undo the last mark',
+  resetMarks: 'Reset marks',
+  raise: 'Raise',
+  lower: 'Lower',
 } as const;
+
+/** How far one press of Turn turns a marked part about the spot's normal. _(proposal, #93)_ */
+export const TURN_STEP_DEG = 15;
 
 /** How far one press of Raise or Lower moves the figure on its base. _(proposal, #70)_ */
 export const LIFT_STEP_MM = 0.5;
@@ -138,9 +157,21 @@ export function describeWrongFile(name: string, dev: boolean): string {
   return dev ? `${name} is neither an STL nor a GLB file.` : `${name} is not an STL file.`;
 }
 
-/** The line for more files than a figure and its base. */
-export function describeTooManyFiles(): string {
-  return 'Drop one figure file, or a figure and its base.';
+/** The line for more files than one mini is made of (`MAX_PARTS`, #93). */
+export function describeTooManyFiles(max: number): string {
+  return `Drop up to ${max} files: a figure, its base and its parts.`;
+}
+
+/** A file's name as the page lists it: without `.stl`. */
+export const partName = (fileName: string): string => fileName.replace(/\.stl$/i, '');
+
+/** " · raised 0.5 mm, turned 15°" for a marked meeting's lift and turn; empty without either. */
+function liftAndTurn(liftMm: number, turnDeg: number): string {
+  const said: string[] = [];
+  if (liftMm !== 0)
+    said.push(`${liftMm > 0 ? 'raised' : 'lowered'} ${Math.round(Math.abs(liftMm) * 10) / 10} mm`);
+  if (turnDeg !== 0) said.push(`turned ${Math.round(turnDeg)}°`);
+  return said.length > 0 ? ` · ${said.join(', ')}` : '';
 }
 
 /** Two sides this close count as one size: a round hole, not a slot. _(proposal)_ */
@@ -153,6 +184,9 @@ const ROUND_SPOT = 0.1;
  */
 export function describePlacement(placement: Placement, scale = 1): string {
   const { spot } = placement;
+  // Marked by the person (#93): where they marked, raised and turned along the spot's normal.
+  if (placement.method === 'marked')
+    return `Set where you marked${liftAndTurn((placement.marks?.liftMm ?? 0) * scale, placement.marks?.turnDeg ?? 0)}`;
   const [a, b] = [...spot.sizeMm].map((mm) => mm * scale).sort((x, y) => y - x) as [number, number];
   const size =
     a - b <= a * ROUND_SPOT ? millimetres(a) : `${millimetres(a).slice(0, -3)} × ${millimetres(b)}`;
@@ -205,6 +239,61 @@ export function describePendingPlacement(pending: {
   if (parts.length === 0) return null;
   const text = parts.join(', ');
   return `${text[0]!.toUpperCase()}${text.slice(1)} — not applied yet`;
+}
+
+/**
+ * One line per part at the parts question and in the Base section (#93): "wing-l · where its
+ * file puts it", "wing-r · marked, raised 0.5 mm", "wing-r · lies apart: mark where it goes",
+ * "body · the body". `apart` says the part is not where it belongs in its file: nothing was
+ * proposed for it.
+ */
+export function describePart(part: PartResult, name: string, apart = false): string {
+  const label = partName(name);
+  if (part.source === 'body') return `${label} · the body`;
+  if (part.source === 'marked') {
+    const joint = part.joint;
+    return `${label} · marked${liftAndTurn(joint?.liftMm ?? 0, joint?.turnDeg ?? 0).replace(' · ', ', ')}`;
+  }
+  return apart ? `${label} · lies apart: mark where it goes` : `${label} · where its file puts it`;
+}
+
+/** "Parts: wing-l where its file puts it · wing-r marked" for the Base section; null for a figure of one file. */
+export function describeParts(
+  parts: readonly PartResult[],
+  names: readonly string[],
+): string | null {
+  const others = parts.filter((part) => part.source !== 'body');
+  if (others.length === 0) return null;
+  const said = others.map((part) => {
+    const name = partName(names[part.file] ?? '');
+    return part.source === 'marked' ? `${name} marked` : `${name} where its file puts it`;
+  });
+  return `Parts: ${said.join(' · ')}`;
+}
+
+/**
+ * What the meet question says under its heading (#93): the placement shown, or, while the
+ * person is marking, which mark comes next.
+ */
+export function describeMeeting(
+  placement: Placement | null,
+  marking: { spot: boolean; contact: boolean },
+  about: 'parts' | 'base',
+): string {
+  if (marking.spot !== marking.contact) {
+    const next = marking.spot ? 'contact' : 'spot';
+    const on =
+      about === 'base'
+        ? next === 'spot'
+          ? 'on the base'
+          : 'on the figure'
+        : next === 'spot'
+          ? 'on a part in place'
+          : 'on the part that goes there';
+    return `Now tap the ${next} ${on}.`;
+  }
+  if (about === 'parts') return COPY.partsHint;
+  return placement ? describePlacement(placement) : COPY.meetHint;
 }
 
 /** "Base: base.stl" or "Figure: figure.stl" above a pair's question; null for a single file. */

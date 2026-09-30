@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   describeAskedFile,
   describeAskPending,
+  describeMeeting,
   describeMini,
   describePairWarning,
+  describePart,
+  describeParts,
   describePendingPlacement,
   describePlacement,
   describeProgress,
@@ -20,6 +23,7 @@ import {
   STEPS,
   type BaseMeasurement,
   type Orientation,
+  type PartResult,
   type Placement,
   type Sizing,
   type UpReason,
@@ -197,7 +201,7 @@ describe('the base section', () => {
     );
   });
 
-  it('says a pair measured its base from the base file, and refuses a third file', () => {
+  it('says a pair measured its base from the base file, and refuses a seventh file', () => {
     const stats = {
       sizeMm: [32, 34, 32] as [number, number, number],
       sizing: sizing({ base: measured('round', 32), baseDiameterMm: 32 }),
@@ -206,7 +210,82 @@ describe('the base section', () => {
     expect(describeMini(stats)).toBe(
       '34 mm tall · Medium, 1 square · 32 mm round base from its own file',
     );
-    expect(describeTooManyFiles()).toBe('Drop one figure file, or a figure and its base.');
+    expect(describeTooManyFiles(6)).toBe('Drop up to 6 files: a figure, its base and its parts.');
+  });
+});
+
+describe('where the parts meet (#93)', () => {
+  const marked = (liftMm: number, turnDeg: number): Placement => ({
+    ...placement({ kind: 'marked', sizeMm: [0, 0] }, 'marked'),
+    marks: {
+      spot: { point: [0, 3, 0], normal: [0, 1, 0] },
+      contact: { point: [0, 3, 0], normal: [0, -1, 0] },
+      rotation: [0, 0, 0, 1],
+      liftMm,
+      turnDeg,
+    },
+  });
+  const part = (source: PartResult['source'], liftMm = 0, turnDeg = 0): PartResult => ({
+    file: 1,
+    source,
+    rotation: [0, 0, 0, 1],
+    translation: [0, 0, 0],
+    triangles: 12,
+    ...(source === 'marked' && {
+      joint: {
+        onto: 0,
+        spot: { point: [0, 0, 0], normal: [1, 0, 0] },
+        contact: { point: [0, 0, 0], normal: [-1, 0, 0] },
+        liftMm,
+        turnDeg,
+      },
+    }),
+  });
+
+  it('says a marked placement was set where the person marked, raised and turned', () => {
+    expect(describePlacement(marked(0, 0))).toBe('Set where you marked');
+    expect(describePlacement(marked(0.5, 0))).toBe('Set where you marked · raised 0.5 mm');
+    expect(describePlacement(marked(-0.5, 15))).toBe(
+      'Set where you marked · lowered 0.5 mm, turned 15°',
+    );
+    // The lift in the base file's units, said in mm.
+    expect(describePlacement(marked(0.02, 0), 25.4)).toBe('Set where you marked · raised 0.5 mm');
+  });
+
+  it('says where each part is', () => {
+    expect(describePart(part('body'), 'body.stl')).toBe('body · the body');
+    expect(describePart(part('files'), 'wing-l.stl')).toBe('wing-l · where its file puts it');
+    expect(describePart(part('files'), 'wing-r.stl', true)).toBe(
+      'wing-r · lies apart: mark where it goes',
+    );
+    expect(describePart(part('marked'), 'wing-r.STL')).toBe('wing-r · marked');
+    expect(describePart(part('marked', 0.5, -15), 'wing-r.stl')).toBe(
+      'wing-r · marked, raised 0.5 mm, turned -15°',
+    );
+    const names = ['body.stl', 'wing-l.stl', 'wing-r.stl'];
+    expect(describeParts([{ ...part('body'), file: 0 }], names)).toBeNull();
+    expect(
+      describeParts(
+        [{ ...part('body'), file: 0 }, part('files'), { ...part('marked'), file: 2 }],
+        names,
+      ),
+    ).toBe('Parts: wing-l where its file puts it · wing-r marked');
+  });
+
+  it('says what to tap next while marking, and the placement once marked', () => {
+    const none = { spot: false, contact: false };
+    expect(describeMeeting(placement({}), none, 'base')).toBe('Set in the 14 × 10 mm recess');
+    expect(describeMeeting(null, none, 'base')).toBe(COPY.meetHint);
+    expect(describeMeeting(null, { spot: true, contact: false }, 'base')).toBe(
+      'Now tap the contact on the figure.',
+    );
+    expect(describeMeeting(null, { spot: false, contact: true }, 'base')).toBe(
+      'Now tap the spot on the base.',
+    );
+    expect(describeMeeting(null, none, 'parts')).toBe(COPY.partsHint);
+    expect(describeMeeting(null, { spot: true, contact: false }, 'parts')).toBe(
+      'Now tap the contact on the part that goes there.',
+    );
   });
 });
 

@@ -35,10 +35,15 @@ import {
   type PlacementOptions,
   type AskOptions,
   type Answer,
+  type Box,
+  type MarkedPair,
+  MAX_PARTS,
+  type Meeting,
+  type MeetQuestion,
+  type PartJoint,
   type PartsOptions,
   type Question,
   type Shown,
-  type UpAnswer,
   type UpQuestion,
 } from '../lib';
 import { transcodeDetail } from '../lib/three';
@@ -49,9 +54,12 @@ import {
   COPY,
   describeAskedFile,
   describeAskPending,
+  describeMeeting,
   describeMini,
   describeProgress,
   describePairWarning,
+  describePart,
+  describeParts,
   describePendingPlacement,
   describePlacement,
   describeReady,
@@ -61,6 +69,7 @@ import {
   LEVEL_LABELS,
   LIFT_STEP_MM,
   pageStateOf,
+  partName,
   type PageState,
 } from './page-state';
 import { Viewer, type BakedMini, type Perf } from './viewer';
@@ -75,7 +84,12 @@ interface AppState {
    * page shows and asks. `name` is the file's, `serial` counts the questions of a conversion.
    * Null when nothing is asked; the page is `asking` while it is set.
    */
-  question: (Omit<UpQuestion, 'meshes'> & { name: string; serial: number }) | null;
+  question: AskedQuestion | null;
+  /**
+   * At a meet question (#93): the marks tapped that are not a meeting yet, in their files'
+   * coordinates, with the face normal the tap hit. Both null when none is being tapped.
+   */
+  marking: { spot: TappedMark | null; contact: TappedMark | null };
   /**
    * From picking or dropping the files to two frames after the first question's mesh went to
    * the viewer: the time to the question (#92, design note §8). Null until measured.
@@ -141,6 +155,18 @@ interface AppState {
   pair: PendingPlacement | null;
 }
 
+type Vec3 = [number, number, number];
+/** A question as the page keeps it: without its meshes, with the name of what it is about. */
+type AskedQuestion = (UpQuestion | MeetQuestion) & { name: string; serial: number };
+/** A mark tapped on a part at a meet question (#93). */
+interface TappedMark {
+  file: number;
+  point: Vec3;
+  normal: Vec3;
+}
+/** A pin the viewer draws. */
+type Pin = TappedMark & { kind: 'spot' | 'contact'; proposed: boolean };
+
 interface PendingPlacement {
   moveMm: [number, number];
   liftMm: number;
@@ -184,6 +210,33 @@ declare global {
       confirmUp: (options?: OrientationOptions) => Promise<void>;
       /** At a question about a pair: the other file is the base. Resolves when its question is on screen. */
       swapAtQuestion: () => Promise<void>;
+      /** At the base's question (#93): this file is the base, or null: none, the files are parts of one figure. */
+      chooseBase: (file: number | null) => Promise<void>;
+      /**
+       * At a meet question (#93): a tap on `file` at `point`, file coordinates. Resolves when
+       * the question that comes back is on screen, or at once while the meeting is half marked.
+       */
+      mark: (file: number, point: Vec3, normal?: Vec3) => Promise<void>;
+      /** At a meet question: what a tap at canvas point (x, y), CSS pixels, hits. Nothing is marked. */
+      pickAt: (x: number, y: number) => { file: number; point: Vec3; normal: Vec3 } | null;
+      /** At a question: where a file's point is on the canvas, CSS pixels from its corner. */
+      screenOf: (file: number, point: Vec3) => [number, number] | null;
+      /** At a meet question: raises (positive) or lowers what was marked last, along the spot's normal. */
+      liftMeeting: (mm: number) => Promise<void>;
+      /** At a meet question: turns what was marked last about the spot's normal. */
+      turnMeeting: (deg: number) => Promise<void>;
+      undoMark: () => Promise<void>;
+      resetMarks: () => Promise<void>;
+      /** At a meet question: confirms what is shown. */
+      confirmMeet: () => Promise<void>;
+      /**
+       * At a meet question: answers with these joints or this meeting (left out: as they are),
+       * as marking would. Resolves when the question that comes back is on screen.
+       */
+      answerMeet: (changes: { joints?: PartJoint[]; meeting?: Meeting | null }) => Promise<void>;
+      /** The Base section's buttons (#93): converts again, asking only where they meet, or how the parts go together. */
+      markMeeting: () => Promise<void>;
+      markParts: () => Promise<void>;
       /** Turns the shown mini by `deg` about the scene's x (pitch) or z (roll) axis: a preview, nothing is converted. */
       turn: (axis: TurnAxis, deg: number) => void;
       /** Converts the last file again, turned exactly as previewed. */
@@ -269,12 +322,26 @@ const askInputs = {
   reset: document.querySelector<HTMLButtonElement>('#ask-reset')!,
   swap: document.querySelector<HTMLButtonElement>('#ask-swap')!,
   confirm: document.querySelector<HTMLButtonElement>('#ask-confirm')!,
+  baseChoice: document.querySelector<HTMLElement>('#ask-base-choice')!,
+  base: document.querySelector<HTMLSelectElement>('#ask-base')!,
+};
+const meetInputs = {
+  question: document.querySelector<HTMLElement>('#meet-question')!,
+  parts: document.querySelector<HTMLElement>('#meet-parts')!,
+  hint: document.querySelector<HTMLElement>('#meet-hint')!,
+  adjust: document.querySelector<HTMLElement>('#meet-adjust')!,
+  undo: document.querySelector<HTMLButtonElement>('#meet-undo')!,
+  reset: document.querySelector<HTMLButtonElement>('#meet-reset')!,
+  confirm: document.querySelector<HTMLButtonElement>('#meet-confirm')!,
 };
 const pairInputs = {
   fieldset: document.querySelector<HTMLFieldSetElement>('#pair')!,
   addBase: document.querySelector<HTMLButtonElement>('#add-base')!,
   baseFile: document.querySelector<HTMLInputElement>('#base-file')!,
   files: document.querySelector<HTMLElement>('#pair-files')!,
+  parts: document.querySelector<HTMLElement>('#pair-parts')!,
+  markMeeting: document.querySelector<HTMLButtonElement>('#mark-meeting')!,
+  markParts: document.querySelector<HTMLButtonElement>('#mark-parts')!,
   swap: document.querySelector<HTMLButtonElement>('#swap-pair')!,
   warning: document.querySelector<HTMLElement>('#pair-warning')!,
   placement: document.querySelector<HTMLElement>('#placement')!,
@@ -306,6 +373,7 @@ const state: AppState = {
   page: 'empty',
   busy: false,
   question: null,
+  marking: { spot: null, contact: null },
   questionMs: null,
   fileName: null,
   progress: null,
@@ -376,11 +444,16 @@ const chosen = (options: OrientationOptions): boolean =>
 /** What the user chose for the last source; a new file starts without choices. */
 let choices: Choices = noChoices();
 
-/** "figure.stl" or "figure.stl + base.stl": the figure first once a conversion said which it is. */
+/**
+ * "figure.stl", or "body.stl + wing.stl + base.stl": the figure's parts first, the body leading,
+ * then the base, once a conversion said which is which (#70, #93).
+ */
 function sourcesName(pair: PairResult | null = null): string {
   const names = sources.map((source) => source.name);
-  if (pair && names.length === 2 && pair.pairing.baseFile === 0) names.reverse();
-  return names.join(' + ');
+  if (!pair) return names.join(' + ');
+  const { baseFile } = pair.pairing;
+  const order = [...pair.parts.map((part) => part.file), ...(baseFile === null ? [] : [baseFile])];
+  return order.map((file) => names[file]).join(' + ');
 }
 
 /** The figure's source of the pair on screen, or the only source. */
@@ -396,8 +469,8 @@ function figureSource(): Source | undefined {
  */
 async function reconvert(ask: AskOptions | null = null): Promise<void> {
   if (sources.length === 0 || state.busy) return;
-  const [stl, secondStl] = await Promise.all(sources.map((source) => source.read()));
-  await convert(stl!, sourcesName(), secondStl, ask);
+  const [stl, ...others] = await Promise.all(sources.map((source) => source.read()));
+  await convert(stl!, sourcesName(state.stats?.pair ?? null), others, ask);
 }
 /** Name of the GLB on screen (`?dev`); null when the page shows a converted mini or none. */
 let importedName: string | null = null;
@@ -409,6 +482,7 @@ let importedName: string | null = null;
 function render(): void {
   state.page = pageStateOf(state);
   document.body.dataset.state = state.page;
+  document.body.dataset.question = state.question?.kind ?? '';
   if (state.imported) document.body.dataset.kind = 'glb';
   else delete document.body.dataset.kind;
   const name = state.fileName ?? '';
@@ -484,12 +558,13 @@ function describePairRows(pair: PairResult | null): [string, string][] {
   if (!pairing || !placement || pairing.baseFile === null) return [];
   const size = (mm: number[]): string => `${mm.map((v) => v.toFixed(0)).join(' × ')} mm`;
   const figure = pairing.files[pair!.parts[0]?.file ?? 0]!;
+  const parts = pair!.parts.length > 1 ? `, ${pair!.parts.length} parts` : '';
   const base = pairing.files[pairing.baseFile]!;
   const { spot } = placement;
   return [
     [
       'Pair',
-      `base: file ${pairing.baseFile + 1} (${pairing.method}), figure ${size(figure.sizeMm)}, base ${size(base.sizeMm)}` +
+      `base: file ${pairing.baseFile + 1} (${pairing.method}), figure ${size(figure.sizeMm)}${parts}, base ${size(base.sizeMm)}` +
         (pairing.warnings.length > 0 ? `, ${pairing.warnings.join(', ')}` : ''),
     ],
     [
@@ -701,7 +776,7 @@ function showTurn(turn: Rotation | null): void {
 
 function turn(axis: TurnAxis, deg: number): void {
   // After a conversion, or at a question (#92): a preview either way.
-  if (state.busy ? !state.question : !state.stats) return;
+  if (state.busy ? !upQuestion() : !state.stats) return;
   if (state.pair) showPlacement(null);
   showTurn(multiply(fromAxisAngle(TURN_AXES[axis], deg), state.orientation.turn ?? IDENTITY));
 }
@@ -809,18 +884,19 @@ function describeSkipped(skipped: NonNullable<ConversionStats['bakeSkipped']>): 
 }
 
 /**
- * The question after the orient step (#92, design note §6): what the worker sent about each
+ * The questions of a conversion (#92 design note §6, #93 §6): what the worker sent about each
  * file, kept until the last question is confirmed, and the answer the page owes it.
  */
 const asking = {
   /** The welded meshes the worker sent, by file: each travels once per conversion. */
   meshes: [] as (IndexedMesh | undefined)[],
-  /** The file whose mesh the viewer shows, or null. */
-  shown: null as number | null,
+  /** Whether the viewer shows a question's meshes, and what the camera last framed. */
+  shown: false,
+  framed: '',
   /** Answers the question on screen; null when none waits. */
   answer: null as ((answer: Answer) => void) | null,
   /**
-   * The options the question on screen was resolved from, as the worker has them: what
+   * The options the up question on screen was resolved from, as the worker has them: what
    * Confirm sends when nothing is being turned. `key` says for which role and file.
    */
   options: {} as OrientationOptions,
@@ -831,8 +907,11 @@ const asking = {
     'orientation' | 'baseOrientation'
   >,
   swapped: false,
-  /** Whether the figure of a pair is asked about too: then the base's question is not the last. */
-  figureAsked: true,
+  /** Which questions this conversion asks: what makes a Confirm the last one. */
+  asks: {} as AskOptions,
+  /** At a meet question: the joints and the meeting the worker has, as last answered (#93). */
+  joints: [] as PartJoint[],
+  meeting: null as Meeting | null,
   serial: 0,
   /** Hooks waiting for the next question on screen. */
   waiters: [] as (() => void)[],
@@ -840,49 +919,72 @@ const asking = {
   startedAt: null as number | null,
 };
 
-/** The worker's question: the mesh to the viewer, the words to the section, and wait for the person. */
+/** The question on screen when it is an up question. */
+function upQuestion(): (AskedQuestion & { kind: 'up' }) | null {
+  const question = state.question;
+  return question?.kind === 'up' ? question : null;
+}
+/** The question on screen when it is a meet question. */
+function meetQuestion(): (AskedQuestion & { kind: 'meet' }) | null {
+  const question = state.question;
+  return question?.kind === 'meet' ? question : null;
+}
+
+/** A file's name as the source list has it. */
+const nameOf = (file: number | null): string =>
+  file === null ? '' : (sources[file]?.name ?? `file ${file + 1}`);
+
+/**
+ * What the viewer draws at a question: each entry of `shown` with the mesh the worker sent. The
+ * camera frames it anew when other files are shown, or the figure is laid beside its base: not
+ * when the same files only move a little, so a change tried out is seen from where the person
+ * looked.
+ */
+function drawShown(shown: readonly Shown[], box: Box, layout = ''): void {
+  const entries = shown.flatMap((entry) => {
+    const mesh = asking.meshes[entry.file];
+    return mesh ? [{ ...entry, mesh }] : [];
+  });
+  // ...or when what is shown grew or shrank by half or more (a part joined from far away).
+  const across = Math.max(...box.max.map((max, k) => max - box.min[k]!));
+  const scale = Math.round(Math.log2(Math.max(across, 1)));
+  const framing = `${entries.map((entry) => entry.file).join(',')}${layout}:${scale}`;
+  viewer.showShown(entries, box, framing !== asking.framed);
+  asking.framed = framing;
+  asking.shown = true;
+}
+
+/** The worker's question: the meshes to the viewer, the words to the section, and wait for the person. */
 function askUp(question: Question): Promise<Answer> {
   return new Promise((resolve) => {
     for (const { file, mesh } of question.meshes) asking.meshes[file] = mesh;
-    if (question.kind === 'meet') {
-      // Where the parts meet is confirmed as shown until the page draws it (#93, build step 7).
-      resolve({
-        kind: 'meet',
-        joints: choices.parts.joints,
-        meeting: choices.placement?.marks ?? null,
-        confirm: true,
-      });
-      return;
-    }
-    const asked: Partial<Pick<UpQuestion, 'meshes'>> & Omit<UpQuestion, 'meshes'> = { ...question };
-    delete asked.meshes;
-    // The viewer stands the mesh on the grid itself: the box before the worker's shift.
-    const shift: number[] = question.shown.find((entry: Shown) => entry.file === question.file)
-      ?.translation ?? [0, 0, 0];
-    const box = {
-      min: question.box.min.map((v, k) => v - shift[k]!),
-      max: question.box.max.map((v, k) => v - shift[k]!),
-    };
-    const key = `${question.role}:${question.file}`;
-    if (key !== asking.key) {
-      asking.key = key;
-      asking.options = asking.swapped
-        ? {}
-        : question.role === 'base'
-          ? asking.sent.baseOrientation
-          : asking.sent.orientation;
-    }
     asking.answer = resolve;
-    const { rotation } = question.orientation;
-    if (asking.shown === question.file) viewer.turnQuestion(rotation, box);
-    else {
-      viewer.showQuestion(asking.meshes[question.file]!, rotation, box);
-      asking.shown = question.file;
+    const asked = { ...question, meshes: [] };
+    if (question.kind === 'up') {
+      const key = `${question.role}:${question.file}`;
+      if (key !== asking.key) {
+        asking.key = key;
+        asking.options = asking.swapped
+          ? {}
+          : question.role === 'base'
+            ? asking.sent.baseOrientation
+            : asking.sent.orientation;
+      }
+      const name =
+        question.role === 'base'
+          ? nameOf(question.file)
+          : question.roles.figureFiles.map(nameOf).join(' + ');
+      state.question = { ...asked, name, serial: ++asking.serial };
+    } else {
+      state.marking = { spot: null, contact: null };
+      const name =
+        question.about === 'base'
+          ? `${question.roles.figureFiles.map(nameOf).join(' + ')} + ${nameOf(question.roles.baseFile)}`
+          : question.roles.figureFiles.map(nameOf).join(' + ');
+      state.question = { ...asked, name, serial: ++asking.serial };
     }
-    const name = sources[question.file]?.name ?? '';
-    state.question = { ...asked, name, serial: ++asking.serial };
     showTurn(null);
-    showQuestion(state.question);
+    showQuestion();
     status.textContent = '';
     render();
     const started = asking.startedAt;
@@ -897,41 +999,142 @@ function askUp(question: Question): Promise<Answer> {
   });
 }
 
-/** The question's section: which file, why it stands so, the warning, the axis, the buttons. */
-function showQuestion(question: NonNullable<AppState['question']>): void {
-  const file = describeAskedFile(question.role, question.name);
-  askInputs.file.hidden = file === null;
-  askInputs.file.textContent = file ?? '';
-  askInputs.found.textContent = describeUp(question);
-  // The base's question is where the roles are confirmed: the warning of the guess goes there.
-  const warning =
-    question.role === 'base' ? describePairWarning(question.warnings, 'question') : null;
-  askInputs.warning.hidden = warning === null;
-  askInputs.warning.textContent = warning ?? '';
-  askInputs.up.value = question.orientation.up;
-  askInputs.swap.hidden = question.role === 'mini';
-  askInputs.confirm.textContent =
-    question.role === 'base' && asking.figureAsked ? COPY.confirmBaseUp : COPY.confirmUp;
+/** Whether confirming this question ends the questions: what follows depends on what is asked. */
+function lastQuestion(question: AskedQuestion): boolean {
+  const { up, baseUp, meet } = {
+    up: asking.asks.up !== false,
+    baseUp: asking.asks.baseUp !== false,
+    meet: asking.asks.meet !== false,
+  };
+  const withBase = question.roles.baseFile !== null;
+  if (question.kind === 'meet')
+    return question.about === 'base' || (withBase ? !baseUp && !up && !meet : !up);
+  if (question.role === 'base') return !up && !meet;
+  if (question.role === 'figure') return !meet;
+  return true;
+}
+
+/** The question's section and the viewer, for the question on screen. */
+function showQuestion(): void {
+  const question = state.question;
+  if (!question) return;
+  const confirmLabel = (label: string): string => (lastQuestion(question) ? COPY.confirmUp : label);
+  if (question.kind === 'up') {
+    drawShown(question.shown, question.box);
+    viewer.setPins([]);
+    const file = describeAskedFile(question.role, question.name);
+    askInputs.file.hidden = file === null;
+    askInputs.file.textContent = file ?? '';
+    askInputs.found.textContent = describeUp(question);
+    // The base's question is where the roles are confirmed: the warning of the guess goes there.
+    const warning =
+      question.role === 'base' ? describePairWarning(question.warnings, 'question') : null;
+    askInputs.warning.hidden = warning === null;
+    askInputs.warning.textContent = warning ?? '';
+    askInputs.up.value = question.orientation.up;
+    askInputs.swap.hidden = question.role === 'mini' || sources.length !== 2;
+    // Which file is the base, or none (#93): at the base's question, or for parts without one.
+    const choosesBase =
+      sources.length >= 2 &&
+      (question.role === 'base' || (question.role === 'mini' && question.roles.baseFile === null));
+    askInputs.baseChoice.hidden = !choosesBase;
+    if (choosesBase) {
+      askInputs.base.replaceChildren(
+        ...sources.map((source, file) => new Option(partName(source.name), String(file))),
+        new Option(COPY.noBase, ''),
+      );
+      askInputs.base.value = String(question.roles.baseFile ?? '');
+    }
+    askInputs.confirm.textContent =
+      question.role === 'base'
+        ? confirmLabel(COPY.confirmBaseUp)
+        : question.role === 'figure'
+          ? confirmLabel(COPY.confirmFigureUp)
+          : COPY.confirmUp;
+    return;
+  }
+  // Where the parts meet (#93): the parts together, or the figure on its base; while one mark
+  // of a meeting with the base is set, the figure stands beside it so both can be tapped.
+  const { marking } = state;
+  const marks = {
+    spot: marking.spot !== null,
+    contact: marking.contact !== null,
+  };
+  const apart = question.about === 'base' && marks.spot !== marks.contact && question.apart;
+  drawShown(
+    apart ? apart.shown : question.shown,
+    apart ? apart.box : question.box,
+    apart ? ':apart' : '',
+  );
+  viewer.setPins(pinsOf(question));
+  meetInputs.question.textContent = question.about === 'parts' ? COPY.askParts : COPY.askMeet;
+  meetInputs.hint.textContent = describeMeeting(question.placement, marks, question.about);
+  meetInputs.parts.hidden = question.about !== 'parts';
+  if (question.about === 'parts') {
+    const proposed = new Set(question.proposed.map((pair) => pair.contact.file));
+    meetInputs.parts.replaceChildren(
+      ...question.parts.map((part) => {
+        const item = document.createElement('li');
+        const apartFile = part.source === 'files' && !proposed.has(part.file);
+        item.textContent = describePart(part, nameOf(part.file), apartFile);
+        return item;
+      }),
+    );
+  }
+  // Raise, Lower and Turn once something is marked (PM decision 2026-09-30).
+  meetInputs.adjust.hidden =
+    question.about === 'base' ? !asking.meeting : asking.joints.length === 0;
+  meetInputs.confirm.textContent = question.about === 'parts' ? COPY.confirmParts : COPY.confirmUp;
+}
+
+/** The pins of a meet question: the marks set, the ones being tapped, else the proposals. */
+function pinsOf(question: AskedQuestion & { kind: 'meet' }): Pin[] {
+  const pins: Pin[] = [];
+  const add = (pair: MarkedPair, proposed: boolean): void => {
+    pins.push({ ...pair.spot, kind: 'spot', proposed });
+    pins.push({ ...pair.contact, kind: 'contact', proposed });
+  };
+  const { spot, contact } = state.marking;
+  const tapping = spot !== null || contact !== null;
+  if (spot) pins.push({ ...spot, kind: 'spot', proposed: false });
+  if (contact) pins.push({ ...contact, kind: 'contact', proposed: false });
+  if (question.about === 'base') {
+    if (tapping) return pins;
+    if (question.marks[0]) add(question.marks[0], false);
+    else for (const pair of question.proposed) add(pair, true);
+    return pins;
+  }
+  for (const pair of question.marks) add(pair, false);
+  if (!tapping) for (const pair of question.proposed) add(pair, true);
+  return pins;
 }
 
 /** Gives up the question's meshes: the viewer releases them and the page drops its arrays (§4.3). */
 function giveUpQuestion(): void {
   asking.meshes = [];
-  asking.shown = null;
+  asking.shown = false;
+  asking.framed = '';
   viewer.clear();
 }
 
 /** Answers the question on screen. False when none waits. */
-function answerQuestion(answer: UpAnswer): boolean {
+function answerQuestion(answer: Answer): boolean {
   const resolve = asking.answer;
   const question = state.question;
   if (!resolve || !question) return false;
   asking.answer = null;
-  if (answer.swap) asking.swapped = true;
-  else if (!answer.confirm) asking.options = answer.orientation;
-  if (answer.confirm || answer.swap) {
+  if (answer.kind === 'up') {
+    if (answer.swap || answer.baseFile !== undefined) asking.swapped = true;
+    else if (!answer.confirm) asking.options = answer.orientation;
+  } else {
+    asking.joints = answer.joints;
+    asking.meeting = answer.meeting;
+  }
+  state.marking = { spot: null, contact: null };
+  const restart = answer.kind === 'up' && (answer.swap || answer.baseFile !== undefined);
+  if (answer.confirm || restart) {
     // After the last Confirm the conversion runs as it does without a question (PM decision).
-    if (answer.confirm && (question.role !== 'base' || !asking.figureAsked)) giveUpQuestion();
+    if (answer.confirm && lastQuestion(question)) giveUpQuestion();
     state.question = null;
     showTurn(null);
     render();
@@ -940,24 +1143,24 @@ function answerQuestion(answer: UpAnswer): boolean {
   return true;
 }
 
-/** The rotation on screen at the question: the one asked about, with a turn being tried out. */
+/** The rotation on screen at an up question: the one asked about, with a turn being tried out. */
 function rotationAtQuestion(): Rotation | null {
-  const question = state.question;
+  const question = upQuestion();
   if (!question) return null;
   const { turn } = state.orientation;
   return turn ? multiply(turn, question.orientation.rotation) : question.orientation.rotation;
 }
 
-/** Confirms the question: with `options`, or what is on screen. */
+/** Confirms the up question: with `options`, or what is on screen. */
 function confirmUp(options?: OrientationOptions): void {
-  if (!state.question) return;
+  if (!upQuestion()) return;
   const orientation =
     options ?? (state.orientation.turn ? { rotation: rotationAtQuestion()! } : asking.options);
   answerQuestion({ kind: 'up', orientation, confirm: true });
 }
 
 /** An answer that brings the next question; resolves when it is on screen. */
-function answerAndWait(answer: UpAnswer): Promise<void> {
+function answerAndWait(answer: Answer): Promise<void> {
   return new Promise((resolve) => {
     asking.waiters.push(resolve);
     if (!answerQuestion(answer)) {
@@ -965,6 +1168,127 @@ function answerAndWait(answer: UpAnswer): Promise<void> {
       resolve();
     }
   });
+}
+
+/** Answers the meet question on screen with changed joints or meeting: it comes back resolved. */
+function answerMeet(joints: PartJoint[], meeting: Meeting | null, confirm = false): Promise<void> {
+  if (!meetQuestion()) return Promise.resolve();
+  const answer: Answer = { kind: 'meet', joints, meeting, confirm };
+  if (confirm) {
+    answerQuestion(answer);
+    return Promise.resolve();
+  }
+  return answerAndWait(answer);
+}
+
+/** Whether a part's joints lead back to it: the tree of parts must not go round. */
+function goesRound(joints: readonly PartJoint[], part: number, onto: number): boolean {
+  for (let file: number | undefined = onto; file !== undefined;) {
+    if (file === part) return true;
+    file = joints.find((joint) => joint.part === file)?.onto;
+  }
+  return false;
+}
+
+/**
+ * A tap on a part at a meet question (#93 design note §6.2, one tap and no mode, PM decision):
+ * on the base, or on a part in place, it is the spot; on the figure, or on a part not yet in
+ * place, the contact. A tap on the part a mark is already on moves that mark. Once both are
+ * set they are one meeting, and the page answers; the worker shows it placed.
+ */
+function tapMark(pick: { file: number; point: Vec3; normal: Vec3 }): Promise<void> {
+  const question = meetQuestion();
+  if (!question) return Promise.resolve();
+  const marking = { ...state.marking };
+  if (question.about === 'base') {
+    if (pick.file === question.roles.baseFile) marking.spot = pick;
+    else marking.contact = pick;
+  } else {
+    const body = question.roles.figureFiles[0];
+    const inPlace = (file: number): boolean =>
+      file === body ||
+      question.parts.some((part) => part.file === file && part.source === 'marked') ||
+      question.proposed.some((pair) => pair.contact.file === file);
+    if (marking.spot?.file === pick.file) marking.spot = pick;
+    else if (marking.contact?.file === pick.file) marking.contact = pick;
+    else if (marking.spot && pick.file !== body) marking.contact = pick;
+    else if (marking.contact) marking.spot = pick;
+    else if (inPlace(pick.file)) marking.spot = pick;
+    else marking.contact = pick;
+  }
+  state.marking = marking;
+  const { spot, contact } = marking;
+  if (!spot || !contact) {
+    showQuestion();
+    return Promise.resolve();
+  }
+  const picks = {
+    spot: { file: spot.file, point: spot.point },
+    contact: { file: contact.file, point: contact.point },
+  };
+  if (question.about === 'base') return answerMeet(asking.joints, picks);
+  if (goesRound(asking.joints, contact.file, spot.file)) {
+    // Two parts cannot each hang on the other: the contact starts again.
+    state.marking = { spot, contact: null };
+    showQuestion();
+    return Promise.resolve();
+  }
+  const joint: PartJoint = { part: contact.file, onto: spot.file, ...picks };
+  const joints = [...asking.joints.filter((other) => other.part !== joint.part), joint];
+  return answerMeet(joints, asking.meeting);
+}
+
+/** Raises or turns what was marked last: the meeting with the base, or the last joint (#93). */
+function adjustMeeting(liftMm: number, turnDeg: number): Promise<void> {
+  const question = meetQuestion();
+  if (!question) return Promise.resolve();
+  const change = <T extends Meeting>(meeting: T): T => ({
+    ...meeting,
+    liftMm: (meeting.liftMm ?? 0) + liftMm,
+    turnDeg: (meeting.turnDeg ?? 0) + turnDeg,
+  });
+  if (question.about === 'base')
+    return asking.meeting ? answerMeet(asking.joints, change(asking.meeting)) : Promise.resolve();
+  const last = asking.joints.at(-1);
+  if (!last) return Promise.resolve();
+  return answerMeet([...asking.joints.slice(0, -1), change(last)], asking.meeting);
+}
+
+/** Drops the mark being tapped, else the last meeting marked. */
+function undoMark(): Promise<void> {
+  const question = meetQuestion();
+  if (!question) return Promise.resolve();
+  if (state.marking.spot || state.marking.contact) {
+    state.marking = { spot: null, contact: null };
+    showQuestion();
+    return Promise.resolve();
+  }
+  if (question.about === 'base')
+    return asking.meeting ? answerMeet(asking.joints, null) : Promise.resolve();
+  return asking.joints.length > 0
+    ? answerMeet(asking.joints.slice(0, -1), asking.meeting)
+    : Promise.resolve();
+}
+
+/** Drops every mark: back to what the files and the automatic placement propose. */
+function resetMarks(): Promise<void> {
+  const question = meetQuestion();
+  if (!question) return Promise.resolve();
+  state.marking = { spot: null, contact: null };
+  const changed = question.about === 'base' ? asking.meeting !== null : asking.joints.length > 0;
+  if (!changed) {
+    showQuestion();
+    return Promise.resolve();
+  }
+  return question.about === 'base'
+    ? answerMeet(asking.joints, null)
+    : answerMeet([], asking.meeting);
+}
+
+/** Confirms the meet question as it stands; a mark half set is dropped. */
+function confirmMeet(): void {
+  if (!meetQuestion()) return;
+  void answerMeet(asking.joints, asking.meeting, true);
 }
 
 /**
@@ -975,26 +1299,31 @@ function answerAndWait(answer: UpAnswer): Promise<void> {
 async function convert(
   stl: ArrayBuffer,
   fileName: string,
-  secondStl?: ArrayBuffer,
+  others: ArrayBuffer[] = [],
   ask: AskOptions | null = null,
   startedAt = performance.now(),
 ): Promise<void> {
   if (state.busy) return;
   const asks = ask !== null && pageOptions.ask;
+  const [secondStl, ...moreStl] = others;
   Object.assign(asking, {
     meshes: [],
-    shown: null,
+    shown: false,
+    framed: '',
     answer: null,
     key: '',
     sent: { orientation: choices.orientation, baseOrientation: choices.baseOrientation },
     swapped: false,
-    figureAsked: ask?.up !== false,
+    asks: ask ?? {},
+    joints: choices.parts.joints,
+    meeting: choices.placement.marks ?? null,
     serial: 0,
     startedAt: asks ? startedAt : null,
   });
   Object.assign(state, {
     busy: true,
     question: null,
+    marking: { spot: null, contact: null },
     questionMs: null,
     fileName,
     stats: null,
@@ -1033,6 +1362,8 @@ async function convert(
           placement: choices.placement,
           baseOrientation: choices.baseOrientation,
         }),
+        ...(moreStl.length > 0 && { moreStl }),
+        ...(secondStl && choices.parts.joints.length > 0 && { parts: choices.parts }),
       },
       asks ? askUp : undefined,
     );
@@ -1044,6 +1375,12 @@ async function convert(
     if (secondStl) {
       choices.baseOrientation = result.choices.baseOrientation ?? {};
       choices.pairing = result.choices.pairing ?? {};
+      choices.parts = result.choices.parts ?? { joints: [] };
+      // Marks confirmed at the meet question stay; without them, a move made by hand stays (#93).
+      const marks = result.choices.placement?.marks;
+      const byHand = { ...choices.placement };
+      delete byHand.marks;
+      choices.placement = marks ? { marks } : byHand;
     }
     baked = null;
     detailKtx2 = null;
@@ -1117,7 +1454,8 @@ async function convert(
     // Cancelled or failed at a question: its mesh leaves the screen too.
     asking.answer = null;
     state.question = null;
-    if (asking.shown !== null) giveUpQuestion();
+    state.marking = { spot: null, contact: null };
+    if (asking.shown) giveUpQuestion();
     if (askInputs.turnByHand.checked) {
       askInputs.turnByHand.checked = false;
       viewer.setTurnGizmo(null);
@@ -1221,7 +1559,8 @@ async function loadFiles(files: File[]): Promise<void> {
     render();
   };
   const names = files.map((file) => file.name).join(' + ');
-  if (files.length > 2) return refuse(names, describeTooManyFiles(), 'not-stl');
+  if (files.length > MAX_PARTS)
+    return refuse(names, describeTooManyFiles(MAX_PARTS), 'too-many-files');
   // Opening a GLB checks the export's round trip: a tool for the team, under ?dev.
   const [first] = files;
   if (files.length === 1 && pageOptions.dev && first!.name.toLowerCase().endsWith('.glb')) {
@@ -1243,29 +1582,59 @@ async function loadFiles(files: File[]): Promise<void> {
   }
   sources = files.map((file) => ({ name: file.name, read: () => file.arrayBuffer() }));
   choices = noChoices();
-  // New files: every one of them is asked about (design note §6.4).
-  await convert(buffers[0]!, names, buffers[1], { up: true, baseUp: true }, startedAt);
+  // New files: every question is asked (#92 design note §6.4, #93 §6.6).
+  const ask = { up: true, baseUp: true, parts: true, meet: true };
+  await convert(buffers[0]!, names, buffers.slice(1), ask, startedAt);
 }
 
-/** Adds a base file to the mini on screen: the two convert as a pair, the guess says which is the base. */
+/** The figure's sources, the body first: every file that is not the base. */
+function figureSources(): Source[] {
+  const pair = state.stats?.pair;
+  return pair ? pair.parts.flatMap((part) => sources[part.file] ?? []) : sources.slice(0, 1);
+}
+
+/**
+ * Adds a base file to the mini on screen: the figure (one file, or its parts) and the base
+ * convert together, the guess says which is the base. The parts keep their joints: the base
+ * comes last, so no file index moves.
+ */
 async function addBase(base: Source): Promise<void> {
-  const figure = figureSource();
-  if (!figure || state.busy) return;
-  sources = [figure, base];
+  const figure = figureSources();
+  if (figure.length === 0 || state.busy) return;
+  const parts =
+    figure.length > 1 && sources.length === figure.length ? choices.parts : { joints: [] };
+  sources = [...figure, base];
   // The figure's orientation stays; the size is measured from the base now. The new base is
   // asked about, and the figure too unless its up was chosen: the pair may stand it another way.
-  choices = { ...noChoices(), orientation: choices.orientation };
-  await reconvert({ up: !chosen(choices.orientation), baseUp: true });
+  // Where they meet is shown before the conversion, as for every pair (PM decision 2026-09-30).
+  choices = { ...noChoices(), orientation: choices.orientation, parts };
+  await reconvert({ up: !chosen(choices.orientation), baseUp: true, parts: false, meet: true });
 }
 
-/** Converts the figure alone again. */
+/** Converts the figure alone again: one file, or its parts without a base (#93). */
 async function removeBase(): Promise<void> {
-  const figure = figureSource();
-  if (!figure || sources.length < 2 || state.busy) return;
+  const pair = state.stats?.pair;
+  const figure = figureSources();
+  if (!pair || pair.pairing.baseFile === null || state.busy) return;
   const turned = choices.pairing.swap === true;
-  sources = [figure];
-  choices = { ...noChoices(), orientation: turned ? {} : choices.orientation };
-  await reconvert({ up: !chosen(choices.orientation) });
+  // The joints name files by index: without the base, the files after it move up one.
+  const index = new Map(pair.parts.map((part, k) => [part.file, k]));
+  const at = (file: number): number => index.get(file) ?? file;
+  const joints = choices.parts.joints.map((joint) => ({
+    ...joint,
+    part: at(joint.part),
+    onto: at(joint.onto),
+    spot: { ...joint.spot, file: at(joint.spot.file) },
+    contact: { ...joint.contact, file: at(joint.contact.file) },
+  }));
+  sources = figure;
+  choices = {
+    ...noChoices(),
+    orientation: turned ? {} : choices.orientation,
+    parts: { joints },
+    pairing: figure.length > 1 ? { baseFile: null } : {},
+  };
+  await reconvert({ up: !chosen(choices.orientation), parts: false });
 }
 
 /** Converts the pair again with figure and base the other way round. The up axis was the figure's: it starts afresh. */
@@ -1278,18 +1647,42 @@ async function swapPair(): Promise<void> {
       ? { swap: !choices.pairing.swap }
       : { baseFile: baseFile === 0 ? (1 as const) : (0 as const) };
   choices = { ...noChoices(), pairing, sizing: choices.sizing };
-  await reconvert({ up: true, baseUp: true });
+  await reconvert({ up: true, baseUp: true, parts: false, meet: true });
+}
+
+/** Converts again asking only where the figure meets its base (#93 design note §6.6). */
+function markMeeting(): Promise<void> {
+  if (!state.stats?.pair?.placement) return Promise.resolve();
+  return reconvert({ up: false, baseUp: false, parts: false, meet: true });
+}
+
+/** Converts again asking only how the figure's parts go together. */
+function markParts(): Promise<void> {
+  if ((state.stats?.pair?.parts.length ?? 0) < 2) return Promise.resolve();
+  return reconvert({ up: false, baseUp: false, parts: true, meet: false });
 }
 
 /** The Base section for what is on screen: the add button for one file, the pair's lines and controls for two. */
 function showPairSection(stats: ConversionStats): void {
   const { pair } = stats;
-  pairInputs.fieldset.dataset.kind = pair ? 'pair' : 'single';
+  const kind = !pair ? 'single' : pair.pairing.baseFile === null ? 'parts' : 'pair';
+  pairInputs.fieldset.dataset.kind = kind;
+  pairInputs.fieldset.toggleAttribute('data-marked', pair?.placement?.method === 'marked');
   pairInputs.moveByHand.checked = false;
   viewer.setMoveGizmo(null);
-  if (!pair?.placement || pair.pairing.baseFile === null) return;
-  const figure = sources[pair.parts[0]?.file ?? 0]?.name ?? '';
-  const base = sources[pair.pairing.baseFile]?.name ?? '';
+  if (!pair) return;
+  const names = sources.map((source) => source.name);
+  const figure = pair.parts.map((part) => names[part.file] ?? '').join(' + ');
+  const parts = describeParts(pair.parts, names);
+  pairInputs.parts.hidden = parts === null;
+  pairInputs.parts.textContent = parts ?? '';
+  pairInputs.markParts.hidden = pair.parts.length < 2;
+  pairInputs.swap.hidden = sources.length !== 2;
+  if (!pair.placement || pair.pairing.baseFile === null) {
+    pairInputs.files.textContent = `Figure: ${figure}`;
+    return;
+  }
+  const base = names[pair.pairing.baseFile] ?? '';
   pairInputs.files.textContent = `Base: ${base} · Figure: ${figure}`;
   const warning = describePairWarning(pair.pairing.warnings);
   pairInputs.warning.hidden = warning === null;
@@ -1502,6 +1895,44 @@ askInputs.swap.addEventListener('click', () =>
   answerQuestion({ kind: 'up', orientation: {}, confirm: false, swap: true }),
 );
 askInputs.confirm.addEventListener('click', () => confirmUp());
+askInputs.base.addEventListener('change', () =>
+  answerQuestion({
+    kind: 'up',
+    orientation: {},
+    confirm: false,
+    baseFile: askInputs.base.value === '' ? null : Number(askInputs.base.value),
+  }),
+);
+// Where the parts meet (#93): a tap marks, the buttons adjust, undo, reset and confirm.
+for (const button of meetInputs.adjust.querySelectorAll<HTMLButtonElement>('[data-meet-lift]'))
+  button.addEventListener(
+    'click',
+    () => void adjustMeeting(Number(button.dataset.meetLift) * LIFT_STEP_MM, 0),
+  );
+for (const button of meetInputs.adjust.querySelectorAll<HTMLButtonElement>('[data-meet-turn]'))
+  button.addEventListener('click', () => void adjustMeeting(0, Number(button.dataset.meetTurn)));
+meetInputs.undo.addEventListener('click', () => void undoMark());
+meetInputs.reset.addEventListener('click', () => void resetMarks());
+meetInputs.confirm.addEventListener('click', () => confirmMeet());
+/** A press is a tap when it moves no further and lasts no longer than this; else it orbits. _(proposals, #93)_ */
+const TAP_MAX_PX = 6;
+const TAP_MAX_MS = 400;
+let press: { id: number; x: number; y: number; at: number } | null = null;
+canvas.addEventListener('pointerdown', (event) => {
+  press = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now() };
+});
+canvas.addEventListener('pointerup', (event) => {
+  const down = press;
+  press = null;
+  if (!down || down.id !== event.pointerId || !meetQuestion()) return;
+  const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
+  if (moved > TAP_MAX_PX || performance.now() - down.at > TAP_MAX_MS) return;
+  const rect = canvas.getBoundingClientRect();
+  const pick = viewer.pick(event.clientX - rect.left, event.clientY - rect.top);
+  if (pick) void tapMark(pick);
+});
+pairInputs.markMeeting.addEventListener('click', () => void markMeeting());
+pairInputs.markParts.addEventListener('click', () => void markParts());
 document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
 turnReset.addEventListener('click', () => showTurn(null));
 for (const button of [chooseButton, chooseAgain]) {
@@ -1563,6 +1994,23 @@ window.__mt = {
     return Promise.resolve();
   },
   swapAtQuestion: () => answerAndWait({ kind: 'up', orientation: {}, confirm: false, swap: true }),
+  chooseBase: (file) =>
+    answerAndWait({ kind: 'up', orientation: {}, confirm: false, baseFile: file }),
+  mark: (file, point, normal = [0, 1, 0]) => tapMark({ file, point, normal }),
+  pickAt: (x, y) => viewer.pick(x, y),
+  screenOf: (file, point) => viewer.screenOf(file, point),
+  liftMeeting: (mm) => adjustMeeting(mm, 0),
+  turnMeeting: (deg) => adjustMeeting(0, deg),
+  undoMark,
+  resetMarks,
+  confirmMeet: () => {
+    confirmMeet();
+    return Promise.resolve();
+  },
+  answerMeet: ({ joints, meeting }) =>
+    answerMeet(joints ?? asking.joints, meeting === undefined ? asking.meeting : meeting),
+  markMeeting,
+  markParts,
   turn,
   applyTurn: () => applyTurn(false),
   setDown: () => applyTurn(true),

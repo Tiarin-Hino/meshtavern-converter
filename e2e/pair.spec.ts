@@ -109,7 +109,7 @@ test('swaps figure and base, and removes the base', async ({ page }) => {
   await expect(page.locator('#swap-pair')).toBeHidden();
 });
 
-test('takes two files picked at once as a pair, and refuses a third', async ({ page }) => {
+test('takes two files picked at once as a pair, and refuses a seventh (#93)', async ({ page }) => {
   test.setTimeout(120_000);
   await open(page);
   await page.setInputFiles('#file', [
@@ -121,14 +121,14 @@ test('takes two files picked at once as a pair, and refuses a third', async ({ p
   await expect(page.locator('#heading')).toHaveText('hero + hero-base');
   await expect(page.locator('#placement')).toHaveText('Set in the 13 mm recess');
 
-  await page.setInputFiles('#file', [
-    file('a.stl', generatePuddleFigure(12)),
-    file('b.stl', generateRecessBase()),
-    file('c.stl', generateRecessBase()),
-  ]);
+  // A figure, its base and its parts are up to six files (#93); a seventh is refused.
+  await page.setInputFiles(
+    '#file',
+    Array.from({ length: 7 }, (_, k) => file(`part-${k}.stl`, generateRecessBase())),
+  );
   await expect(page.locator('body')).toHaveAttribute('data-state', 'error');
   await expect(page.locator('#status')).toHaveText(
-    'Drop one figure file, or a figure and its base.',
+    'Drop up to 6 files: a figure, its base and its parts.',
   );
 });
 
