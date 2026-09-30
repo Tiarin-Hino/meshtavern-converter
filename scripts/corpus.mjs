@@ -484,18 +484,18 @@ function pairReport() {
 function questionReport() {
   const timed = converted.filter(([, m]) => m.times.questionMs != null);
   if (timed.length === 0) return 'Nothing was asked (`--options "?ask=off"`).';
-  const singles = timed.filter(([, m]) => !m.pair);
-  const largest = singles.reduce(
+  // The largest corpus file by its figure's STL, single or not: the issue's second budget.
+  const largest = timed.reduce(
     (most, row) => (most === null || row[1].stlBytes > most[1].stlBytes ? row : most),
     null,
   )?.[0];
-  const budgetOf = ([key, m]) =>
-    m.pair ? null : key === largest ? QUESTION_BUDGET_LARGEST_MS : QUESTION_BUDGET_MS;
+  const budgetOf = ([key]) => (key === largest ? QUESTION_BUDGET_LARGEST_MS : QUESTION_BUDGET_MS);
+  const singles = timed.filter(([, m]) => !m.pair);
   const over = singles.filter((row) => row[1].times.questionMs > budgetOf(row));
   const steps = (m) =>
     ['read', 'weld', 'orient'].reduce((sum, step) => sum + (m.times.steps[step] ?? 0), 0);
   return [
-    `${singles.length - over.length} of ${singles.length} single files reached the question within the budget (${QUESTION_BUDGET_MS / 1000} s, the largest file ${QUESTION_BUDGET_LARGEST_MS / 1000} s). The budgets are the reference laptop's; this run is ${results.machine.cpu}. Pairs are reported, not held to a budget (PM decision on PR #94).`,
+    `${singles.length - over.length} of ${singles.length} single files reached the question within the budget: ${QUESTION_BUDGET_MS / 1000} s, and ${QUESTION_BUDGET_LARGEST_MS / 1000} s for the largest corpus file (${largest}). The budgets are the reference laptop's; this run is ${results.machine.cpu}. Pairs are reported against the same budgets, not held to them (PM decision on PR #94). For a pair the first question is the base's; its orient step also holds the figure's decision, made after that question, so it can be longer than the time to the question.`,
     table(
       [
         'Mini',
@@ -508,10 +508,8 @@ function questionReport() {
       timed.map((row) => {
         const [key, m] = row;
         const budget = budgetOf(row);
-        const within =
-          budget === null
-            ? 'reported'
-            : `${budget.toLocaleString()} ms${m.times.questionMs > budget ? ' **over**' : ''}`;
+        const over = m.times.questionMs > budget;
+        const within = `${budget.toLocaleString()} ms${m.pair ? ' (pair: reported)' : ''}${over ? ' **over**' : ''}`;
         const asked = m.asked.map((a) => `${a.role} ${a.tries}`).join(', ') || 'none';
         return `| ${key} | ${m.sourceTriangles.toLocaleString()} | ${m.times.questionMs.toLocaleString()} ms | ${within} | ${steps(m).toLocaleString()} ms | ${asked} |`;
       }),
