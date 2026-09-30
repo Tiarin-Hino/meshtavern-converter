@@ -96,11 +96,17 @@ export function scoreAll(records, files, place) {
     const pair = files(key, record);
     if (!pair) continue;
     try {
-      const auto = place(pair.figure, pair.base, {});
+      // A base the PM stood another way at its question (#92) stands that way here too.
+      const baseOrientation = record.choices?.baseOrientation;
+      const options = baseOrientation ? { baseOrientation } : {};
+      const auto = place(pair.figure, pair.base, options);
       const withAxis =
         auto.orientation.up === record.orientation.up
           ? auto
-          : place(pair.figure, pair.base, { orientation: { up: record.orientation.up } });
+          : place(pair.figure, pair.base, {
+              ...options,
+              orientation: { up: record.orientation.up },
+            });
       rows.push({ key, record, auto, ...score(record, auto, withAxis) });
     } catch (error) {
       rows.push({ key, record, error: String(error.code ?? error.message) });

@@ -2,13 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { ConversionProblem, PROBLEM_MESSAGES } from '../pipeline/problems';
 import type { ConversionResult } from '../pipeline/run';
 import { ConversionCancelled, Converter, type WorkerLike } from './client';
+import type { UpAnswer, UpQuestion } from '../pipeline/ask';
 import type { WorkerRequest, WorkerResponse } from './protocol';
+
+type ConvertRequest = Extract<WorkerRequest, { type: 'convert' }>;
 
 class FakeWorker implements WorkerLike {
   onmessage: WorkerLike['onmessage'] = null;
   onerror: WorkerLike['onerror'] = null;
   terminated = false;
   readonly requests: WorkerRequest[] = [];
+  /** The convert requests only. */
+  get converts(): ConvertRequest[] {
+    return this.requests.filter((r): r is ConvertRequest => r.type === 'convert');
+  }
   readonly transfers: Transferable[][] = [];
 
   postMessage(
@@ -42,7 +49,7 @@ describe('Converter', () => {
     const { converter, workers } = setUp();
     const seen: string[] = [];
     const job = converter.convert(new ArrayBuffer(84), (p) => seen.push(p.step), { bake: 512 });
-    const request = workers[0]!.requests[0]!;
+    const request = workers[0]!.converts[0]!;
     expect(request.options).toEqual({ bake: 512 });
 
     workers[0]!.reply({ type: 'progress', id: request.id, progress: { step: 'read', percent: 0 } });
@@ -57,7 +64,7 @@ describe('Converter', () => {
     const secondStl = new ArrayBuffer(84);
     void converter.convert(stl, () => {}, { secondStl, pairing: { swap: true } });
     expect(workers[0]!.transfers[0]).toEqual([stl, secondStl]);
-    expect(workers[0]!.requests[0]!.options).toMatchObject({ secondStl, pairing: { swap: true } });
+    expect(workers[0]!.converts[0]!.options).toMatchObject({ secondStl, pairing: { swap: true } });
     void converter.convert(new ArrayBuffer(84), () => {});
     expect(workers[0]!.transfers[1]).toHaveLength(1);
   });
@@ -130,6 +137,79 @@ describe('Converter', () => {
       code: 'out-of-memory',
       message: PROBLEM_MESSAGES['too-large'],
     });
+    expect(workers).toHaveLength(2);
+  });
+});
+
+describe('Converter asking which way is up (#92)', () => {
+  const question = { role: 'mini', file: 0 } as UpQuestion;
+  const answer: UpAnswer = { orientation: { up: '+x' }, confirm: true };
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('asks about every file by default, and passes the answer back to the worker', async () => {
+    const { converter, workers } = setUp();
+    const asked: UpQuestion[] = [];
+    const job = converter.convert(
+      new ArrayBuffer(84),
+      () => {},
+      { bake: 0 },
+      (q) => {
+        asked.push(q);
+        return Promise.resolve(answer);
+      },
+    );
+    const worker = workers[0]!;
+    expect(worker.converts[0]!.options).toEqual({ bake: 0, ask: { up: true, baseUp: true } });
+    worker.reply({ type: 'question', id: 1, question });
+    await settle();
+    expect(asked).toEqual([question]);
+    expect(worker.requests[1]).toEqual({ type: 'answer', id: 1, answer });
+    worker.reply({ type: 'done', id: 1, result });
+    await expect(job).resolves.toBe(result);
+  });
+
+  it('keeps the files named in the options, and strips them without a callback', () => {
+    const { converter, workers } = setUp();
+    void converter.convert(
+      new ArrayBuffer(84),
+      () => {},
+      { ask: { baseUp: false } },
+      () => Promise.resolve(answer),
+    );
+    expect(workers[0]!.converts[0]!.options).toEqual({ ask: { baseUp: false } });
+    void converter.convert(new ArrayBuffer(84), () => {}, { bake: 0, ask: { up: true } });
+    expect(workers[0]!.converts[1]!.options).toEqual({ bake: 0 });
+  });
+
+  it('posts nothing for a job cancelled while the question was open', async () => {
+    const { converter, workers } = setUp();
+    let answerNow: (a: UpAnswer) => void = () => {};
+    const job = converter.convert(
+      new ArrayBuffer(84),
+      () => {},
+      {},
+      () => new Promise((resolve) => (answerNow = resolve)),
+    );
+    workers[0]!.reply({ type: 'question', id: 1, question });
+    converter.cancel();
+    await expect(job).rejects.toBeInstanceOf(ConversionCancelled);
+    answerNow(answer);
+    await settle();
+    expect(workers[0]!.requests).toHaveLength(1);
+    expect(workers[1]!.requests).toHaveLength(0);
+  });
+
+  it('rejects with the callback’s error and starts a fresh worker', async () => {
+    const { converter, workers } = setUp();
+    const job = converter.convert(
+      new ArrayBuffer(84),
+      () => {},
+      {},
+      () => Promise.reject(new Error('the page went away')),
+    );
+    workers[0]!.reply({ type: 'question', id: 1, question });
+    await expect(job).rejects.toThrow('the page went away');
+    expect(workers[0]!.terminated).toBe(true);
     expect(workers).toHaveLength(2);
   });
 });

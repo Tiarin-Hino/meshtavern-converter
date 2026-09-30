@@ -30,7 +30,16 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
   await page.goto('/?dev&bake=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   const nextVerdict = await installFeedback(page);
-  const session = { index: 1, total: 4, commit: 'test', outDir, browser, nextVerdict };
+  // The questions after the orient step (#92) are confirmed as detected, as an unattended run does.
+  const session = {
+    index: 1,
+    total: 4,
+    commit: 'test',
+    outDir,
+    browser,
+    nextVerdict,
+    up: 'detected' as const,
+  };
   const read = (key: string) => JSON.parse(readFileSync(recordPath(outDir, key), 'utf8'));
 
   // S: the move being tried out is the record; Apply is not needed.
@@ -46,6 +55,8 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
     verdict: 'placed',
     pairing: { baseFile: 1, method: 'guessed' },
     orientation: { up: '+z' },
+    baseOrientation: { up: '+z', method: 'base' },
+    choices: { orientation: {}, baseOrientation: {}, pairing: {} },
     detected: { spot: { kind: 'recess' } },
   });
   expect(placed.placed.moveMm).toEqual([2, 0]);

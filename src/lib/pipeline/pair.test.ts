@@ -14,6 +14,7 @@ import { resolveOrientation } from './orient';
 import {
   BASE_MAX_ASPECT,
   baseOrientation,
+  chosenBase,
   figureUpCandidates,
   printCut,
   PRINT_CUT_MIN_MM2,
@@ -25,7 +26,7 @@ import {
   type FileShape,
 } from './pair';
 import { ConversionProblem } from './problems';
-import { angleDeg, apply, fileUp, fromAxisAngle } from './rotation';
+import { angleDeg, apply, AXIS_ROTATION, fileUp, fromAxisAngle, multiply } from './rotation';
 
 /** The shape the pipeline sees for a Z-up soup, standing as `baseOrientation` stands it. */
 function shapeOf(soup: Float32Array): FileShape {
@@ -136,6 +137,38 @@ describe('baseOrientation', () => {
   });
 });
 
+describe('chosenBase (#92)', () => {
+  const mesh = weldVertices(generateRecessBase()).mesh;
+  const { detection } = baseOrientation(mesh);
+
+  it('measures a base turned over in the 2 mm band: its top, recess and all, is the underside', () => {
+    const turned = chosenBase(mesh, { up: '-z' }, detection);
+    expect(turned).toMatchObject({ how: 'chosen', flatUnderside: true });
+    expect(turned.detection.orientation).toMatchObject({ up: '-z', method: 'manual' });
+    // The top ring and the recess floor 1 mm below it: the whole disc.
+    expect(turned.coverage).toBeGreaterThan(0.7);
+    const placed = placeOriented(mesh, turned);
+    expect(placed.base).toMatchObject({ shape: 'round' });
+    expect(placed.base!.diameterMm).toBeCloseTo(32, 0);
+  });
+
+  it('sees no flat underside on a file that has none', () => {
+    const figure = weldVertices(generateFigure(false)).mesh;
+    const chosen = chosenBase(figure, { up: '+z' }, baseOrientation(figure).detection);
+    expect(chosen).toMatchObject({ how: 'chosen', flatUnderside: false });
+  });
+
+  it('takes a free turn as the underside, measured after placing', () => {
+    const rotation = multiply(fromAxisAngle([1, 0, 0], 5), AXIS_ROTATION['+z']);
+    const tilted = chosenBase(mesh, { rotation }, detection);
+    expect(tilted).toMatchObject({ how: 'chosen', flatUnderside: true });
+    expect(tilted.detection.orientation.rotation).toBe(rotation);
+    // Its shape is measured as it stands: 4 mm high plus the tilt over 32 mm.
+    const shape = shapeOfFile(mesh, tilted);
+    expect(shape.sizeMm[1]).toBeGreaterThan(4 + 32 * Math.sin((5 * Math.PI) / 180) - 0.5);
+  });
+});
+
 describe('fileShape', () => {
   it('sees a flat underside on a base and none under a figure without one', () => {
     expect(base.flatUnderside).toBe(true);
@@ -180,6 +213,31 @@ describe('guessRoles', () => {
     const refuse = (): unknown => guessRoles([figure, lowCreatureShape()]);
     expect(refuse).toThrow(ConversionProblem);
     expect(refuse).toThrow(/Neither of these files has a flat underside/);
+  });
+
+  it('proposes the lower, wider of two files without a flat underside, when asked to (#92)', () => {
+    const low = lowCreatureShape();
+    expect(guessRoles([figure, low], {}, 'propose')).toEqual({
+      baseFile: 1,
+      method: 'guessed',
+      warnings: ['no-flat-underside'],
+      files: [figure, low],
+    });
+    expect(guessRoles([low, figure], {}, 'propose').baseFile).toBe(0);
+    expect(guessRoles([figure, figure], {}, 'propose').baseFile).toBe(1);
+  });
+
+  it('takes the file named as the base, and never refuses then (#92)', () => {
+    expect(guessRoles([figure, lowCreatureShape()], { baseFile: 0 })).toMatchObject({
+      baseFile: 0,
+      method: 'manual',
+      warnings: ['no-flat-underside'],
+    });
+    expect(guessRoles([figure, base], { baseFile: 0, swap: true })).toMatchObject({
+      baseFile: 0,
+      method: 'manual',
+      warnings: [],
+    });
   });
 
   it('swaps the roles on request and keeps the warnings as seen', () => {

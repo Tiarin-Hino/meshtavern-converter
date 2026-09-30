@@ -33,6 +33,9 @@ import {
   type PairingOptions,
   type PairResult,
   type PlacementOptions,
+  type AskOptions,
+  type UpAnswer,
+  type UpQuestion,
 } from '../lib';
 import { transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
@@ -40,6 +43,8 @@ import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { parsePageOptions } from './options';
 import {
   COPY,
+  describeAskedFile,
+  describeAskPending,
   describeMini,
   describeProgress,
   describePairWarning,
@@ -47,6 +52,7 @@ import {
   describePlacement,
   describeReady,
   describeTooManyFiles,
+  describeUp,
   describeWrongFile,
   LEVEL_LABELS,
   LIFT_STEP_MM,
@@ -57,9 +63,20 @@ import { Viewer, type BakedMini, type Perf } from './viewer';
 
 interface AppState {
   ready: boolean;
-  /** Which of the four states the page shows; follows from the rest, see `render()`. */
+  /** Which of the five states the page shows; follows from the rest, see `render()`. */
   page: PageState;
   busy: boolean;
+  /**
+   * The question a conversion waits at after its orient step (#92), without its mesh: what the
+   * page shows and asks. `name` is the file's, `serial` counts the questions of a conversion.
+   * Null when nothing is asked; the page is `asking` while it is set.
+   */
+  question: (Omit<UpQuestion, 'mesh'> & { name: string; serial: number }) | null;
+  /**
+   * From picking or dropping the files to two frames after the first question's mesh went to
+   * the viewer: the time to the question (#92, design note §8). Null until measured.
+   */
+  questionMs: number | null;
   fileName: string | null;
   progress: Progress | null;
   /** Every progress message of the last conversion, for tests. */
@@ -107,8 +124,9 @@ interface AppState {
   showingBaked: boolean;
   /**
    * A turn the user is trying out (issue #72): scene axes, applied after the last result's
-   * rotation (`stats.orientation`). Shown in the viewer only; `applyTurn()` and
-   * `setDown()` convert with it.
+   * rotation (`stats.orientation`), or at a question after the rotation asked about (#92).
+   * Shown in the viewer only; `applyTurn()` and `setDown()` convert with it, Confirm answers
+   * with it.
    */
   orientation: { turn: Rotation | null; turnDeg: number };
   /**
@@ -153,6 +171,15 @@ declare global {
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
+      /**
+       * At a question (#92): shows how the file stands with these options (left out: the
+       * proposal). Resolves when the question that comes back is on screen.
+       */
+      answerUp: (options?: OrientationOptions) => Promise<void>;
+      /** At a question: confirms, with these options or, left out, what is on screen, a turn being tried out included. */
+      confirmUp: (options?: OrientationOptions) => Promise<void>;
+      /** At a question about a pair: the other file is the base. Resolves when its question is on screen. */
+      swapAtQuestion: () => Promise<void>;
       /** Turns the shown mini by `deg` about the scene's x (pitch) or z (roll) axis: a preview, nothing is converted. */
       turn: (axis: TurnAxis, deg: number) => void;
       /** Converts the last file again, turned exactly as previewed. */
@@ -226,6 +253,19 @@ const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
 const turnReset = document.querySelector<HTMLButtonElement>('#turn-reset')!;
 const turnApply = document.querySelector<HTMLButtonElement>('#turn-apply')!;
 const perfLine = document.querySelector<HTMLElement>('#perf')!;
+const askInputs = {
+  file: document.querySelector<HTMLElement>('#ask-file')!,
+  found: document.querySelector<HTMLElement>('#ask-found')!,
+  warning: document.querySelector<HTMLElement>('#ask-warning')!,
+  up: document.querySelector<HTMLSelectElement>('#ask-up')!,
+  turn: document.querySelector<HTMLElement>('#ask-turn')!,
+  turnByHand: document.querySelector<HTMLInputElement>('#ask-turn-by-hand')!,
+  pending: document.querySelector<HTMLElement>('#ask-pending')!,
+  setDown: document.querySelector<HTMLButtonElement>('#ask-set-down')!,
+  reset: document.querySelector<HTMLButtonElement>('#ask-reset')!,
+  swap: document.querySelector<HTMLButtonElement>('#ask-swap')!,
+  confirm: document.querySelector<HTMLButtonElement>('#ask-confirm')!,
+};
 const pairInputs = {
   fieldset: document.querySelector<HTMLFieldSetElement>('#pair')!,
   addBase: document.querySelector<HTMLButtonElement>('#add-base')!,
@@ -261,6 +301,8 @@ const state: AppState = {
   ready: false,
   page: 'empty',
   busy: false,
+  question: null,
+  questionMs: null,
   fileName: null,
   progress: null,
   progressLog: [],
@@ -306,13 +348,24 @@ interface Source {
 let sources: Source[] = [];
 interface Choices {
   orientation: OrientationOptions;
+  /** A pair only: the axis or turn chosen for the base file (#92). */
+  baseOrientation: OrientationOptions;
   sizing: SizingOptions;
   /** A pair only: the user swapped figure and base. */
   pairing: PairingOptions;
   /** A pair only: the user moved, raised or turned the figure, relative to the detection. */
   placement: PlacementOptions;
 }
-const noChoices = (): Choices => ({ orientation: {}, sizing: {}, pairing: {}, placement: {} });
+const noChoices = (): Choices => ({
+  orientation: {},
+  baseOrientation: {},
+  sizing: {},
+  pairing: {},
+  placement: {},
+});
+/** Whether an axis or turn was chosen, rather than left to the detection. */
+const chosen = (options: OrientationOptions): boolean =>
+  options.up !== undefined || options.rotation !== undefined || options.setDown === true;
 /** What the user chose for the last source; a new file starts without choices. */
 let choices: Choices = noChoices();
 
@@ -329,11 +382,14 @@ function figureSource(): Source | undefined {
   return pair && sources.length === 2 ? sources[1 - pair.pairing.baseFile] : sources[0];
 }
 
-/** Converts the current sources again with the current choices. */
-async function reconvert(): Promise<void> {
+/**
+ * Converts the current sources again with the current choices. `ask` names the files to ask
+ * about (#92, design note §6.4); left out, a conversion that only applies a choice asks nothing.
+ */
+async function reconvert(ask: AskOptions | null = null): Promise<void> {
   if (sources.length === 0 || state.busy) return;
   const [stl, secondStl] = await Promise.all(sources.map((source) => source.read()));
-  await convert(stl!, sourcesName(), secondStl);
+  await convert(stl!, sourcesName(), secondStl, ask);
 }
 /** Name of the GLB on screen (`?dev`); null when the page shows a converted mini or none. */
 let importedName: string | null = null;
@@ -628,12 +684,16 @@ function showTurn(turn: Rotation | null): void {
   viewer.setTurn(state.orientation.turn);
   turnPending.hidden = state.orientation.turn === null;
   turnPending.textContent = `Turned ${Math.round(deg)}°, not set down yet`;
+  const pending = describeAskPending(state.orientation.turn ? deg : 0);
+  askInputs.pending.hidden = pending === null;
+  askInputs.pending.textContent = pending ?? '';
   turnReset.disabled = state.orientation.turn === null;
   turnApply.disabled = state.orientation.turn === null;
 }
 
 function turn(axis: TurnAxis, deg: number): void {
-  if (!state.stats || state.busy) return;
+  // After a conversion, or at a question (#92): a preview either way.
+  if (state.busy ? !state.question : !state.stats) return;
   if (state.pair) showPlacement(null);
   showTurn(multiply(fromAxisAngle(TURN_AXES[axis], deg), state.orientation.turn ?? IDENTITY));
 }
@@ -740,11 +800,176 @@ function describeSkipped(skipped: NonNullable<ConversionStats['bakeSkipped']>): 
     : `per-vertex look: ${skipped.step} failed (${skipped.message})`;
 }
 
-/** Converts with the choices made for the current source; see `choices`. */
-async function convert(stl: ArrayBuffer, fileName: string, secondStl?: ArrayBuffer): Promise<void> {
+/**
+ * The question after the orient step (#92, design note §6): what the worker sent about each
+ * file, kept until the last question is confirmed, and the answer the page owes it.
+ */
+const asking = {
+  /** The welded meshes the worker sent, by file: each travels once per conversion. */
+  meshes: [] as (IndexedMesh | undefined)[],
+  /** The file whose mesh the viewer shows, or null. */
+  shown: null as number | null,
+  /** Answers the question on screen; null when none waits. */
+  answer: null as ((answer: UpAnswer) => void) | null,
+  /**
+   * The options the question on screen was resolved from, as the worker has them: what
+   * Confirm sends when nothing is being turned. `key` says for which role and file.
+   */
+  options: {} as OrientationOptions,
+  key: '',
+  /** The options the conversion started with; after a swap every question starts from the proposal. */
+  sent: { orientation: {}, baseOrientation: {} } as Pick<
+    Choices,
+    'orientation' | 'baseOrientation'
+  >,
+  swapped: false,
+  /** Whether the figure of a pair is asked about too: then the base's question is not the last. */
+  figureAsked: true,
+  serial: 0,
+  /** Hooks waiting for the next question on screen. */
+  waiters: [] as (() => void)[],
+  /** When the person picked the files, for `questionMs`; null once measured or when nothing is asked. */
+  startedAt: null as number | null,
+};
+
+/** The worker's question: the mesh to the viewer, the words to the section, and wait for the person. */
+function askUp(question: UpQuestion): Promise<UpAnswer> {
+  return new Promise((resolve) => {
+    const { mesh, ...asked } = question;
+    if (mesh) asking.meshes[question.file] = mesh;
+    const key = `${question.role}:${question.file}`;
+    if (key !== asking.key) {
+      asking.key = key;
+      asking.options = asking.swapped
+        ? {}
+        : question.role === 'base'
+          ? asking.sent.baseOrientation
+          : asking.sent.orientation;
+    }
+    asking.answer = resolve;
+    const { rotation } = question.orientation;
+    if (asking.shown === question.file) viewer.turnQuestion(rotation, question.box);
+    else {
+      viewer.showQuestion(asking.meshes[question.file]!, rotation, question.box);
+      asking.shown = question.file;
+    }
+    const name = sources[question.file]?.name ?? '';
+    state.question = { ...asked, name, serial: ++asking.serial };
+    showTurn(null);
+    showQuestion(state.question);
+    status.textContent = '';
+    render();
+    const started = asking.startedAt;
+    if (started !== null) {
+      asking.startedAt = null;
+      // Two frames, so that handing the mesh to the GPU counts.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => (state.questionMs = performance.now() - started)),
+      );
+    }
+    for (const waiter of asking.waiters.splice(0)) waiter();
+  });
+}
+
+/** The question's section: which file, why it stands so, the warning, the axis, the buttons. */
+function showQuestion(question: NonNullable<AppState['question']>): void {
+  const file = describeAskedFile(question.role, question.name);
+  askInputs.file.hidden = file === null;
+  askInputs.file.textContent = file ?? '';
+  askInputs.found.textContent = describeUp(question);
+  // The base's question is where the roles are confirmed: the warning of the guess goes there.
+  const warning =
+    question.role === 'base' ? describePairWarning(question.warnings, 'question') : null;
+  askInputs.warning.hidden = warning === null;
+  askInputs.warning.textContent = warning ?? '';
+  askInputs.up.value = question.orientation.up;
+  askInputs.swap.hidden = question.role === 'mini';
+  askInputs.confirm.textContent =
+    question.role === 'base' && asking.figureAsked ? COPY.confirmBaseUp : COPY.confirmUp;
+}
+
+/** Gives up the question's meshes: the viewer releases them and the page drops its arrays (§4.3). */
+function giveUpQuestion(): void {
+  asking.meshes = [];
+  asking.shown = null;
+  viewer.clear();
+}
+
+/** Answers the question on screen. False when none waits. */
+function answerQuestion(answer: UpAnswer): boolean {
+  const resolve = asking.answer;
+  const question = state.question;
+  if (!resolve || !question) return false;
+  asking.answer = null;
+  if (answer.swap) asking.swapped = true;
+  else if (!answer.confirm) asking.options = answer.orientation;
+  if (answer.confirm || answer.swap) {
+    // After the last Confirm the conversion runs as it does without a question (PM decision).
+    if (answer.confirm && (question.role !== 'base' || !asking.figureAsked)) giveUpQuestion();
+    state.question = null;
+    showTurn(null);
+    render();
+  }
+  resolve(answer);
+  return true;
+}
+
+/** The rotation on screen at the question: the one asked about, with a turn being tried out. */
+function rotationAtQuestion(): Rotation | null {
+  const question = state.question;
+  if (!question) return null;
+  const { turn } = state.orientation;
+  return turn ? multiply(turn, question.orientation.rotation) : question.orientation.rotation;
+}
+
+/** Confirms the question: with `options`, or what is on screen. */
+function confirmUp(options?: OrientationOptions): void {
+  if (!state.question) return;
+  const orientation =
+    options ?? (state.orientation.turn ? { rotation: rotationAtQuestion()! } : asking.options);
+  answerQuestion({ orientation, confirm: true });
+}
+
+/** An answer that brings the next question; resolves when it is on screen. */
+function answerAndWait(answer: UpAnswer): Promise<void> {
+  return new Promise((resolve) => {
+    asking.waiters.push(resolve);
+    if (!answerQuestion(answer)) {
+      asking.waiters.pop();
+      resolve();
+    }
+  });
+}
+
+/**
+ * Converts with the choices made for the current source; see `choices`. `ask` names the files
+ * to stop and ask about after the orient step (#92), unless the address has `?ask=off`;
+ * `startedAt` is when the person picked the files, for the time to the question.
+ */
+async function convert(
+  stl: ArrayBuffer,
+  fileName: string,
+  secondStl?: ArrayBuffer,
+  ask: AskOptions | null = null,
+  startedAt = performance.now(),
+): Promise<void> {
   if (state.busy) return;
+  const asks = ask !== null && pageOptions.ask;
+  Object.assign(asking, {
+    meshes: [],
+    shown: null,
+    answer: null,
+    key: '',
+    sent: { orientation: choices.orientation, baseOrientation: choices.baseOrientation },
+    swapped: false,
+    figureAsked: ask?.up !== false,
+    serial: 0,
+    startedAt: asks ? startedAt : null,
+  });
   Object.assign(state, {
     busy: true,
+    question: null,
+    questionMs: null,
     fileName,
     stats: null,
     error: null,
@@ -775,16 +1000,25 @@ async function convert(stl: ArrayBuffer, fileName: string, secondStl?: ArrayBuff
         compress: pageOptions.ktx,
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
         memoryBudgetBytes: memoryBudget,
+        ...(asks && { ask }),
         ...(secondStl && {
           secondStl,
           pairing: choices.pairing,
           placement: choices.placement,
+          baseOrientation: choices.baseOrientation,
         }),
       },
+      asks ? askUp : undefined,
     );
     // From here on the mini exists; cancelling would only stop it from being shown.
     cancelButton.disabled = true;
     const stats = result.stats;
+    // What was confirmed at the questions is kept: a later conversion of these files repeats it.
+    choices.orientation = result.choices.orientation;
+    if (secondStl) {
+      choices.baseOrientation = result.choices.baseOrientation ?? {};
+      choices.pairing = result.choices.pairing ?? {};
+    }
     baked = null;
     detailKtx2 = null;
     state.baked = null;
@@ -854,6 +1088,15 @@ async function convert(stl: ArrayBuffer, fileName: string, secondStl?: ArrayBuff
     progressBar.removeAttribute('data-silent');
     state.progress = null;
     state.busy = false;
+    // Cancelled or failed at a question: its mesh leaves the screen too.
+    asking.answer = null;
+    state.question = null;
+    if (asking.shown !== null) giveUpQuestion();
+    if (askInputs.turnByHand.checked) {
+      askInputs.turnByHand.checked = false;
+      viewer.setTurnGizmo(null);
+    }
+    for (const waiter of asking.waiters.splice(0)) waiter();
     render();
   }
 }
@@ -941,6 +1184,8 @@ function showProblem(fileName: string, error: unknown): void {
  */
 async function loadFiles(files: File[]): Promise<void> {
   if (files.length === 0 || state.busy) return;
+  // The time to the question counts from here: reading the files from disk is part of it.
+  const startedAt = performance.now();
   status.classList.remove('problem');
   const refuse = (fileName: string, error: string, errorCode: ProblemCode): void => {
     // The error card, like the refusals below, so the page state matches what is on screen.
@@ -972,7 +1217,8 @@ async function loadFiles(files: File[]): Promise<void> {
   }
   sources = files.map((file) => ({ name: file.name, read: () => file.arrayBuffer() }));
   choices = noChoices();
-  await convert(buffers[0]!, names, buffers[1]);
+  // New files: every one of them is asked about (design note §6.4).
+  await convert(buffers[0]!, names, buffers[1], { up: true, baseUp: true }, startedAt);
 }
 
 /** Adds a base file to the mini on screen: the two convert as a pair, the guess says which is the base. */
@@ -980,9 +1226,10 @@ async function addBase(base: Source): Promise<void> {
   const figure = figureSource();
   if (!figure || state.busy) return;
   sources = [figure, base];
-  // The figure's orientation stays; the size is measured from the base now.
+  // The figure's orientation stays; the size is measured from the base now. The new base is
+  // asked about, and the figure too unless its up was chosen: the pair may stand it another way.
   choices = { ...noChoices(), orientation: choices.orientation };
-  await reconvert();
+  await reconvert({ up: !chosen(choices.orientation), baseUp: true });
 }
 
 /** Converts the figure alone again. */
@@ -992,14 +1239,20 @@ async function removeBase(): Promise<void> {
   const turned = choices.pairing.swap === true;
   sources = [figure];
   choices = { ...noChoices(), orientation: turned ? {} : choices.orientation };
-  await reconvert();
+  await reconvert({ up: !chosen(choices.orientation) });
 }
 
 /** Converts the pair again with figure and base the other way round. The up axis was the figure's: it starts afresh. */
 async function swapPair(): Promise<void> {
   if (sources.length < 2 || state.busy) return;
-  choices = { ...noChoices(), pairing: { swap: !choices.pairing.swap }, sizing: choices.sizing };
-  await reconvert();
+  // Roles the person named (neither file had a flat underside) swap by naming the other file.
+  const { baseFile } = choices.pairing;
+  const pairing =
+    baseFile === undefined
+      ? { swap: !choices.pairing.swap }
+      : { baseFile: baseFile === 0 ? (1 as const) : (0 as const) };
+  choices = { ...noChoices(), pairing, sizing: choices.sizing };
+  await reconvert({ up: true, baseUp: true });
 }
 
 /** The Base section for what is on screen: the add button for one file, the pair's lines and controls for two. */
@@ -1190,6 +1443,38 @@ turnByHand.addEventListener('change', () =>
   viewer.setTurnGizmo(turnByHand.checked ? (turned) => showTurn(turned) : null),
 );
 turnApply.addEventListener('click', () => void applyTurn(false));
+// The question's controls (#92): each change is an answer the worker resolves and asks again
+// with; the turn buttons are a preview, as after a conversion; Confirm converts.
+askInputs.up.replaceChildren(
+  ...UP_AXES.map((axis) => {
+    const option = document.createElement('option');
+    option.value = axis;
+    option.textContent = axis;
+    return option;
+  }),
+);
+askInputs.up.addEventListener('change', () =>
+  answerQuestion({ orientation: { up: askInputs.up.value as UpAxis }, confirm: false }),
+);
+for (const button of askInputs.turn.querySelectorAll<HTMLButtonElement>('[data-turn]')) {
+  button.addEventListener('click', () =>
+    turn(button.dataset.turn as TurnAxis, Number(button.dataset.deg ?? TURN_STEP_DEG)),
+  );
+}
+askInputs.turnByHand.addEventListener('change', () =>
+  viewer.setTurnGizmo(askInputs.turnByHand.checked ? (turned) => showTurn(turned) : null),
+);
+askInputs.setDown.addEventListener('click', () => {
+  const rotation = rotationAtQuestion();
+  if (rotation) answerQuestion({ orientation: { rotation, setDown: true }, confirm: false });
+});
+askInputs.reset.addEventListener('click', () =>
+  answerQuestion({ orientation: {}, confirm: false }),
+);
+askInputs.swap.addEventListener('click', () =>
+  answerQuestion({ orientation: {}, confirm: false, swap: true }),
+);
+askInputs.confirm.addEventListener('click', () => confirmUp());
 document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
 turnReset.addEventListener('click', () => showTurn(null));
 for (const button of [chooseButton, chooseAgain]) {
@@ -1245,6 +1530,12 @@ window.__mt = {
   removeBase,
   figurePlacement,
   setUp,
+  answerUp: (options = {}) => answerAndWait({ orientation: options, confirm: false }),
+  confirmUp: (options) => {
+    confirmUp(options);
+    return Promise.resolve();
+  },
+  swapAtQuestion: () => answerAndWait({ orientation: {}, confirm: false, swap: true }),
   turn,
   applyTurn: () => applyTurn(false),
   setDown: () => applyTurn(true),

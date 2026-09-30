@@ -8,7 +8,7 @@
  * the same place (the regression pair depends on it).
  */
 import type { IndexedMesh } from './mesh';
-import { turnPositions, type PlacedMesh } from './orient';
+import { turnPositions, type Orientation, type PlacedMesh } from './orient';
 import type { Rotation } from './rotation';
 import type { Pairing } from './pair';
 import { restingPoints } from './stance';
@@ -677,6 +677,8 @@ export interface PairResult {
   /** The merged full-detail mesh lists the figure's vertices and triangles first: the page splits it there for the preview (§6). */
   figureVertices: number;
   figureTriangles: number;
+  /** How the base file stands: its detection, or the user's choice (#92). */
+  baseOrientation: Orientation;
 }
 
 /**
@@ -999,6 +1001,56 @@ export function touchShare(positions: Float32Array, points: number[], map: Heigh
   return touching / points.length;
 }
 
+/** The base's top, read once: its height map and the basins that would hold rain. */
+export interface BaseTop {
+  map: HeightMap;
+  basins: Basin[];
+}
+
+export function readBaseTop(base: PlacedMesh): BaseTop {
+  const map = topHeightMap(base.mesh);
+  return { map, basins: findBasins(map) };
+}
+
+/**
+ * How the figure of a pair stands before it is placed (issue #92, design note
+ * docs/design/up-before-reduce.md §4.2): registered, or the candidate that touches the base
+ * better. The orient step decides it when it asks about the figure; the place step does not
+ * repeat it.
+ */
+export interface FigureDecision {
+  top: BaseTop;
+  /** Which of the candidates stays: 0 the first, 1 the alternative. */
+  candidate: 0 | 1;
+  /** The figure where its file puts it, when the pair is registered; else null. */
+  registered: { mesh: IndexedMesh; heightMm: number } | null;
+}
+
+/**
+ * The decision of `placeOnBase`, without the placing: the base's top, the registration test
+ * when `files` are given, and between two candidates the one touching the base better.
+ */
+export function decideFigure(
+  figure: PlacedMesh,
+  base: PlacedMesh,
+  files?: PairFiles,
+  alternative?: PlacedMesh,
+): FigureDecision {
+  const top = readBaseTop(base);
+  const { map, basins } = top;
+  const registered = files ? registeredFigure(files, base, map) : null;
+  let candidate: 0 | 1 = 0;
+  if (!registered && alternative) {
+    const touch = (mesh: IndexedMesh): number => {
+      const contact = contactFootprint(mesh.positions);
+      const trial = placeFigure(mesh, map, chooseSpot(map, basins, contact), contact);
+      return touchShare(trial.positions, contact.points, map);
+    };
+    if (touch(alternative.mesh) > touch(figure.mesh)) candidate = 1;
+  }
+  return { top, candidate, registered };
+}
+
 /**
  * The place step (design note §4): the base's top, its basins, the figure's contact
  * footprint, the spot, the figure set on it, and the two merged, the figure first. The
@@ -1011,6 +1063,8 @@ export function touchShare(positions: Float32Array, points: number[], map: Heigh
  *   user chose the figure's orientation).
  * @param alternative The figure turned to a second candidate up axis (design note §9 step 4):
  *   placed both ways, the one touching the base better stays; `candidate` says which.
+ * @param decided What `decideFigure` found, when the orient step decided it already (#92):
+ *   then `files` and `alternative` are not tested again.
  */
 export function placeOnBase(
   figure: PlacedMesh,
@@ -1019,19 +1073,10 @@ export function placeOnBase(
   options: PlacementOptions = {},
   files?: PairFiles,
   alternative?: PlacedMesh,
-): { merged: PlacedMesh; pair: PairResult; candidate: 0 | 1 } {
-  const map = topHeightMap(base.mesh);
-  const basins = findBasins(map);
-  const registered = files ? registeredFigure(files, base, map) : null;
-  let candidate: 0 | 1 = 0;
-  if (!registered && alternative) {
-    const touch = (mesh: IndexedMesh): number => {
-      const contact = contactFootprint(mesh.positions);
-      const trial = placeFigure(mesh, map, chooseSpot(map, basins, contact), contact);
-      return touchShare(trial.positions, contact.points, map);
-    };
-    if (touch(alternative.mesh) > touch(figure.mesh)) candidate = 1;
-  }
+  decided?: FigureDecision,
+): { merged: PlacedMesh; pair: Omit<PairResult, 'baseOrientation'>; candidate: 0 | 1 } {
+  const { top, registered, candidate } = decided ?? decideFigure(figure, base, files, alternative);
+  const { map, basins } = top;
   if (candidate === 1) figure = alternative!;
   const placing = registered?.mesh ?? figure.mesh;
   const contact = contactFootprint(placing.positions);

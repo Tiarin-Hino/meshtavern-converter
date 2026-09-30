@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
   pageErrors.set(page, errors);
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/?bake=off');
+  await page.goto('/?bake=off&ask=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 });
 
@@ -92,7 +92,7 @@ test.describe('on a device with little memory', () => {
     await page.addInitScript(() =>
       Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 }),
     );
-    await page.goto('/?bake=off');
+    await page.goto('/?bake=off&ask=off');
     await page.waitForFunction(() => window.__mt?.state.ready === true);
   });
 

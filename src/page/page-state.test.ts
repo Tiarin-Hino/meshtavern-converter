@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  describeAskedFile,
+  describeAskPending,
   describeMini,
   describePairWarning,
   describePendingPlacement,
@@ -7,11 +9,21 @@ import {
   describeProgress,
   describeReady,
   describeTooManyFiles,
+  describeUp,
   describeWrongFile,
   pageStateOf,
+  COPY,
   STEP_LABELS,
 } from './page-state';
-import { BAKE_STEPS, STEPS, type Placement, type Sizing } from '../lib';
+import {
+  BAKE_STEPS,
+  STEPS,
+  type BaseMeasurement,
+  type Orientation,
+  type Placement,
+  type Sizing,
+  type UpReason,
+} from '../lib';
 
 const idle = { busy: false, stats: null, imported: null, error: null };
 
@@ -29,6 +41,11 @@ describe('pageStateOf', () => {
 
   it('shows an opened GLB as done', () => {
     expect(pageStateOf({ ...idle, imported: { triangles: 12 } })).toBe('done');
+  });
+
+  it('asks while a conversion waits at its question, though it is busy (#92)', () => {
+    expect(pageStateOf({ ...idle, busy: true, question: { role: 'mini' } })).toBe('asking');
+    expect(pageStateOf({ ...idle, busy: true, question: null })).toBe('converting');
   });
 });
 
@@ -161,6 +178,13 @@ describe('the base section', () => {
     expect(describePairWarning([])).toBeNull();
     expect(describePairWarning(['both-look-like-bases'])).toMatch(/Both files look like bases/);
     expect(describePairWarning(['figure-has-its-own-base'])).toMatch(/flat underside of its own/);
+    // Two files without a flat underside (#92): at the question, and after the conversion.
+    expect(describePairWarning(['no-flat-underside'], 'question')).toBe(
+      'Neither file has a flat underside, so the converter cannot tell which one is the base. It took the lower, wider one. If this is the figure, swap them.',
+    );
+    expect(describePairWarning(['no-flat-underside'])).toBe(
+      'Neither file has a flat underside; you said which one is the base.',
+    );
   });
 
   it('says what is pending and not applied', () => {
@@ -183,5 +207,59 @@ describe('the base section', () => {
       '34 mm tall · Medium, 1 square · 32 mm round base from its own file',
     );
     expect(describeTooManyFiles()).toBe('Drop one figure file, or a figure and its base.');
+  });
+});
+
+describe('the up question (#92)', () => {
+  const orientation: Orientation = {
+    up: '+z',
+    method: 'manual',
+    confidence: 1,
+    rotation: [0, 0, 0, 1],
+    tiltDeg: 0,
+    setDownDeg: 0,
+  };
+  const round: BaseMeasurement = {
+    shape: 'round',
+    diameterMm: 25.2,
+    footprintMm: [25, 25],
+    coverage: 0.9,
+  };
+  const up = (reason: UpReason, changes: Partial<Parameters<typeof describeUp>[0]> = {}): string =>
+    describeUp({ reason, base: null, orientation, ...changes });
+
+  it('says why the file stands as it does', () => {
+    expect(up('base', { base: round })).toBe('Standing on its base, 25 mm across.');
+    expect(up('tallest')).toBe('No base found, so the taller way was taken as up. Check it.');
+    expect(up('cut')).toBe('Standing on the flat cut of its feet.');
+    expect(up('registered')).toBe(
+      'Standing the way its base does: the two files were exported together.',
+    );
+    expect(up('underside')).toBe('Standing on its flat underside.');
+    expect(up('tilted')).toBe('Stored at an angle; standing on its flat underside.');
+    expect(up('guess')).toBe('No flat underside found. Check it.');
+    expect(up('chosen')).toBe('As you turned it.');
+    expect(up('chosen', { orientation: { ...orientation, setDownDeg: 4.2 } })).toBe(
+      'As you turned it, set down by 4°.',
+    );
+  });
+
+  it('names the file of a pair, and the turn being tried out', () => {
+    expect(describeAskedFile('base', 'base.stl')).toBe('Base: base.stl');
+    expect(describeAskedFile('figure', 'figure.stl')).toBe('Figure: figure.stl');
+    expect(describeAskedFile('mini', 'mini.stl')).toBeNull();
+    expect(describeAskPending(30)).toBe('Turned 30°');
+    expect(describeAskPending(-15.2)).toBe('Turned -15°');
+    expect(describeAskPending(0)).toBeNull();
+  });
+
+  it('has the words of the note', () => {
+    expect(COPY).toMatchObject({
+      askUp: 'Is this the right way up?',
+      confirmUp: 'Yes, convert',
+      confirmBaseUp: 'Yes, next: the figure',
+      askSetDown: 'Set down',
+      askReset: 'Reset',
+    });
   });
 });

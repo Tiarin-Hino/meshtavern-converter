@@ -21,7 +21,18 @@ export {
   type StepName,
   type StepTiming,
   type LodStats,
+  type UpChoices,
 } from './pipeline/run';
+// Which way is up, asked on the full-detail mesh before anything is reduced (issue #92).
+export type {
+  AskUp,
+  AskOptions,
+  AskedUp,
+  UpAnswer,
+  UpQuestion,
+  UpReason,
+  UpRole,
+} from './pipeline/ask';
 // Why a file did not become a mini, with the sentence the user reads.
 export {
   ConversionProblem,

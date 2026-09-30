@@ -102,6 +102,19 @@ export class Viewer {
   private figure: { pivot: THREE.Group; mesh: THREE.Mesh; home: THREE.Vector3 } | null = null;
   private moveGizmo: TransformControls | null = null;
   private onMove: ((moveMm: [number, number]) => void) | null = null;
+  /**
+   * The full-detail mesh at the question after the orient step (#92): in file coordinates,
+   * turned by the orientation being asked about and stood on the grid by `holder`, inside the
+   * pivot so a turn previews as it does on a converted mini. Null when no question is shown.
+   */
+  private question: { holder: THREE.Group; mesh: THREE.Mesh } | null = null;
+  /** The sculpt as the file has it: flat-shaded in the primer's grey, no look yet (PM decision, #92). */
+  private readonly questionMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(DEFAULT_LOOK.base),
+    flatShading: true,
+    roughness: 0.75,
+    metalness: 0,
+  });
   private look: Look = { ...DEFAULT_LOOK };
   private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
@@ -245,6 +258,42 @@ export class Viewer {
     if (this.figure) this.moveGizmo.attach(this.figure.pivot);
   }
 
+  /**
+   * Shows the full-detail mesh of a file at its question (#92): `mesh` in file coordinates,
+   * turned by `rotation`, standing on the grid with `box` (the turned mesh's box, file units)
+   * centred in x and z. Flat shading needs no normals. The camera frames it as a new mini.
+   */
+  showQuestion(mesh: IndexedMesh, rotation: Rotation, box: { min: number[]; max: number[] }): void {
+    this.clear();
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+    const shown = new THREE.Mesh(geometry, this.questionMaterial);
+    const holder = new THREE.Group();
+    holder.add(shown);
+    this.question = { holder, mesh: shown };
+    this.pivot.add(holder);
+    this.scene.add(this.pivot);
+    this.turnQuestion(rotation, box);
+    this.gizmo?.attach(this.pivot);
+    this.setCamera(34, 22, 1);
+  }
+
+  /** A later question about the same file: the mesh turns and stands again; the geometry stays on the GPU. */
+  turnQuestion(rotation: Rotation, box: { min: number[]; max: number[] }): void {
+    if (!this.question) return;
+    const [minX, minY, minZ] = box.min as [number, number, number];
+    const [maxX, maxY, maxZ] = box.max as [number, number, number];
+    const height = maxY - minY;
+    this.question.mesh.quaternion.set(...rotation);
+    this.question.mesh.position.set(0 - (minX + maxX) / 2, 0 - minY, 0 - (minZ + maxZ) / 2);
+    // As `showSingle`: the pivot at half the height, so a turn pivots about the middle.
+    this.question.holder.position.set(0, 0 - height / 2, 0);
+    this.pivot.position.set(0, height / 2, 0);
+    this.pivot.quaternion.copy(this.turn);
+    this.size.set(maxX - minX, height, maxZ - minZ);
+  }
+
   /** Adds the single mini to the scene, with the turn being tried out and the gizmo if shown. */
   private showSingle(sizeMm: [number, number, number], reframe: boolean): void {
     this.pivot.position.set(0, sizeMm[1] / 2, 0);
@@ -298,7 +347,7 @@ export class Viewer {
       this.scene.add(gizmo.getHelper());
       this.gizmo = gizmo;
     }
-    if (this.mesh) this.gizmo.attach(this.pivot);
+    if (this.mesh || this.question) this.gizmo.attach(this.pivot);
   }
 
   /**
@@ -476,6 +525,7 @@ export class Viewer {
 
   setWireframe(wireframe: boolean): void {
     this.material.wireframe = wireframe;
+    this.questionMaterial.wireframe = wireframe;
     for (const material of this.bakedMaterials) material.wireframe = wireframe;
   }
 
@@ -512,9 +562,16 @@ export class Viewer {
     return geometry;
   }
 
-  private clear(): void {
+  /** Removes whatever is shown and releases its GPU buffers: the page calls it when a question's mesh is given up. */
+  clear(): void {
     this.gizmo?.detach();
     this.moveGizmo?.detach();
+    if (this.question) {
+      this.pivot.remove(this.question.holder);
+      this.scene.remove(this.pivot);
+      this.question.mesh.geometry.dispose();
+      this.question = null;
+    }
     if (this.figure) {
       this.figure.mesh.geometry.dispose();
       this.figure = null;

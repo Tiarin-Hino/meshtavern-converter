@@ -24,6 +24,7 @@ import {
   placeFigure,
   CENTRE_MAX_SHARE,
   guardCentre,
+  decideFigure,
   placeOnBase,
   REGISTERED_TOLERANCE_MM,
   SEAT_BBOX_FILL,
@@ -398,8 +399,8 @@ function shifted(soup: Float32Array, dx: number, dz: number): Float32Array {
   return out;
 }
 
-/** A figure and base soup through the pair path's orient and place, with the registration test. */
-function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {}) {
+/** A figure and base soup through the pair path's orient step, as `placeOnBase` gets them. */
+function orientPair(figureSoup: Float32Array, baseSoup: Float32Array) {
   const figureMesh = weldVertices(figureSoup).mesh;
   const baseMesh = weldVertices(baseSoup).mesh;
   const standing = [figureMesh, baseMesh].map((mesh) => baseOrientation(mesh));
@@ -419,8 +420,37 @@ function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {
     base: baseMesh,
     baseRotation: standing[1]!.detection.orientation.rotation,
   };
+  return { figure, base, pairing, files };
+}
+
+/** A figure and base soup through the pair path's orient and place, with the registration test. */
+function placePair(figureSoup: Float32Array, baseSoup: Float32Array, options = {}) {
+  const { figure, base, pairing, files } = orientPair(figureSoup, baseSoup);
   return placeOnBase(figure, base, pairing, options, files);
 }
+
+describe('the decision apart from the placing (#92)', () => {
+  it('places to the same bits with the decision passed in, registered or not', () => {
+    const { heightMm, recessDepthMm } = RECESS_BASE;
+    const registered = shifted(generatePuddleFigure(12), 0, heightMm - recessDepthMm);
+    for (const soup of [registered, generatePuddleFigure(12)]) {
+      const { figure, base, pairing, files } = orientPair(soup, generateRecessBase());
+      const decided = decideFigure(figure, base, files);
+      expect(decided.registered !== null).toBe(soup === registered);
+      const placed = placeOnBase(figure, base, pairing, { moveMm: [1, 0] }, files);
+      const again = placeOnBase(
+        figure,
+        base,
+        pairing,
+        { moveMm: [1, 0] },
+        files,
+        undefined,
+        decided,
+      );
+      expect(again).toEqual(placed);
+    }
+  }, 60_000);
+});
 
 describe('the registration test', () => {
   const { heightMm, recessDepthMm } = RECESS_BASE;
@@ -477,8 +507,15 @@ describe('two candidate up axes', () => {
       shapeOfFile(upright, baseOrientation(upright)),
     ]);
     const baseMesh = { mesh: base, sizeMm: [32, 4, 32] as [number, number, number], base: null };
-    expect(placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing).candidate).toBe(1);
+    const turned = placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing);
+    expect(turned.candidate).toBe(1);
     expect(placeOnBase(standing, baseMesh, pairing, {}, undefined, onItsHead).candidate).toBe(0);
+    // Decided apart from the placing (#92): the same candidate, the same bits.
+    const decided = decideFigure(onItsHead, baseMesh, undefined, standing);
+    expect(decided).toMatchObject({ candidate: 1, registered: null });
+    const again = placeOnBase(onItsHead, baseMesh, pairing, {}, undefined, standing, decided);
+    expect(again).toEqual(turned);
+    expect(again.merged.mesh.positions).toEqual(turned.merged.mesh.positions);
   });
 
   it('counts the contact vertices within touching distance of the top', () => {

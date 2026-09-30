@@ -45,10 +45,14 @@ const budget = memoryBudgetBytes((navigator as { deviceMemory?: number }).device
 export async function addMini(file: File) {
   try {
     const stl = await readStlFile(file, budget); // refuses empty, not-STL and too-large files early
-    const result = await converter.convert(stl, (p) => console.log(p.step, p.percent), {
-      orientation: { up: '+z' }, // or leave it out: detected from the base
-      sizing: { size: 'medium' }, // or leave it out: suggested from the base
-    });
+    const result = await converter.convert(
+      stl,
+      (p) => console.log(p.step, p.percent),
+      { sizing: { size: 'medium' } }, // or leave it out: suggested from the base
+      // Optional: stop after the orient step and ask which way is up, on the full-detail mesh.
+      // askPerson is your own dialog; answer with confirm: false to show an axis or a turn first.
+      async (question) => ({ orientation: await askPerson(question), confirm: true }),
+    );
     const table = result.lods[BAKED_LEVEL]!; // the level the table shows; result.baked has its texture
     const glb = encodeGlb(table.mesh, {
       name: file.name,
@@ -65,6 +69,8 @@ export async function addMini(file: File) {
 }
 // converter.cancel() stops the running conversion; its promise rejects with ConversionCancelled.
 ```
+
+- The fourth argument of `convert` is optional. With it, the worker stops after reading, welding and orienting, and asks with an `UpQuestion`: the file's `role` (`mini`, or `base` then `figure` for a pair), the proposed `orientation` and why (`reason`), and the first time a file is asked about, its welded mesh in file coordinates to show. Each answer is an `UpAnswer`: `orientation` as in the options (`{}` is the proposal), `confirm`, and for a pair `swap`. Without it nothing is asked, and `orientation`, `baseOrientation` and `pairing` in the options say how the files stand. `result.choices` holds what was confirmed: converting the same files with those options gives the same mini without asking.
 
 - The look is chosen when a mini is drawn and exported (`look` above, `vertexColours`, the `three` entry), not when it is converted: changing the colour does not need a new conversion.
 - `createBakedMaterial` and `transcodeDetail` from `meshtavern-converter/three` draw the baked table level with its KTX2 texture. `transcodeDetail` needs three.js's `basis_transcoder.js` and `.wasm` served; pass their folder as its third argument (this page serves them under `basis/`, see `vite.config.ts`).

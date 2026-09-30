@@ -6,23 +6,31 @@ import type {
   StepName,
   CreatureSize,
   Units,
+  UpQuestion,
+  UpRole,
 } from '../lib';
 
 /**
- * What the page says and which of its four states it is in (issue #41, design note
- * `docs/design/product-page.md`). No DOM and no three.js: the wording has unit tests, and
- * `main.ts` only puts these strings into elements. Every string is a proposal the PM may change.
+ * What the page says and which of its five states it is in (issue #41, design note
+ * `docs/design/product-page.md`; `asking` from #92, `docs/design/up-before-reduce.md` §6). No
+ * DOM and no three.js: the wording has unit tests, and `main.ts` only puts these strings into
+ * elements. Every string is a proposal the PM may change.
  */
 
-export type PageState = 'empty' | 'converting' | 'done' | 'error';
+export type PageState = 'empty' | 'converting' | 'asking' | 'done' | 'error';
 
-/** The state of the page follows from the app state; nothing sets it by hand. */
+/**
+ * The state of the page follows from the app state; nothing sets it by hand. A conversion
+ * waiting at its question is `asking`, though it is still busy.
+ */
 export function pageStateOf(app: {
   busy: boolean;
   stats: unknown | null;
   imported: unknown | null;
   error: string | null;
+  question?: unknown | null;
 }): PageState {
+  if (app.question != null) return 'asking';
   if (app.busy) return 'converting';
   if (app.error !== null) return 'error';
   if (app.stats !== null || app.imported !== null) return 'done';
@@ -52,6 +60,11 @@ export const COPY = {
   removeBase: 'Remove the base',
   swapPair: 'Swap figure and base',
   moveByHand: 'Move by hand',
+  askUp: 'Is this the right way up?',
+  confirmUp: 'Yes, convert',
+  confirmBaseUp: 'Yes, next: the figure',
+  askSetDown: 'Set down',
+  askReset: 'Reset',
 } as const;
 
 /** How far one press of Raise or Lower moves the figure on its base. _(proposal, #70)_ */
@@ -155,8 +168,18 @@ export function describePlacement(placement: Placement, scale = 1): string {
   return placement.method === 'manual' ? `${where} · moved by hand` : where;
 }
 
-/** The warning line of a pair, or null when there is nothing to say. */
-export function describePairWarning(warnings: readonly PairWarning[]): string | null {
+/**
+ * The warning line of a pair, or null when there is nothing to say. `at` is where it is said:
+ * at the base's question, where the person still decides the roles, or after the conversion.
+ */
+export function describePairWarning(
+  warnings: readonly PairWarning[],
+  at: 'question' | 'done' = 'done',
+): string | null {
+  if (warnings.includes('no-flat-underside'))
+    return at === 'question'
+      ? 'Neither file has a flat underside, so the converter cannot tell which one is the base. It took the lower, wider one. If this is the figure, swap them.'
+      : 'Neither file has a flat underside; you said which one is the base.';
   if (warnings.includes('both-look-like-bases'))
     return 'Both files look like bases. If one is a low creature, swap them.';
   if (warnings.includes('figure-has-its-own-base'))
@@ -181,4 +204,42 @@ export function describePendingPlacement(pending: {
   if (parts.length === 0) return null;
   const text = parts.join(', ');
   return `${text[0]!.toUpperCase()}${text.slice(1)} — not applied yet`;
+}
+
+/** "Base: base.stl" or "Figure: figure.stl" above a pair's question; null for a single file. */
+export function describeAskedFile(role: UpRole, name: string): string | null {
+  if (role === 'mini') return null;
+  return `${role === 'base' ? 'Base' : 'Figure'}: ${name}`;
+}
+
+/** Why the file stands as the question shows it (#92). */
+export function describeUp(question: Pick<UpQuestion, 'reason' | 'base' | 'orientation'>): string {
+  switch (question.reason) {
+    case 'base':
+      return question.base
+        ? `Standing on its base, ${Math.round(question.base.diameterMm)} mm across.`
+        : 'Standing on its base.';
+    case 'tallest':
+      return 'No base found, so the taller way was taken as up. Check it.';
+    case 'cut':
+      return 'Standing on the flat cut of its feet.';
+    case 'registered':
+      return 'Standing the way its base does: the two files were exported together.';
+    case 'underside':
+      return 'Standing on its flat underside.';
+    case 'tilted':
+      return 'Stored at an angle; standing on its flat underside.';
+    case 'guess':
+      return 'No flat underside found. Check it.';
+    case 'chosen': {
+      const setDown = Math.round(question.orientation.setDownDeg);
+      return setDown > 0 ? `As you turned it, set down by ${setDown}°.` : 'As you turned it.';
+    }
+  }
+}
+
+/** "Turned 30°" while a turn is being tried out at the question; null when there is none. */
+export function describeAskPending(turnDeg: number): string | null {
+  const degrees = Math.round(turnDeg);
+  return degrees === 0 ? null : `Turned ${degrees}°`;
 }

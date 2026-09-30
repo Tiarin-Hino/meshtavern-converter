@@ -54,7 +54,12 @@ test('no request carries the file: the promise on the page is true', async ({ pa
     mimeType: 'model/stl',
     buffer: Buffer.from(stl),
   });
-  // The change event and the first read are asynchronous: wait for the end, not for "not busy".
+  // The change event and the first read are asynchronous: wait for the question after the
+  // orient step (#92) and confirm it, so the promise is proven with the question in the path.
+  await page.waitForFunction(
+    () => window.__mt.state.page === 'asking' || window.__mt.state.page === 'error',
+  );
+  await page.evaluate(() => window.__mt.confirmUp());
   await page.waitForFunction(
     () => window.__mt.state.page === 'done' || window.__mt.state.page === 'error',
   );

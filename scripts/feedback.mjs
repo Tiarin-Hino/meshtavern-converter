@@ -2,7 +2,7 @@
 // figure + base pairs in the real page, the PM corrects each placement with the page's own
 // controls and presses a key, and a record and a sheet are written for every pair.
 //
-//   npm run feedback -- [--pairs <json>] [--from <key>] [--only <text>] [--redo]
+//   npm run feedback -- [--pairs <json>] [--from <key>] [--only <text>] [--redo] [--up ask|detected|index]
 //
 // Without --pairs: the corpus pairs (a figure with a -base.stl next to it). With it: a list of
 // { key, figure, base }, such as the research's pairs of the library. Pairs with a record are
@@ -11,6 +11,9 @@
 // (skip, marked), Escape end. Records: out/feedback/<key>.json, sheets: out/feedback/sheets/;
 // both stay on this machine (the library's minis are licensed). Promote a corpus record by hand
 // into scripts/corpus-placements.json; `npm run score-placements` scores the code against both.
+// Every pair stops at the questions after the orient step (#92): --up ask (the default) leaves
+// them to the PM on the page; detected confirms the proposals; index answers with the pair's
+// `up`, `rotation` and `baseUp` (in a --pairs list, or scripts/corpus-index.json for the corpus).
 import { execSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
@@ -19,9 +22,20 @@ import { baseFileFor, CORPUS, corpusFiles } from './lib/corpus-files.mjs';
 import { installFeedback, recordPath, reviewPair } from './lib/feedback-session.mjs';
 import { FEEDBACK_DIR } from './lib/placements.mjs';
 
+const INDEX = 'scripts/corpus-index.json';
+
 const PORT = 4183;
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+const up = option('--up') ?? 'ask';
+if (!['ask', 'detected', 'index'].includes(up))
+  throw new Error(`--up ${up}: use ask, detected or index`);
+/** How a pair's questions are answered with --up index: its own `up`, `rotation` and `baseUp`. */
+const answers = ({ up: axis, rotation, baseUp }) => ({
+  ...(axis && { up: axis }),
+  ...(rotation && { rotation }),
+  ...(baseUp && { baseUp }),
+});
 
 let pairs;
 if (option('--pairs')) {
@@ -30,16 +44,22 @@ if (option('--pairs')) {
     key: pair.key ?? `${String(i).padStart(4, '0')}`,
     figure: pair.figure,
     base: pair.base,
+    ...answers(pair),
   }));
 } else {
+  const index = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
   pairs = corpusFiles()
     .map((figure) => ({ figure, base: baseFileFor(figure) }))
     .filter((pair) => pair.base)
-    .map(({ figure, base }) => ({
-      key: figure.slice(0, -'.stl'.length).split(sep).join('/'),
-      figure: join(CORPUS, figure),
-      base: join(CORPUS, base),
-    }));
+    .map(({ figure, base }) => {
+      const key = figure.slice(0, -'.stl'.length).split(sep).join('/');
+      return {
+        key,
+        figure: join(CORPUS, figure),
+        base: join(CORPUS, base),
+        ...answers(index[key] ?? {}),
+      };
+    });
 }
 if (option('--only')) pairs = pairs.filter((pair) => pair.key.includes(option('--only')));
 if (option('--from')) {
@@ -78,6 +98,7 @@ try {
       outDir: FEEDBACK_DIR,
       browser,
       nextVerdict,
+      up,
     });
     if (verdict === 'end') break;
     counts[verdict] = (counts[verdict] ?? 0) + 1;

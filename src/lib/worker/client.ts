@@ -1,3 +1,4 @@
+import type { AskUp, UpQuestion } from '../pipeline/ask';
 import { ConversionProblem, toProblem } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
 import type { ConvertOptions, WorkerRequest, WorkerResponse } from './protocol';
@@ -6,6 +7,8 @@ interface Job {
   onProgress: (progress: Progress) => void;
   resolve: (result: ConversionResult) => void;
   reject: (error: Error) => void;
+  /** Answers the job's questions (#92); without it the job asks none. */
+  askUp?: AskUp;
 }
 
 /** What a cancelled conversion rejects with. */
@@ -36,16 +39,24 @@ export class Converter {
    * The STL buffer, and a base file's in `options.secondStl`, are transferred to the worker
    * and are unusable on the page afterwards. A file that does not become a mini rejects with
    * a `ConversionProblem`.
+   *
+   * With `askUp` the conversion stops after the orient step and asks which way is up (#92), for
+   * the files `options.ask` names (all by default); its answer continues the conversion. When
+   * it rejects, the job rejects with that error and the worker is started afresh, as on cancel.
+   * Without it nothing is asked, whatever `options.ask` says.
    */
   convert(
     stl: ArrayBuffer,
     onProgress: (progress: Progress) => void,
     options: ConvertOptions = {},
+    askUp?: AskUp,
   ): Promise<ConversionResult> {
     const id = this.nextId++;
-    const request: WorkerRequest = { type: 'convert', id, stl, options };
+    const { ask, ...rest } = options;
+    const sent = askUp ? { ...rest, ask: ask ?? { up: true, baseUp: true } } : rest;
+    const request: WorkerRequest = { type: 'convert', id, stl, options: sent };
     return new Promise((resolve, reject) => {
-      this.jobs.set(id, { onProgress, resolve, reject });
+      this.jobs.set(id, { onProgress, resolve, reject, askUp });
       this.worker.postMessage(request, options.secondStl ? [stl, options.secondStl] : [stl]);
     });
   }
@@ -78,6 +89,7 @@ export class Converter {
     const job = this.jobs.get(response.id);
     if (!job) return;
     if (response.type === 'progress') return job.onProgress(response.progress);
+    if (response.type === 'question') return this.ask(response.id, job, response.question);
     this.jobs.delete(response.id);
     if (response.type === 'done') return job.resolve(response.result);
     job.reject(new ConversionProblem(response.code, response.detail));
@@ -87,6 +99,26 @@ export class Converter {
       this.failAll(new ConversionProblem('out-of-memory', response.detail));
       this.restart();
     }
+  }
+
+  /** Passes a question to the job's callback and its answer back, unless the job ended meanwhile. */
+  private ask(id: number, job: Job, question: UpQuestion): void {
+    if (!job.askUp) return;
+    job.askUp(question).then(
+      (answer) => {
+        if (this.jobs.get(id) !== job) return;
+        const request: WorkerRequest = { type: 'answer', id, answer };
+        this.worker.postMessage(request);
+      },
+      (error: unknown) => {
+        if (this.jobs.get(id) !== job) return;
+        this.jobs.delete(id);
+        job.reject(error instanceof Error ? error : new Error(String(error)));
+        // The conversion cannot go on, and its memory should be freed: as on cancel.
+        this.failAll(new ConversionCancelled());
+        this.restart();
+      },
+    );
   }
 
   private restart(): void {

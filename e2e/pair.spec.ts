@@ -21,7 +21,8 @@ const file = (name: string, soup: Float32Array) => ({
   buffer: stl(soup),
 });
 
-async function open(page: Page, search = '?bake=off'): Promise<void> {
+// These tests prove the pair itself; the question after the orient step has its own spec (#92).
+async function open(page: Page, search = '?bake=off&ask=off'): Promise<void> {
   await page.goto(`/${search}`);
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 }
@@ -44,7 +45,7 @@ test('sets the generated figure in its recess, and moves it only when applied', 
 }, testInfo) => {
   // The normal path bakes and compresses, which is slow on CI runners.
   test.setTimeout(240_000);
-  await open(page, '');
+  await open(page, '?ask=off');
   await loadPair(page);
   await expect(page.locator('body')).toHaveAttribute('data-state', 'done');
   await expect(page.locator('#heading')).toHaveText('figure + recess-base');
