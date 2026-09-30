@@ -1,11 +1,12 @@
 // One pair of a feedback session (issue #70, design note docs/design/base-file.md §13.2): the page
 // converts the pair, an overlay says what the keys do, the PM corrects the placement with the
-// page's own controls and gives a verdict, and the record and a sheet are written. Used by
-// scripts/feedback.mjs and by e2e/feedback.spec.ts.
+// page's own controls and gives a verdict, and the record and a sheet are written. A figure in
+// parts converts with its parts after its base (#93), and the record keeps the joints and marks
+// the PM set at the questions. Used by scripts/feedback.mjs and by e2e/feedback.spec.ts.
 import { Buffer } from 'node:buffer';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { asDetected, convertAnswering } from './answer-up.mjs';
+import { asDetected, convertAnswering, fromChoices } from './answer-up.mjs';
 
 /** A pair that does not finish converting within this is recorded as skipped. */
 export const FEEDBACK_TIMEOUT_MS = 600_000;
@@ -93,15 +94,19 @@ export const recordPath = (outDir, key) =>
 
 /**
  * The answers to a pair's questions after the orient step (#92) from its own `up`, `rotation`
- * and `baseUp`; a proposal that already stands that way is confirmed as it is.
+ * and `baseUp`; a proposal that already stands that way is confirmed as it is. A pair with
+ * `choices` (a record's, #93) is answered with them: its joints and marks included.
  */
 export function pickFromPair(pair) {
-  return (question) => {
+  const fromIndex = (question) => {
+    if (question.kind === 'meet') return {};
     if (question.role === 'base')
       return pair.baseUp && pair.baseUp !== question.orientation.up ? { up: pair.baseUp } : {};
     if (pair.rotation) return { rotation: pair.rotation };
     return pair.up && pair.up !== question.orientation.up ? { up: pair.up } : {};
   };
+  // A pair that carries the choices of a conversion (#93): its joints and marks too.
+  return pair.choices ? fromChoices(pair.choices, fromIndex) : fromIndex;
 }
 
 /**
@@ -134,10 +139,12 @@ async function answeredByThePm(page) {
  */
 export async function reviewPair(page, pair, session) {
   const { index, total, commit, outDir, browser, nextVerdict, up = 'ask' } = session;
+  const parts = pair.parts ?? [];
   const base = {
     key: pair.key,
     figureFile: pair.figure,
     baseFile: pair.base,
+    ...(parts.length > 0 && { partFiles: parts }),
     date: new Date().toISOString(),
     commit,
   };
@@ -151,7 +158,7 @@ export async function reviewPair(page, pair, session) {
     Object.assign(window.__mt.state, { stats: null, error: null });
     document.querySelector('#feedback-overlay').textContent = 'converting…';
   });
-  await page.setInputFiles('#file', [pair.figure, pair.base]);
+  await page.setInputFiles('#file', [pair.figure, ...(pair.base ? [pair.base] : []), ...parts]);
   try {
     if (up === 'ask') await answeredByThePm(page);
     else
@@ -167,21 +174,25 @@ export async function reviewPair(page, pair, session) {
   }
   const first = await page.evaluate(() => {
     const { stats, error } = window.__mt.state;
-    return { error, placement: stats?.pair?.placement ?? null };
+    return { error, pair: stats?.pair ?? null, placement: stats?.pair?.placement ?? null };
   });
-  if (first.error || !first.placement) {
+  // A figure in parts without a base has no placement (#93), but it is a mini to record.
+  if (first.error || !first.pair) {
     write({ ...base, verdict: 'refused', note: String(first.error ?? 'not converted as a pair') });
     return 'refused';
   }
-  const detected = {
+  const detected = first.placement && {
     spot: first.placement.spot,
     offsetMm: first.placement.offsetMm,
     yawDeg: first.placement.yawDeg,
+    method: first.placement.method,
   };
 
   await page.evaluate(
     ([i, n, key]) => {
-      const line = document.querySelector('#placement')?.textContent ?? '';
+      const line = window.__mt.state.stats?.pair?.placement
+        ? (document.querySelector('#placement')?.textContent ?? '')
+        : (document.querySelector('#pair-files')?.textContent ?? '');
       document.querySelector('#feedback-overlay').textContent =
         `pair ${i} of ${n} · ${key}\n${line}\nR right · S save placement · K skip · N next · Esc end`;
     },
@@ -202,6 +213,16 @@ export async function reviewPair(page, pair, session) {
       pairing: stats?.pair
         ? { baseFile: stats.pair.pairing.baseFile, method: stats.pair.pairing.method }
         : null,
+      // Where the parts and the figure were marked to meet (#93), as the result has them.
+      marks: stats?.pair?.placement?.marks ?? null,
+      parts:
+        stats?.pair && stats.pair.parts.length > 1
+          ? stats.pair.parts.map((part) => ({
+              file: part.file,
+              source: part.source,
+              ...(part.joint && { joint: part.joint }),
+            }))
+          : null,
       pending,
       figure: window.__mt.figurePlacement(),
       baseFootprintMm: stats?.sizing.base
@@ -209,7 +230,8 @@ export async function reviewPair(page, pair, session) {
         : null,
     };
   });
-  if (verdict === 'skipped' || verdict === 'next' || !now.figure) {
+  const inParts = !first.placement;
+  if (verdict === 'skipped' || verdict === 'next' || (!now.figure && !inParts)) {
     write({ ...base, verdict: 'skipped', ...(verdict === 'next' ? { note: 'next' } : {}) });
     return 'skipped';
   }
@@ -224,8 +246,10 @@ export async function reviewPair(page, pair, session) {
     baseOrientation: now.baseOrientation,
     choices: now.choices,
     pairing: now.pairing,
+    ...(now.marks && { marks: now.marks }),
+    ...(now.parts && { parts: now.parts }),
     detected,
-    placed: {
+    placed: now.figure && {
       moveMm: pending?.moveMm ?? [0, 0],
       liftMm: pending?.liftMm ?? 0,
       turnDeg: pending?.turnDeg ?? 0,
@@ -234,7 +258,7 @@ export async function reviewPair(page, pair, session) {
       figureCentreMm: now.figure.figureCentreMm,
       figureLowestMm: now.figure.figureLowestMm,
     },
-    figureCentreMm: now.figure.figureCentreMm,
+    figureCentreMm: now.figure?.figureCentreMm ?? null,
     baseFootprintMm: now.baseFootprintMm,
     sheet: sheetPath,
   });

@@ -11,6 +11,10 @@
 // Every file stops at the question after the orient step (#92), which is answered as detected,
 // or with --up index as scripts/corpus-index.json says (`up`, `rotation`, `baseUp`); the time to
 // it is measured. --options "?ask=off" converts without the question, as before #92.
+// A figure's other parts sit next to it as `<name>-part-<label>.stl` (#93) and convert with it,
+// after its base. With --up index a mini whose placement record (scripts/corpus-placements.json,
+// or out/feedback/ from `npm run feedback -- --mark`) has joints or marks is answered with the
+// record's choices: put together and placed as the PM marked it.
 // Usage: npm run corpus -- [--no-bake] [--up detected|index] [--options "?ktx=1"] [--out <folder under out/>]
 // Nothing from corpus/ or out/ is ever committed.
 import { execSync, spawn } from 'node:child_process';
@@ -19,8 +23,8 @@ import { cpus, totalmem } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { chromium } from '@playwright/test';
 import { createServer, runnerImport } from 'vite';
-import { asDetected, convertAnswering } from './lib/answer-up.mjs';
-import { baseFileFor, CORPUS, corpusFiles } from './lib/corpus-files.mjs';
+import { asDetected, convertAnswering, fromChoices } from './lib/answer-up.mjs';
+import { baseFileFor, CORPUS, corpusFiles, partFilesFor } from './lib/corpus-files.mjs';
 import { loadRecords, scoreAll, scoreReport } from './lib/placements.mjs';
 
 const PORT = 4179;
@@ -73,13 +77,20 @@ const expected = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {
 function pickFor(key) {
   if (up === 'detected') return asDetected;
   const entry = expected[key] ?? {};
-  return (question) => {
+  const fromIndex = (question) => {
+    if (question.kind === 'meet') return {};
     if (question.role === 'base')
       return entry.baseUp && entry.baseUp !== question.orientation.up ? { up: entry.baseUp } : {};
     if (entry.rotation) return { rotation: entry.rotation };
     return entry.up && entry.up !== question.orientation.up ? { up: entry.up } : {};
   };
+  // A mini the PM marked (#93): its record's choices put it together and place it again.
+  const choices = records[key]?.choices;
+  return choices && (choices.parts?.joints?.length > 0 || choices.placement?.marks)
+    ? fromChoices(choices, fromIndex)
+    : fromIndex;
 }
+const records = loadRecords();
 const OUT = join('out', flag('--out') ?? 'corpus');
 
 const files = corpusFiles();
@@ -121,15 +132,23 @@ try {
     const kind = path.includes(sep) ? path.split(sep)[0] : 'unsorted';
     const mini = { kind, stlBytes: statSync(file).size };
     minis[key] = mini;
-    // A figure with its base file next to it (#70) is converted as a pair; the key stays the figure's.
+    // A figure with its base file next to it (#70) is converted as a pair, with its other parts
+    // after the base (#93); the key stays the figure's.
     const base = baseFileFor(path);
     if (base) {
       mini.baseFile = base.split(sep).join('/');
       mini.baseStlBytes = statSync(join(CORPUS, base)).size;
     }
+    const parts = partFilesFor(path);
+    if (parts.length > 0) mini.partFiles = parts.map((part) => part.split(sep).join('/'));
 
     await page.evaluate(() => Object.assign(window.__mt.state, { stats: null, error: null }));
-    await page.setInputFiles('#file', base ? [file, join(CORPUS, base)] : file);
+    const picked = [
+      file,
+      ...(base ? [join(CORPUS, base)] : []),
+      ...parts.map((p) => join(CORPUS, p)),
+    ];
+    await page.setInputFiles('#file', picked.length > 1 ? picked : file);
     try {
       await convertAnswering(page, pickFor(key), CONVERSION_TIMEOUT_MS);
     } catch {
@@ -271,7 +290,7 @@ try {
     mkdirSync(dirname(join(OUT, `${key}.png`)), { recursive: true });
     await sheet.screenshot({ path: join(OUT, `${key}.png`), fullPage: true });
     await sheet.close();
-    if (mini.pair) await placementSheet(page, browser, key, mini);
+    if (mini.pair?.spot) await placementSheet(page, browser, key, mini);
     console.log(`${key}: ${stats.triangles.toLocaleString()} triangles, ${mini.times.totalMs} ms`);
   }
 } finally {
@@ -289,15 +308,25 @@ function pairFigures(pair) {
     fit: round(s.fit, 3),
     ...(s.centred && { centred: true }),
   });
+  // The figure's parts (#93): where each came from, and what it was joined onto.
+  const parts = pair.parts.map((part) => ({
+    file: part.file,
+    source: part.source,
+    ...(part.joint && { onto: part.joint.onto }),
+  }));
+  const placement = pair.placement;
   return {
     baseFile: pair.pairing.baseFile,
     method: pair.pairing.method,
     warnings: pair.pairing.warnings,
-    spot: spot(pair.placement.spot),
-    offsetMm: pair.placement.offsetMm.map((mm) => round(mm, 2)),
-    yawDeg: round(pair.placement.yawDeg, 1),
-    placement: pair.placement.method,
-    candidates: pair.placement.candidates.map(spot),
+    ...(parts.length > 1 && { parts }),
+    ...(placement && {
+      spot: spot(placement.spot),
+      offsetMm: placement.offsetMm.map((mm) => round(mm, 2)),
+      yawDeg: round(placement.yawDeg, 1),
+      placement: placement.method,
+      candidates: placement.candidates.map(spot),
+    }),
   };
 }
 
@@ -341,13 +370,18 @@ if (Object.values(minis).some((mini) => mini.baseFile)) {
   const corpusPair = (key) => {
     const mini = minis[key];
     return mini?.baseFile
-      ? { figure: join(CORPUS, `${key}.stl`), base: join(CORPUS, mini.baseFile) }
+      ? {
+          figure: join(CORPUS, `${key}.stl`),
+          base: join(CORPUS, mini.baseFile),
+          parts: (mini.partFiles ?? []).map((part) => join(CORPUS, part)),
+        }
       : null;
   };
   placementScores = scoreAll(
     loadRecords({ feedback: false }),
     corpusPair,
-    (figure, base, options) => placePairOnly(read(figure), read(base), options),
+    ({ figure, base, parts }, options) =>
+      placePairOnly(read(figure), read(base), { ...options, moreStl: parts.map(read) }),
   );
 }
 
@@ -437,7 +471,7 @@ function sizeReport() {
 /** The pairs (#70): the spot found against the kind the index expects, with the runners-up. */
 function pairReport() {
   const index = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
-  const pairs = converted.filter(([, m]) => m.pair);
+  const pairs = converted.filter(([, m]) => m.pair?.spot);
   const withBase = Object.entries(minis).filter(([, m]) => m.baseFile);
   if (withBase.length === 0) return 'No figure has a base file next to it (`<name>-base.stl`).';
   const size = (s) => `${s.sizeMm.join(' × ')} mm`;
@@ -450,6 +484,7 @@ function pairReport() {
       [
         'Figure',
         'Base file',
+        'Parts',
         'Spot found',
         'Expected',
         'Size',
@@ -468,7 +503,13 @@ function pairReport() {
           .slice(0, 3)
           .map((c) => `${c.kind} ${size(c)}, fit ${c.fit}`)
           .join('; ');
-        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${found(p)} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
+        const joined = p.parts
+          ? p.parts
+              .filter((part) => part.source !== 'body')
+              .map((part) => `${part.file + 1} ${part.source}`)
+              .join(', ')
+          : 'one file';
+        return `| ${key} | ${m.baseFile} (file ${p.baseFile + 1}, ${p.method}) | ${joined} | ${found(p)} | ${index[key]?.spot ?? '?'} | ${size(p.spot)} | ${p.spot.depthMm} mm | ${p.spot.fit} | ${p.offsetMm[0]}, ${p.offsetMm[1]} | ${p.offsetMm[2]} mm | ${p.yawDeg}° | ${p.warnings.join(', ') || 'none'} | ${others || 'none'} |`;
       }),
     ),
     ...pairs

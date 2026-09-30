@@ -7,7 +7,9 @@
 // it). Without a base file: the generated recess base, refined to about a million triangles,
 // the size of a large sculpted base. The files are read, welded and oriented once, then
 // `placeOnBase`, the whole place step as run.ts calls it, is timed per run against
-// PLACE_BUDGET_MS. `--full` runs the whole pipeline instead and prints every step's time.
+// PLACE_BUDGET_MS, and so is one answer at the meet question (#93): a mark resolved on each file
+// and the figure placed by them, against MARK_RESOLVE_BUDGET_MS. `--full` runs the whole
+// pipeline instead and prints every step's time.
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { runnerImport } from 'vite';
@@ -25,7 +27,8 @@ const load = async (path) => (await runnerImport(path, { logLevel: 'silent' })).
 const { runPipeline } = await load('./src/lib/pipeline/run.ts');
 const { encodeBinaryStl } = await load('./src/lib/pipeline/stl.ts');
 const { addRecessBase, RECESS_BASE } = await load('./src/regression/shapes.ts');
-const { PLACE_BUDGET_MS, placeOnBase } = await load('./src/lib/pipeline/place.ts');
+const { PLACE_BUDGET_MS, placeMarked, placeOnBase } = await load('./src/lib/pipeline/place.ts');
+const { MARK_RESOLVE_BUDGET_MS, resolveMark } = await load('./src/lib/pipeline/marks.ts');
 const { readStlTriangles } = await load('./src/lib/pipeline/stl.ts');
 const { weldVertices, dropInvalidTriangles } = await load('./src/lib/pipeline/mesh.ts');
 const { baseOrientation, guessRoles, placeOriented, shapeOfFile } = await load(
@@ -98,5 +101,33 @@ if (full) {
       `run ${run}: place ${ms.toFixed(0)} ms, ${verdict(ms)} the ${PLACE_BUDGET_MS} ms budget`,
     );
     if (run === 1) console.log(`  ${JSON.stringify(pair.placement.spot)}`);
+  }
+  // One answer at the meet question (#93): what the worker does for a meeting marked on the page.
+  // A tap lands on the surface: the vertex in the middle of each file's list stands for it.
+  const figureFile = 1 - pairing.baseFile;
+  const pointOf = (mesh) => {
+    const v = Math.floor(mesh.positions.length / 6) * 3;
+    return [mesh.positions[v], mesh.positions[v + 1], mesh.positions[v + 2]];
+  };
+  const within = (ms) => (ms <= MARK_RESOLVE_BUDGET_MS ? 'within' : 'OVER');
+  for (let run = 1; run <= runs; run++) {
+    const start = performance.now();
+    const spot = resolveMark(meshes[pairing.baseFile], pointOf(meshes[pairing.baseFile]));
+    const onBase = performance.now() - start;
+    const contact = resolveMark(meshes[figureFile], pointOf(meshes[figureFile]));
+    const onFigure = performance.now() - start - onBase;
+    placeMarked(
+      meshes[figureFile],
+      standing[figureFile].detection.orientation.rotation,
+      base,
+      standing[pairing.baseFile].detection.orientation.rotation,
+      spot,
+      contact,
+    );
+    const ms = performance.now() - start;
+    console.log(
+      `run ${run}: marks ${onBase.toFixed(0)} ms on the base, ${onFigure.toFixed(0)} ms on the figure; ` +
+        `placed by them ${ms.toFixed(0)} ms in all, ${within(ms)} the ${MARK_RESOLVE_BUDGET_MS} ms budget`,
+    );
   }
 }

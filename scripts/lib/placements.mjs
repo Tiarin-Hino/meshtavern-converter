@@ -87,8 +87,10 @@ export function score(record, auto, withAxis) {
 }
 
 /**
- * Scores every record whose figure and base can be found: `files(key)` gives their paths or
- * null. `place(figurePath, basePath, options)` is `placePairOnly` over the two files.
+ * Scores every record whose figure and base can be found: `files(key)` gives their paths (and a
+ * kit's other `parts`, #93) or null. `place(files, options)` is `placePairOnly` over them. The
+ * record's joints and marks (#93) go into the placement with the record's axis only: the
+ * automatic placement is what they are compared with, and it never gets them.
  */
 export function scoreAll(records, files, place) {
   const rows = [];
@@ -99,13 +101,23 @@ export function scoreAll(records, files, place) {
       // A base the PM stood another way at its question (#92) stands that way here too.
       const baseOrientation = record.choices?.baseOrientation;
       const options = baseOrientation ? { baseOrientation } : {};
-      const auto = place(pair.figure, pair.base, options);
+      const auto = place(pair, options);
+      // The record's own assembly and marks, when it has them: what the PM set by hand.
+      const marked = {
+        ...(record.choices?.parts && { parts: record.choices.parts }),
+        ...(record.choices?.placement?.marks && { placement: record.choices.placement }),
+      };
+      const byHand = Object.keys(marked).length > 0;
       const withAxis =
-        auto.orientation.up === record.orientation.up
+        auto.orientation.up === record.orientation.up && !byHand
           ? auto
-          : place(pair.figure, pair.base, {
+          : place(pair, {
               ...options,
-              orientation: { up: record.orientation.up },
+              ...marked,
+              orientation:
+                byHand && record.choices?.orientation
+                  ? record.choices.orientation
+                  : { up: record.orientation.up },
             });
       rows.push({ key, record, auto, ...score(record, auto, withAxis) });
     } catch (error) {
@@ -127,7 +139,7 @@ export function scoreReport(rows) {
     ...rows.map((row) =>
       row.error
         ? `| ${row.key} | ${row.record.verdict} | error: ${row.error} | | | | |`
-        : `| ${row.key} | ${row.record.verdict} | ${row.auto.orientation.up} / ${row.record.orientation.up}${row.axis ? '' : ' ✗'} | ${round(row.dPositionMm)} mm | ${round(row.dLiftMm)} mm | ${round(row.dTurnDeg)}° | ${row.auto.pair.placement.spot.centred ? 'centred' : row.auto.pair.placement.spot.kind} |`,
+        : `| ${row.key} | ${row.record.verdict} | ${row.auto.orientation.up} / ${row.record.orientation.up}${row.axis ? '' : ' ✗'} | ${round(row.dPositionMm)} mm | ${round(row.dLiftMm)} mm | ${round(row.dTurnDeg)}° | ${row.auto.pair.placement.spot.centred ? 'centred' : row.auto.pair.placement.spot.kind}${row.record.choices?.placement?.marks ? ' (record marked)' : ''} |`,
     ),
   ];
   return [

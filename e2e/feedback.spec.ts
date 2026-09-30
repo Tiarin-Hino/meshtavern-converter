@@ -76,6 +76,25 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
   expect(kept.placed.moveMm).toEqual([0, 0]);
   expect(kept.placed.offsetMm).toEqual(kept.detected.offsetMm);
 
+  // Marked where they meet (#93): the record keeps the marks, in the choices and as resolved.
+  const meeting = {
+    spot: { file: 1, point: [3, 0, 3] as [number, number, number] },
+    contact: { file: 0, point: [0, 0, 0] as [number, number, number] },
+    liftMm: 0.5,
+  };
+  const marked = reviewPair(
+    page,
+    { ...pair('test/marked'), choices: { placement: { marks: meeting } } },
+    { ...session, up: 'index' as const },
+  );
+  await overlayShown(page, 'test/marked');
+  await page.keyboard.press('s');
+  expect(await marked).toBe('placed');
+  const withMarks = read('test/marked');
+  expect(withMarks.choices.placement).toEqual({ marks: meeting });
+  expect(withMarks.marks).toMatchObject({ liftMm: 0.5, spot: { normal: [0, 1, 0] } });
+  expect(withMarks.detected.method).toBe('marked');
+
   // K: skipped; Escape: the session ends and nothing is written.
   const skipped = reviewPair(page, pair('test/skipped'), session);
   await overlayShown(page, 'test/skipped');
