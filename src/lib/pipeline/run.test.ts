@@ -18,7 +18,9 @@ import {
 import { estimateConversionBytes } from './memory';
 
 /** The steps of a single file: `place` runs for a figure with its base file only. */
-const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place' && step !== 'assemble');
+/** A figure with its base file: every step but the assemble step of a figure in parts (#93). */
+const PAIR_STEPS = STEPS.filter((step) => step !== 'assemble');
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {
@@ -268,7 +270,7 @@ describe('runPipeline with a base file (#70)', () => {
   it('sets the figure in the recess and merges the two before reducing', async () => {
     const result = await runPipeline(figure(), { bake: 0, secondStl: base() });
     const { pair, stats, sizing, mesh } = result;
-    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(stats.timings.map((t) => t.step)).toEqual([...PAIR_STEPS]);
     expect(pair).not.toBeNull();
     expect(stats.pair).toBe(pair);
     expect(pair!.pairing).toMatchObject({
@@ -276,8 +278,8 @@ describe('runPipeline with a base file (#70)', () => {
       method: 'guessed',
       warnings: ['figure-has-its-own-base'],
     });
-    expect(pair!.placement.spot.kind).toBe('recess');
-    expect(pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(pair!.placement!.spot.kind).toBe('recess');
+    expect(pair!.placement!.offsetMm).toEqual([0, 0, 3]);
     // Measured from the base file: 32 mm round, not the puddle.
     expect(sizing.base).toMatchObject({ shape: 'round', diameterMm: 32 });
     expect(sizing).toMatchObject({ size: 'medium', plainBase: null });
@@ -294,7 +296,7 @@ describe('runPipeline with a base file (#70)', () => {
   it('finds the base in either order, and swaps when asked', async () => {
     const reversed = await runPipeline(base(), { bake: 0, secondStl: figure() });
     expect(reversed.pair!.pairing.baseFile).toBe(0);
-    expect(reversed.pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(reversed.pair!.placement!.offsetMm).toEqual([0, 0, 3]);
     const swapped = await runPipeline(figure(), {
       bake: 0,
       secondStl: base(),
@@ -310,8 +312,8 @@ describe('runPipeline with a base file (#70)', () => {
       secondStl: base(),
       placement: { moveMm: [1, 0], liftMm: 0.5 },
     });
-    expect(moved.pair!.placement.method).toBe('manual');
-    expect(moved.pair!.placement.offsetMm[0]).toBe(1);
+    expect(moved.pair!.placement!.method).toBe('manual');
+    expect(moved.pair!.placement!.offsetMm[0]).toBe(1);
   }, 60_000);
 
   it('refuses two figures, and a pair too large for the device', async () => {
@@ -348,8 +350,8 @@ describe('runPipeline with a base file (#70)', () => {
     });
     expect(over.pair!.baseOrientation).toMatchObject({ up: '-z', method: 'manual' });
     expect(over.pair!.pairing.files[1]).toMatchObject({ up: '-z', upMethod: 'manual' });
-    expect(over.pair!.placement.spot.kind).toBe('flat');
-    expect(over.pair!.placement.offsetMm[2]).toBeCloseTo(4, 3);
+    expect(over.pair!.placement!.spot.kind).toBe('flat');
+    expect(over.pair!.placement!.offsetMm[2]).toBeCloseTo(4, 3);
     expect(over.sizing.base).toMatchObject({ shape: 'round' });
     expect(over.sizing.base!.diameterMm).toBeCloseTo(32, 0);
 
@@ -359,7 +361,7 @@ describe('runPipeline with a base file (#70)', () => {
       secondStl: base(),
       baseOrientation: { rotation },
     });
-    expect(tilted.pair!.baseOrientation.rotation).toBe(rotation);
+    expect(tilted.pair!.baseOrientation!.rotation).toBe(rotation);
     expect(tilted.choices.baseOrientation).toEqual({ rotation });
   }, 60_000);
 
@@ -368,8 +370,8 @@ describe('runPipeline with a base file (#70)', () => {
     const soup = generatePuddleFigure(12);
     for (let i = 2; i < soup.length; i += 3) soup[i] = soup[i]! + 3;
     const registered = await runPipeline(encodeBinaryStl(soup), { bake: 0, secondStl: base() });
-    expect(registered.pair!.placement.spot.kind).toBe('registered');
-    expect(registered.pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(registered.pair!.placement!.spot.kind).toBe('registered');
+    expect(registered.pair!.placement!.offsetMm).toEqual([0, 0, 3]);
     expect(registered.orientation).toBe(registered.stats.orientation);
     expect(registered.orientation).toMatchObject({ up: '+z', method: 'base' });
     // The user's axis for the figure is final: no registration test.
@@ -378,7 +380,7 @@ describe('runPipeline with a base file (#70)', () => {
       secondStl: base(),
       orientation: { up: '+z' },
     });
-    expect(chosen.pair!.placement.spot.kind).not.toBe('registered');
+    expect(chosen.pair!.placement!.spot.kind).not.toBe('registered');
   }, 60_000);
 });
 
@@ -589,7 +591,7 @@ describe('runPipeline asking about a pair (#92)', () => {
     ]);
     expect(asked.choices).toEqual({ orientation: {}, baseOrientation: {}, pairing: {} });
     expect(asked.pair!.pairing.method).toBe('guessed');
-    expect(asked.stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(asked.stats.timings.map((t) => t.step)).toEqual([...PAIR_STEPS]);
   }, 60_000);
 
   it('shows a registered figure the way its base stands; a changed figure is not registered', async () => {
@@ -601,14 +603,14 @@ describe('runPipeline asking about a pair (#92)', () => {
     });
     expect(ask.questions[1]).toMatchObject({ role: 'figure', reason: 'registered' });
     expect(ask.questions[1]!.orientation.rotation).toEqual(ask.questions[0]!.orientation.rotation);
-    expect(registered.pair!.placement.spot.kind).toBe('registered');
+    expect(registered.pair!.placement!.spot.kind).toBe('registered');
 
     const changed = await runPipeline(registeredFigure(), {
       bake: 0,
       secondStl: base(),
       askUp: answering(confirm(), confirm({ up: '+z' })),
     });
-    expect(changed.pair!.placement.spot.kind).not.toBe('registered');
+    expect(changed.pair!.placement!.spot.kind).not.toBe('registered');
     expect(changed.orientation).toMatchObject({ up: '+z', method: 'manual' });
   }, 60_000);
 
@@ -623,7 +625,7 @@ describe('runPipeline asking about a pair (#92)', () => {
     expect(ask.questions[1]).toMatchObject({ role: 'base', reason: 'chosen' });
     expect(ask.questions[1]!.mesh).toBeUndefined();
     expect(ask.questions[2]).toMatchObject({ role: 'figure', reason: 'base' });
-    expect(result.pair!.placement.spot.kind).toBe('flat');
+    expect(result.pair!.placement!.spot.kind).toBe('flat');
     expect(result.pair!.baseOrientation).toMatchObject({ up: '-z', method: 'manual' });
     expect(result.choices).toEqual({
       orientation: {},

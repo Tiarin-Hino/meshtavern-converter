@@ -7,6 +7,7 @@
  * Deterministic: only + - * / and sqrt on the geometry, so every machine sets the figure in
  * the same place (the regression pair depends on it).
  */
+import type { PartResult } from './assemble';
 import type { Vec3 } from './base';
 import { meetingRotation, turnVector, type Mark, type Meeting } from './marks';
 import type { IndexedMesh } from './mesh';
@@ -700,12 +701,15 @@ export interface MarkedMeeting {
 
 export interface PairResult {
   pairing: Pairing;
-  placement: Placement;
+  /** Where the figure was set on its base; null for a figure in parts without a base file (#93). */
+  placement: Placement | null;
   /** The merged full-detail mesh lists the figure's vertices and triangles first: the page splits it there for the preview (§6). */
   figureVertices: number;
   figureTriangles: number;
-  /** How the base file stands: its detection, or the user's choice (#92). */
-  baseOrientation: Orientation;
+  /** How the base file stands: its detection, or the user's choice (#92); null without a base file. */
+  baseOrientation: Orientation | null;
+  /** The figure's parts, the body first; one entry for a figure of one file (#93). */
+  parts: PartResult[];
 }
 
 /**
@@ -1101,7 +1105,11 @@ export function placeOnBase(
   files?: PairFiles,
   alternative?: PlacedMesh,
   decided?: FigureDecision,
-): { merged: PlacedMesh; pair: Omit<PairResult, 'baseOrientation'>; candidate: 0 | 1 } {
+): {
+  merged: PlacedMesh;
+  pair: Omit<PairResult, 'baseOrientation' | 'parts' | 'placement'> & { placement: Placement };
+  candidate: 0 | 1;
+} {
   const { top, registered, candidate } = decided ?? decideFigure(figure, base, files, alternative);
   const { map, basins } = top;
   if (candidate === 1) figure = alternative!;

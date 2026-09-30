@@ -14,6 +14,7 @@ import {
   generateFigure,
   generateHoleBase,
   generatePegFigure,
+  generatePuddleFigureParts,
   generatePuddleFigure,
   generateQuadruped,
   generateRecessBase,
@@ -40,6 +41,8 @@ export interface RegressionCase {
    * `placement` for a pair placed by marks (#93).
    */
   pair?: { base: () => Float32Array; spot: SpotKind; placement?: PlacementOptions };
+  /** A figure in parts (#93): its other parts' files, given after the base. */
+  moreParts?: () => Float32Array[];
 }
 
 /** Bumpy-sheet size below the close level's floor, so the "small source" path stays covered. */
@@ -63,6 +66,16 @@ export const REGRESSION_CASES: readonly RegressionCase[] = [
     bake: 0,
     up: '+z',
     pair: { base: generateRecessBase, spot: 'recess' },
+  },
+  // The same figure on the same base, its right arm in a file of its own (#93): the parts where
+  // their files put them, so every figure is that of figure-on-base.
+  {
+    name: 'figure-in-parts',
+    soup: () => generatePuddleFigureParts(12)[0],
+    bake: 0,
+    up: '+z',
+    pair: { base: generateRecessBase, spot: 'recess' },
+    moreParts: () => [generatePuddleFigureParts(12)[1]],
   },
   // The figure's 3 mm peg marked into the blind hole of a plate: its end on the hole's floor (#93).
   {
@@ -138,6 +151,7 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
     bake: testCase.bake,
     secondStl: testCase.pair && encodeBinaryStl(testCase.pair.base()),
     placement: testCase.pair?.placement,
+    moreStl: testCase.moreParts?.().map((soup) => encodeBinaryStl(soup)),
   });
   const glb = (level: number, compact: boolean): number =>
     encodeGlb(lods[level]!.mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;
@@ -163,7 +177,7 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
       glbBytes: glb(level, false),
       compactGlbBytes: glb(level, true),
     })),
-    ...(stats.pair && {
+    ...(stats.pair?.placement && {
       spot: stats.pair.placement.spot.kind,
       liftMm: stats.pair.placement.offsetMm[2],
     }),

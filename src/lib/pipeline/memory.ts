@@ -71,6 +71,23 @@ export function estimatePairBytes(
   );
 }
 
+/**
+ * Peak memory a conversion of a figure in several files is expected to need (#93): every file's
+ * estimate with the memory every conversion needs counted once, and the union of the parts once
+ * more, which lives beside the parts' own meshes until the last question is answered. The roles
+ * are not known before the files are read, so every file counts as a part: an upper bound.
+ */
+export function estimateAssemblyBytes(
+  files: readonly { byteLength: number; format: StlFormat }[],
+): number {
+  let bytes = 0;
+  for (const { byteLength, format } of files)
+    bytes +=
+      estimateConversionBytes(byteLength, format) +
+      estimateTriangles(byteLength, format) * BYTES_PER_TRIANGLE;
+  return bytes - (files.length - 1) * FIXED_BYTES;
+}
+
 /** Refuses a file whose conversion is expected to need more than `budgetBytes`. */
 export function checkFits(byteLength: number, format: StlFormat, budgetBytes: number): void {
   checkNeeded(estimateConversionBytes(byteLength, format), budgetBytes);

@@ -76,6 +76,7 @@ export const LEVEL_LABELS = ['Original', 'Close', 'Table', 'Far'] as const;
 export const STEP_LABELS: Record<StepName, string> = {
   read: 'Reading the file',
   weld: 'Joining the surface',
+  assemble: 'Putting the parts together',
   orient: 'Finding which way is up',
   place: 'Setting the figure on its base',
   size: 'Measuring the base',

@@ -379,7 +379,8 @@ function sourcesName(pair: PairResult | null = null): string {
 /** The figure's source of the pair on screen, or the only source. */
 function figureSource(): Source | undefined {
   const pair = state.stats?.pair;
-  return pair && sources.length === 2 ? sources[1 - pair.pairing.baseFile] : sources[0];
+  // The body: the figure's first part (#93).
+  return pair ? sources[pair.parts[0]?.file ?? 0] : sources[0];
 }
 
 /**
@@ -472,10 +473,10 @@ function showStats(stats: ConversionStats): void {
  * 32 mm" and "recess 13 × 13 mm, fit 0.85, lift 3.0 mm, turn 0°". File units.
  */
 function describePairRows(pair: PairResult | null): [string, string][] {
-  if (!pair) return [];
-  const { pairing, placement } = pair;
+  const { pairing, placement } = pair ?? {};
+  if (!pairing || !placement || pairing.baseFile === null) return [];
   const size = (mm: number[]): string => `${mm.map((v) => v.toFixed(0)).join(' × ')} mm`;
-  const figure = pairing.files[1 - pairing.baseFile]!;
+  const figure = pairing.files[pair!.parts[0]?.file ?? 0]!;
   const base = pairing.files[pairing.baseFile]!;
   const { spot } = placement;
   return [
@@ -1261,8 +1262,8 @@ function showPairSection(stats: ConversionStats): void {
   pairInputs.fieldset.dataset.kind = pair ? 'pair' : 'single';
   pairInputs.moveByHand.checked = false;
   viewer.setMoveGizmo(null);
-  if (!pair) return;
-  const figure = sources[1 - pair.pairing.baseFile]?.name ?? '';
+  if (!pair?.placement || pair.pairing.baseFile === null) return;
+  const figure = sources[pair.parts[0]?.file ?? 0]?.name ?? '';
   const base = sources[pair.pairing.baseFile]?.name ?? '';
   pairInputs.files.textContent = `Base: ${base} · Figure: ${figure}`;
   const warning = describePairWarning(pair.pairing.warnings);
@@ -1283,7 +1284,7 @@ function showPlacement(pending: PendingPlacement | null): void {
   pairInputs.apply.disabled = !text;
   pairInputs.reset.disabled = !text;
   const pair = state.stats?.pair;
-  if (!pair || !state.stats) return;
+  if (!pair?.placement || !state.stats) return;
   if (!state.pair && !pairInputs.moveByHand.checked) {
     // Back to what the table will show.
     if (viewer.hasFigure()) showLevel(TABLE_LEVEL);
@@ -1341,7 +1342,7 @@ async function applyPlacement(): Promise<void> {
 function figurePlacement(): ReturnType<Window['__mt']['figurePlacement']> {
   const pair = state.stats?.pair;
   const mesh = levels[0];
-  if (!pair || !mesh || !state.stats) return null;
+  if (!pair?.placement || !mesh || !state.stats) return null;
   const scale = state.stats.sizing.scale;
   const pending = state.pair ?? { moveMm: [0, 0], liftMm: 0, turnDeg: 0 };
   const [cx, cz, lift] = pair.placement.offsetMm;

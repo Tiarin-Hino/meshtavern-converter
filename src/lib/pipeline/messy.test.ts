@@ -12,7 +12,7 @@ import { runPipeline, STEPS, type ConversionResult, type Progress } from './run'
 import { encodeAsciiStl, encodeBinaryStl } from './stl';
 
 /** The steps of a single file: `place` runs for a figure with its base file only. */
-const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place' && step !== 'assemble');
 
 type Vec3 = [number, number, number];
 const BAKE = 256;

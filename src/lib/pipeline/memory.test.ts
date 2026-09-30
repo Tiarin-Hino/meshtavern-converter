@@ -4,6 +4,7 @@ import {
   checkFits,
   DEVICE_SHARE,
   estimateConversionBytes,
+  estimateAssemblyBytes,
   estimatePairBytes,
   estimateTriangles,
   FIXED_BYTES,
@@ -70,6 +71,19 @@ describe('memory estimate', () => {
       estimateConversionBytes(figure, 'binary') +
         estimateConversionBytes(base, 'binary') -
         FIXED_BYTES,
+    );
+  });
+
+  it('counts a figure in parts once more for its union, the fixed memory once (#93)', () => {
+    const size = 84 + 50 * 100_000;
+    const files = [size, size, size].map((byteLength) => ({
+      byteLength,
+      format: 'binary' as const,
+    }));
+    expect(estimateAssemblyBytes(files)).toBe(
+      3 * estimateConversionBytes(size, 'binary') -
+        2 * FIXED_BYTES +
+        3 * 100_000 * BYTES_PER_TRIANGLE,
     );
   });
 });

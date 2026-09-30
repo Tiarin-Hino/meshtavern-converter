@@ -179,7 +179,7 @@ describe('the marked placement (#93)', () => {
     const placed = placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()), {
       placement: { marks: holeMeeting() },
     });
-    const { placement } = placed.pair;
+    const placement = placed.pair.placement!;
     expect(placement.method).toBe('marked');
     expect(placement.spot.kind).toBe('marked');
     expect(placement.candidates).toEqual([]);
@@ -207,7 +207,7 @@ describe('the marked placement (#93)', () => {
       contact: { file: 0, point: PEG_END },
     };
     const flat = placePairOnly(pegStl(), base, { placement: { marks: meeting } });
-    const marks = flat.pair.placement.marks!;
+    const marks = flat.pair.placement!.marks!;
     expect(Math.abs(turnAngleDeg(marks.rotation) - 36.8699)).toBeLessThan(0.01);
     expect(flat.orientation.method).toBe('marked');
     expect(flat.orientation.tiltDeg).toBeCloseTo(36.87, 2);
@@ -228,7 +228,7 @@ describe('the marked placement (#93)', () => {
     const to = landed(soup, raised.mesh, PEG_END);
     const moved: Vec3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     for (let k = 0; k < 3; k++) expect(Math.abs(moved[k]! - n[k]!)).toBeLessThan(1e-4);
-    expect(raised.pair.placement.marks!.liftMm).toBe(1);
+    expect(raised.pair.placement!.marks!.liftMm).toBe(1);
 
     const turned = placePairOnly(pegStl(), base, {
       placement: { marks: { ...meeting, turnDeg: 90 } },
@@ -236,7 +236,7 @@ describe('the marked placement (#93)', () => {
     const end = landed(soup, turned.mesh, PEG_END);
     for (let k = 0; k < 3; k++) expect(Math.abs(end[k]! - from[k]!)).toBeLessThan(1e-4);
     expect(angleDeg(axis(turned), n)).toBeLessThan(0.01);
-    expect(turned.pair.placement.yawDeg).toBe(90);
+    expect(turned.pair.placement!.yawDeg).toBe(90);
   }, 60_000);
 
   it('turns the figure over for two marks with the same normal, without an error', () => {
@@ -244,7 +244,7 @@ describe('the marked placement (#93)', () => {
     const placed = placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()), {
       placement: { marks: holeMeeting({ contact: { file: 0, point: PEG_TOP } }) },
     });
-    expect(turnAngleDeg(placed.pair.placement.marks!.rotation)).toBeGreaterThan(90);
+    expect(turnAngleDeg(placed.pair.placement!.marks!.rotation)).toBeGreaterThan(90);
     expect(placed.orientation.method).toBe('marked');
   }, 60_000);
 

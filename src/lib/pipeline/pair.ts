@@ -60,20 +60,34 @@ export interface FileShape {
 }
 
 export interface Pairing {
-  /** Which of the two files is the base: 0 the first given, 1 the second. */
-  baseFile: 0 | 1;
+  /**
+   * Which file is the base: 0 the first given. Null when the files are the parts of a figure
+   * without a base file (#93).
+   */
+  baseFile: number | null;
   method: 'guessed' | 'manual';
   warnings: PairWarning[];
-  files: [FileShape, FileShape];
+  /** One per file given, in the order given. */
+  files: FileShape[];
 }
 
-/** What the user chose about the pair. */
+/** What the user chose about the files' roles. */
 export interface PairingOptions {
-  /** The other file is the base: the user swapped the guess. */
+  /** Two files: the other file is the base, the user swapped the guess. */
   swap?: boolean;
-  /** This file is the base, whatever the shapes say: 0 the first given, 1 the second. Overrides the guess and `swap` (#92). */
-  baseFile?: 0 | 1;
+  /**
+   * This file is the base, whatever the shapes say: 0 the first given. Null: no base, the files
+   * are the parts of one figure (#93). Overrides the guess and `swap` (#92).
+   */
+  baseFile?: number | null;
 }
+
+/** The figure's parts by file index, in the order given: every file that is not the base (#93). */
+export const figureFiles = (pairing: Pairing): number[] =>
+  pairing.files.map((_, file) => file).filter((file) => file !== pairing.baseFile);
+
+/** The figure's body: its first part in the order given (#93). */
+export const bodyFile = (pairing: Pairing): number => figureFiles(pairing)[0]!;
 
 /**
  * The shape of one file after its own detection and placing: a flat underside is what the
@@ -512,11 +526,19 @@ export function shapeOfFile(mesh: IndexedMesh, oriented: FileOrientation): FileS
   return { ...fileShape(orientation, sizeMm), flatUnderside: oriented.flatUnderside };
 }
 
+/** Of these files, the one with the lowest aspect; on a tie the later, as the order keeps the first as the figure. */
+function lowest(files: readonly FileShape[], among: readonly number[]): number {
+  let best = among[0]!;
+  for (const k of among) if (files[k]!.aspect <= files[best]!.aspect) best = k;
+  return best;
+}
+
 /**
- * Which file is the base (design note §4.1). With one flat underside, that file, whatever its
- * aspect; with two, the lower aspect, with a warning; with none, a `not-a-pair` problem,
- * because two figures cannot be set on each other. `swap` exchanges the roles after the guess;
- * the warnings stay as computed.
+ * Which file is the base (design note §4.1; over any number of files, #93 §3.3). With one flat
+ * underside, that file, whatever its aspect; with several, the lowest aspect, with a warning
+ * judged against the next lowest; with none, two files are a `not-a-pair` problem, because two
+ * figures cannot be set on each other, and more files propose the lowest. `swap` exchanges the
+ * roles of two files after the guess; the warnings stay as computed.
  *
  * @param whenNone What happens when neither file has a flat underside (#92, design note
  *   docs/design/up-before-reduce.md §4.2): `refuse`, or `propose` the lower, wider one as the
@@ -524,34 +546,43 @@ export function shapeOfFile(mesh: IndexedMesh, oriented: FileOrientation): FileS
  *   options sets the roles without a guess and never refuses.
  */
 export function guessRoles(
-  files: [FileShape, FileShape],
+  files: FileShape[],
   options: PairingOptions = {},
   whenNone: 'refuse' | 'propose' = 'refuse',
 ): Pairing {
-  const [a, b] = files;
-  let baseFile: 0 | 1;
+  // No base: the parts of one figure (#93); nothing to guess.
+  if (options.baseFile === null) return { baseFile: null, method: 'manual', warnings: [], files };
+  const all = files.map((_, k) => k);
+  const flat = all.filter((k) => files[k]!.flatUnderside);
+  let baseFile: number;
   const warnings: PairWarning[] = [];
-  if (a.flatUnderside && b.flatUnderside) {
+  if (flat.length >= 2) {
     // Equal aspects keep the first file as the figure: the order the user gave them.
-    baseFile = b.aspect <= a.aspect ? 1 : 0;
-    const figure = files[1 - baseFile]!;
+    baseFile = lowest(files, flat);
+    const figure =
+      files[
+        lowest(
+          files,
+          flat.filter((k) => k !== baseFile),
+        )
+      ]!;
     warnings.push(
       figure.aspect <= BASE_MAX_ASPECT ? 'both-look-like-bases' : 'figure-has-its-own-base',
     );
-  } else if (a.flatUnderside || b.flatUnderside) {
-    baseFile = a.flatUnderside ? 0 : 1;
-  } else if (whenNone === 'propose' || options.baseFile !== undefined) {
-    // Equal aspects: the second file, as the rule for two flat undersides keeps the first as the figure.
-    baseFile = b.aspect <= a.aspect ? 1 : 0;
+  } else if (flat.length === 1) {
+    baseFile = flat[0]!;
+  } else if (whenNone === 'propose' || options.baseFile !== undefined || files.length > 2) {
+    // Equal aspects: the later file, as the rule for flat undersides keeps the first as the figure.
+    baseFile = lowest(files, all);
     warnings.push('no-flat-underside');
   } else {
     throw new ConversionProblem(
       'not-a-pair',
-      `aspects ${a.aspect.toFixed(2)} and ${b.aspect.toFixed(2)}, no flat underside`,
+      `aspects ${files.map((file) => file.aspect.toFixed(2)).join(' and ')}, no flat underside`,
     );
   }
   if (options.baseFile !== undefined)
     return { baseFile: options.baseFile, method: 'manual', warnings, files };
-  if (options.swap) baseFile = baseFile === 0 ? 1 : 0;
+  if (options.swap && files.length === 2) baseFile = baseFile === 0 ? 1 : 0;
   return { baseFile, method: options.swap ? 'manual' : 'guessed', warnings, files };
 }

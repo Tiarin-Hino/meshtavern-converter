@@ -57,7 +57,7 @@ test('sets the generated figure in its recess, and moves it only when applied', 
     '34 mm tall · Medium, 1 square · 32 mm round base from its own file',
   );
   const stats = await page.evaluate(() => window.__mt.state.stats!);
-  expect(stats.pair!.placement.spot.kind).toBe('recess');
+  expect(stats.pair!.placement!.spot.kind).toBe('recess');
   expect(stats.sizing.base?.diameterMm).toBeCloseTo(32, 3);
   expect(stats.timings.map((t) => t.step)).toContain('place');
 
@@ -83,9 +83,9 @@ test('sets the generated figure in its recess, and moves it only when applied', 
 
   await page.evaluate(() => window.__mt.applyPlacement());
   await expect(page.locator('body')).toHaveAttribute('data-state', 'done');
-  const moved = await page.evaluate(() => window.__mt.state.stats!.pair!.placement);
+  const moved = await page.evaluate(() => window.__mt.state.stats!.pair!.placement!);
   expect(moved.method).toBe('manual');
-  expect(moved.offsetMm[0]).toBeCloseTo(stats.pair!.placement.offsetMm[0] + 2, 6);
+  expect(moved.offsetMm[0]).toBeCloseTo(stats.pair!.placement!.offsetMm[0] + 2, 6);
   await expect(page.locator('#placement')).toHaveText('Set in the 13 mm recess · moved by hand');
   await expect(page.locator('#placement-pending')).toBeHidden();
 });

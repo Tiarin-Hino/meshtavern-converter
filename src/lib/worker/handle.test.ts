@@ -9,7 +9,9 @@ import { handleRequest } from './handle';
 import type { ConvertOptions, WorkerResponse } from './protocol';
 
 /** The steps of a single file: `place` runs for a figure with its base file only. */
-const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place' && step !== 'assemble');
+/** A figure with its base file: every step but the assemble step of a figure in parts (#93). */
+const PAIR_STEPS = STEPS.filter((step) => step !== 'assemble');
 
 /** Without baking unless a test asks for it: the unwrapper takes seconds to load and warm up. */
 async function collect(stl: ArrayBuffer, id = 7, options: ConvertOptions = { bake: 0 }) {
@@ -130,9 +132,9 @@ describe('handleRequest', () => {
     const last = posted.at(-1)!;
     if (last.response.type !== 'done') throw new Error('expected done');
     const { pair, stats } = last.response.result;
-    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(stats.timings.map((t) => t.step)).toEqual([...PAIR_STEPS]);
     expect(pair).toMatchObject({ pairing: { baseFile: 1 }, placement: { method: 'manual' } });
-    expect(pair!.placement.offsetMm[0]).toBe(1);
+    expect(pair!.placement!.offsetMm[0]).toBe(1);
 
     const swapped = (
       await collect(encodeBinaryStl(generatePuddleFigure(12)), 4, {

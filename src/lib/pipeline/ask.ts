@@ -35,7 +35,7 @@ export type UpReason =
 export interface UpQuestion {
   role: UpRole;
   /** Which of the files given: 0 the first, 1 the second. */
-  file: 0 | 1;
+  file: number;
   /** How the file stands now: the proposal, or what was last tried. */
   orientation: Orientation;
   reason: UpReason;
