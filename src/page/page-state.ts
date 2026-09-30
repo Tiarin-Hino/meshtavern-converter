@@ -85,6 +85,12 @@ export const COPY = {
 
 /** How far one press of Turn turns a marked part about the spot's normal. _(proposal, #93)_ */
 export const TURN_STEP_DEG = 15;
+/**
+ * A tap's raycast at a question should take no longer, on an ordinary corpus mini (1.25 M
+ * triangles) on the development PC: three.js tests every triangle, without a search tree.
+ * `scripts/measure-pick.mjs` measures it. _(proposal, #93 design note §8)_
+ */
+export const PICK_BUDGET_MS = 300;
 
 /** How far one press of Raise or Lower moves the figure on its base. _(proposal, #70)_ */
 export const LIFT_STEP_MM = 0.5;
