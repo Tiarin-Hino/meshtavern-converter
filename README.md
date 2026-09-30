@@ -42,20 +42,29 @@ const converter = new Converter();
 // deviceMemory is Chromium-only; without it the budget assumes a 4 GB device.
 const budget = memoryBudgetBytes((navigator as { deviceMemory?: number }).deviceMemory);
 
-export async function addMini(file: File) {
+// A figure, and optionally its base and its other parts: up to MAX_PARTS files.
+export async function addMini(files: File[]) {
+  const [file, ...others] = files;
   try {
-    const stl = await readStlFile(file, budget); // refuses empty, not-STL and too-large files early
+    // readStlFile refuses empty, not-STL and too-large files early.
+    const [stl, secondStl, ...moreStl] = await Promise.all(
+      files.map((f) => readStlFile(f, budget)),
+    );
     const result = await converter.convert(
-      stl,
+      stl!,
       (p) => console.log(p.step, p.percent),
-      { sizing: { size: 'medium' } }, // or leave it out: suggested from the base
-      // Optional: stop after the orient step and ask which way is up, on the full-detail mesh.
-      // askPerson is your own dialog; answer with confirm: false to show an axis or a turn first.
-      async (question) => ({ orientation: await askPerson(question), confirm: true }),
+      // sizing: or leave it out, suggested from the base; the other files are transferred too.
+      { sizing: { size: 'medium' }, ...(secondStl && { secondStl, moreStl }) },
+      // Optional: stop and ask on the full-detail meshes. askPerson and markPerson are your own
+      // dialogs; answer with confirm: false to show a change first.
+      async (question) =>
+        question.kind === 'up'
+          ? { kind: 'up', orientation: await askPerson(question), confirm: true }
+          : { kind: 'meet', ...(await markPerson(question)), confirm: true },
     );
     const table = result.lods[BAKED_LEVEL]!; // the level the table shows; result.baked has its texture
     const glb = encodeGlb(table.mesh, {
-      name: file.name,
+      name: file!.name,
       look: DEFAULT_LOOK,
       compact: false,
       sizing: result.sizing,
@@ -70,7 +79,7 @@ export async function addMini(file: File) {
 // converter.cancel() stops the running conversion; its promise rejects with ConversionCancelled.
 ```
 
-- The fourth argument of `convert` is optional. With it, the worker stops after reading, welding and orienting, and asks with an `UpQuestion`: the file's `role` (`mini`, or `base` then `figure` for a pair), the proposed `orientation` and why (`reason`), and the first time a file is asked about, its welded mesh in file coordinates to show. Each answer is an `UpAnswer`: `orientation` as in the options (`{}` is the proposal), `confirm`, and for a pair `swap`. Without it nothing is asked, and `orientation`, `baseOrientation` and `pairing` in the options say how the files stand. `result.choices` holds what was confirmed: converting the same files with those options gives the same mini without asking.
+- The fourth argument of `convert` is optional. With it, the worker stops on the full-detail meshes and asks. Every `Question` carries the welded meshes the callback has not had yet (`meshes`, each file once, in file coordinates) and where to draw each file (`shown`: a rotation and a translation per file, and the `box` of it all). An `UpQuestion` (`kind: 'up'`) asks which way is up: the `role` (`mini`, or `base` then `figure` for several files), the proposed `orientation` and why (`reason`). The answer is an `UpAnswer`: `orientation` as in the options (`{}` is the proposal), `confirm`, and `swap` or `baseFile` (another file as the base, or `null`: no base, the files are parts of one figure). A `MeetQuestion` (`kind: 'meet'`) asks how a figure's parts go together (`about: 'parts'`, first) or where the figure meets its base (`about: 'base'`, last, for every pair), with the placement shown and pins where the parts meet (`proposed`, `marks`). The answer is a `MeetAnswer`: `joints` (a part placed against another by a spot and a contact, each a point in its file's coordinates) or `meeting` (the spot on the base and the contact on the figure, with `liftMm` and `turnDeg` along and about the spot's normal; `null` for the automatic placement), and `confirm`. Without the callback nothing is asked, and the options say how the files stand and meet (`orientation`, `baseOrientation`, `pairing`, `parts`, `placement.marks`). `result.choices` holds what was confirmed: converting the same files with those options gives the same mini without asking.
 
 - The look is chosen when a mini is drawn and exported (`look` above, `vertexColours`, the `three` entry), not when it is converted: changing the colour does not need a new conversion.
 - `createBakedMaterial` and `transcodeDetail` from `meshtavern-converter/three` draw the baked table level with its KTX2 texture. `transcodeDetail` needs three.js's `basis_transcoder.js` and `.wasm` served; pass their folder as its third argument (this page serves them under `basis/`, see `vite.config.ts`).
