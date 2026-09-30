@@ -8,18 +8,29 @@ export const asDetected = () => ({});
 
 /**
  * Answers every question with the choices a conversion ended with (`stats.choices`, as a
- * feedback record keeps them, #93): the base named, each file's axis or turn, the parts' joints
- * and the marks where the figure meets its base. The same files in the same order convert to
- * the same mini. `otherwise` answers what the choices do not say.
+ * feedback record keeps them, #93): the base named or the swap taken, each file's axis or turn,
+ * the parts' joints and the marks where the figure meets its base. The same files in the same
+ * order convert to the same mini. `otherwise` answers what the choices do not say. One call per
+ * conversion: a recorded swap is replayed once, at the first up question.
  */
 export function fromChoices(choices, otherwise = asDetected) {
+  let swapped = false;
   return (question) => {
     const baseFile = choices.pairing?.baseFile;
-    if (question.kind === 'meet')
-      return question.about === 'parts'
-        ? { joints: choices.parts?.joints ?? [] }
-        : { meeting: choices.placement?.marks ?? null };
+    if (question.kind === 'meet') {
+      if (question.about !== 'parts') return { meeting: choices.placement?.marks ?? null };
+      // Under other roles than the record's the joints do not fit: the parts are confirmed as
+      // shown, the base question names the recorded base, and the parts are asked again under it.
+      return baseFile !== undefined && baseFile !== question.roles.baseFile
+        ? {}
+        : { joints: choices.parts?.joints ?? [] };
+    }
     if (baseFile !== undefined && baseFile !== question.roles.baseFile) return { baseFile };
+    // A swap of a guessed pair is recorded as `swap`, not as the base it named.
+    if (choices.pairing?.swap && !swapped) {
+      swapped = true;
+      return { swap: true };
+    }
     const options = question.role === 'base' ? choices.baseOrientation : choices.orientation;
     return options && Object.keys(options).length > 0 ? options : otherwise(question);
   };
@@ -60,9 +71,13 @@ export async function convertAnswering(page, pick, timeoutMs) {
       continue;
     }
     const options = pick(question) ?? {};
-    // Another base named (#93): the questions start again with it.
+    // Another base named (#93), or the two swapped: the questions start again with it.
     if (options.baseFile !== undefined) {
       await page.evaluate((file) => window.__mt.chooseBase(file), options.baseFile);
+      continue;
+    }
+    if (options.swap) {
+      await page.evaluate(() => window.__mt.swapAtQuestion());
       continue;
     }
     await page.evaluate((chosen) => window.__mt.confirmUp(chosen), options);

@@ -360,6 +360,8 @@ export type WorkerResponse =
 
 Before both marks are set, the page lays the two **apart**: the base where the worker puts it (centred on the origin), the figure to its right with `APART_GAP_MM = 10` _(proposal)_ between the two boxes (the page adds the offset to the figure's `shown` translation; nothing else is composed on the page). Once `placement` arrives, the parts stand as the worker's transforms say and the offset is dropped: the assembled mini, the base's frame being the scene. Raise, Lower and Turn are answers (`liftMm` by `LIFT_STEP_MM`, `turnDeg` by `TURN_STEP_DEG`, on the meeting as it is); "Reset marks" answers `meeting: null`. The camera does not move between the two states (`setCamera` only on the first question of the conversion, as #92 reframes a new mini).
 
+_Changed by the PM decisions of §14 (2026-09-30): the meeting is asked for every pair, showing the automatic placement with its pins first; the worker, not the page, lays the figure beside its base (`MeetQuestion.apart`); the button at the figure's question below is not built._
+
 **Reaching the meeting on request.** The figure's question (`#ask`, #92) gets a second button next to Confirm, `#ask-mark` "Mark where they meet" _(proposal, COPY.markMeeting)_, shown at the figure's question of a pair; it confirms the orientation on screen with `meet: true`. After a conversion, the Base section gets the same button (§6.4). A conversion of a mini with parts asks the parts question whenever the files are new (§6.6); the meeting of figure and base is never asked without the button or the section.
 
 ### 6.4 The Base section after a conversion
@@ -377,6 +379,8 @@ Before both marks are set, the page lays the two **apart**: the base where the w
 ### 6.6 State, choices and which conversions ask
 
 `state.question: (Omit<Question, 'meshes'> & { name: string; serial: number }) | null`; `state.page` is `asking` at any question. After every conversion the page takes `result.choices` into `choices` (now with `parts` and `placement.marks`).
+
+_Changed by the PM decisions of §14 (2026-09-30): `ask.meet` is yes wherever a pair is converted with questions (files dropped, a base added, Swap); after a marked placement Adjust has no Move, Raise or Turn._
 
 | What starts the conversion                                               | `ask.up` | `ask.baseUp` | `ask.parts` (parts only) | `ask.meet` |
 | ------------------------------------------------------------------------ | -------- | ------------ | ------------------------ | ---------- |

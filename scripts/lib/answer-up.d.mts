@@ -19,6 +19,7 @@ export type AskedQuestion = (UpQuestion | MeetQuestion) & { name: string; serial
 export type Picked =
   | OrientationOptions
   | { baseFile: number | null }
+  | { swap: true }
   | { joints?: PartJoint[]; meeting?: Meeting | null };
 
 export type PickUp = (question: AskedQuestion) => Picked;

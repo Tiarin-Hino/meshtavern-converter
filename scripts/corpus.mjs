@@ -334,6 +334,7 @@ function pairFigures(pair) {
 function spotWords(spot) {
   if (spot.centred) return 'set over the middle of the base';
   if (spot.kind === 'registered') return 'set where the files put it';
+  if (spot.kind === 'marked') return 'set where it was marked';
   return spot.kind === 'flat' ? 'set on the flattest patch' : `set in the ${spot.kind}`;
 }
 

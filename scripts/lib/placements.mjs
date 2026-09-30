@@ -99,8 +99,12 @@ export function scoreAll(records, files, place) {
     if (!pair) continue;
     try {
       // A base the PM stood another way at its question (#92) stands that way here too.
+      // The record's roles and its base's axis: a base swapped or named at a question stays so.
       const baseOrientation = record.choices?.baseOrientation;
-      const options = baseOrientation ? { baseOrientation } : {};
+      const options = {
+        ...(baseOrientation && { baseOrientation }),
+        ...(record.choices?.pairing && { pairing: record.choices.pairing }),
+      };
       const auto = place(pair, options);
       // The record's own assembly and marks, when it has them: what the PM set by hand.
       const marked = {

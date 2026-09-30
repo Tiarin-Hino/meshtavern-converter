@@ -159,3 +159,32 @@ test('makes parts of one figure when there is no base, and refuses a seventh fil
   await expect(page.locator('#status')).toHaveText(describeTooManyFiles(6));
   expect(await page.evaluate(() => window.__mt.state.errorCode)).toBe('too-many-files');
 });
+
+test('drops the joints when another base is chosen after them', async ({ page }) => {
+  test.setTimeout(240_000);
+  await open(page);
+  const { body, wing } = generateWingedFigure();
+  await page.setInputFiles('#file', [
+    file('body.stl', body),
+    file('wing.stl', movedSoup(wing, WING_MOVE)),
+    file('recess-base.stl', generateRecessBase()),
+  ]);
+  const parts = await question(page);
+  await page.evaluate((spot) => window.__mt.mark(0, spot, [1, 0, 0]), WINGED_FIGURE.joint);
+  await page.evaluate(
+    (contact) => window.__mt.mark(1, contact, [-1, 0, 0]),
+    moved(WINGED_FIGURE.joint),
+  );
+  await page.evaluate(() => window.__mt.confirmMeet());
+  const base = await question(page, parts.serial);
+  expect(base).toMatchObject({ kind: 'up', role: 'base', file: 2 });
+  // The wing named as the base: the joint that placed it names a file that is no part now.
+  await page.evaluate(() => window.__mt.chooseBase(1));
+  const again = await question(page, base.serial);
+  expect(again).toMatchObject({ kind: 'meet', about: 'parts', marks: [] });
+  await page.evaluate(() => window.__mt.confirmMeet());
+  const next = await question(page, again.serial);
+  expect(next).toMatchObject({ kind: 'up', role: 'base', file: 1 });
+  expect(await page.evaluate(() => window.__mt.state.error)).toBeNull();
+  await page.evaluate(() => window.__mt.cancel());
+});

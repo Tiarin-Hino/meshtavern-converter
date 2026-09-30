@@ -95,6 +95,17 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
   expect(withMarks.marks).toMatchObject({ liftMm: 0.5, spot: { normal: [0, 1, 0] } });
   expect(withMarks.detected.method).toBe('marked');
 
+  // A record whose pair was swapped at a question is replayed swapped (#93).
+  const swapped = reviewPair(
+    page,
+    { ...pair('test/swapped'), choices: { pairing: { swap: true } } },
+    { ...session, up: 'index' as const },
+  );
+  await overlayShown(page, 'test/swapped');
+  await page.keyboard.press('s');
+  expect(await swapped).toBe('placed');
+  expect(read('test/swapped').pairing).toEqual({ baseFile: 0, method: 'manual' });
+
   // K: skipped; Escape: the session ends and nothing is written.
   const skipped = reviewPair(page, pair('test/skipped'), session);
   await overlayShown(page, 'test/skipped');

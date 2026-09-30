@@ -1125,8 +1125,11 @@ function answerQuestion(answer: Answer): boolean {
   if (!resolve || !question) return false;
   asking.answer = null;
   if (answer.kind === 'up') {
-    if (answer.swap || answer.baseFile !== undefined) asking.swapped = true;
-    else if (!answer.confirm) asking.options = answer.orientation;
+    if (answer.swap || answer.baseFile !== undefined) {
+      asking.swapped = true;
+      // Other roles: the worker drops the joints too (they name files by their old roles).
+      asking.joints = [];
+    } else if (!answer.confirm) asking.options = answer.orientation;
   } else {
     asking.joints = answer.joints;
     asking.meeting = answer.meeting;
