@@ -31,6 +31,7 @@ The placement of #70 finds seats on a base's top from above. It cannot see a hol
 - **Resolving a mark was over twice the budget on the largest file** (807–1020 ms). **Cause:** the design pass's 40 ms per pass was a guess; a pass over 6 million triangles through their indices costs several hundred. **Fix:** a pass over the vertices first bounds the search by the nearest vertex. The triangle pass tests each box on x before loading the rest, and allocates nothing: 345–446 ms, the same triangle found.
 - **Parallel e2e runs time out on this PC**, in different tests each run, as #70 found. With one worker, as CI runs, every test passed.
 - **A shell heredoc broke on quotes** three times. **Fix:** the edit scripts went to files.
+- **The automatic review found four bugs in replaying choices** after the roles change. A record's joints were answered under the guessed roles. A recorded Swap was never replayed. The placement score dropped a record's roles. The page kept its joints after another base was named, and sent them back. **Fix:** replay the roles first and the swap once, pass the roles through, and drop the joints on both sides. A new e2e test fails without the last fix.
 - **The time to the question looked 44 % slower** for single files, whose path did not change. A timing script that forgot to reset `questionMs` first gave stale numbers. Reset before each run, a build of `main` and one of this branch, alternating, gave the same times.
 
 ## Numbers
@@ -43,7 +44,7 @@ Development PC (i7-11700F, RTX 3060, 64 GB), 2026-09-30.
 - **The place step** grew by the meet question's work (the automatic placement's pins, the layout beside the base): 16–95 ms → 60–294 ms on the 14 ordinary pairs, 178 → 736 ms on the largest pair.
 - **Time to the question** of single files read 1.44× slower in that run. Timed again against a build of `main`, four runs of three files each, alternating: the same (the humanoid 864–1501 ms against 974–1828 ms on `main`). The evening's machine, not this work.
 - **Regression baseline:** two new cases. `peg-marked-in-hole` puts the peg's end on the hole's floor. `figure-in-parts` (the figure's arm in a file of its own) has the same figures as `figure-on-base`, except 4 bytes of GLB name. No other row moved; `npm run score-placements` gives the same table as `main`.
-- Unit tests 427 → 451; e2e 37 → 41, all passing with one worker.
+- Unit tests 427 → 451; e2e 37 → 42, all passing with one worker.
 
 ## Still open
 
