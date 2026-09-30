@@ -470,7 +470,8 @@ function figureSource(): Source | undefined {
 async function reconvert(ask: AskOptions | null = null): Promise<void> {
   if (sources.length === 0 || state.busy) return;
   const [stl, ...others] = await Promise.all(sources.map((source) => source.read()));
-  await convert(stl!, sourcesName(state.stats?.pair ?? null), others, ask);
+  // The files as given: the roles may have changed with them (a base added or removed).
+  await convert(stl!, sourcesName(), others, ask);
 }
 /** Name of the GLB on screen (`?dev`); null when the page shows a converted mini or none. */
 let importedName: string | null = null;
