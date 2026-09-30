@@ -34,6 +34,10 @@ import {
   type PairResult,
   type PlacementOptions,
   type AskOptions,
+  type Answer,
+  type PartsOptions,
+  type Question,
+  type Shown,
   type UpAnswer,
   type UpQuestion,
 } from '../lib';
@@ -71,7 +75,7 @@ interface AppState {
    * page shows and asks. `name` is the file's, `serial` counts the questions of a conversion.
    * Null when nothing is asked; the page is `asking` while it is set.
    */
-  question: (Omit<UpQuestion, 'mesh'> & { name: string; serial: number }) | null;
+  question: (Omit<UpQuestion, 'meshes'> & { name: string; serial: number }) | null;
   /**
    * From picking or dropping the files to two frames after the first question's mesh went to
    * the viewer: the time to the question (#92, design note §8). Null until measured.
@@ -353,8 +357,10 @@ interface Choices {
   sizing: SizingOptions;
   /** A pair only: the user swapped figure and base. */
   pairing: PairingOptions;
-  /** A pair only: the user moved, raised or turned the figure, relative to the detection. */
+  /** A pair only: the user moved, raised or turned the figure, relative to the detection, or marked where they meet (#93). */
   placement: PlacementOptions;
+  /** A figure in parts (#93): the joints of the parts that lie apart in their files. */
+  parts: PartsOptions;
 }
 const noChoices = (): Choices => ({
   orientation: {},
@@ -362,6 +368,7 @@ const noChoices = (): Choices => ({
   sizing: {},
   pairing: {},
   placement: {},
+  parts: { joints: [] },
 });
 /** Whether an axis or turn was chosen, rather than left to the detection. */
 const chosen = (options: OrientationOptions): boolean =>
@@ -811,7 +818,7 @@ const asking = {
   /** The file whose mesh the viewer shows, or null. */
   shown: null as number | null,
   /** Answers the question on screen; null when none waits. */
-  answer: null as ((answer: UpAnswer) => void) | null,
+  answer: null as ((answer: Answer) => void) | null,
   /**
    * The options the question on screen was resolved from, as the worker has them: what
    * Confirm sends when nothing is being turned. `key` says for which role and file.
@@ -834,10 +841,28 @@ const asking = {
 };
 
 /** The worker's question: the mesh to the viewer, the words to the section, and wait for the person. */
-function askUp(question: UpQuestion): Promise<UpAnswer> {
+function askUp(question: Question): Promise<Answer> {
   return new Promise((resolve) => {
-    const { mesh, ...asked } = question;
-    if (mesh) asking.meshes[question.file] = mesh;
+    for (const { file, mesh } of question.meshes) asking.meshes[file] = mesh;
+    if (question.kind === 'meet') {
+      // Where the parts meet is confirmed as shown until the page draws it (#93, build step 7).
+      resolve({
+        kind: 'meet',
+        joints: choices.parts.joints,
+        meeting: choices.placement?.marks ?? null,
+        confirm: true,
+      });
+      return;
+    }
+    const asked: Partial<Pick<UpQuestion, 'meshes'>> & Omit<UpQuestion, 'meshes'> = { ...question };
+    delete asked.meshes;
+    // The viewer stands the mesh on the grid itself: the box before the worker's shift.
+    const shift: number[] = question.shown.find((entry: Shown) => entry.file === question.file)
+      ?.translation ?? [0, 0, 0];
+    const box = {
+      min: question.box.min.map((v, k) => v - shift[k]!),
+      max: question.box.max.map((v, k) => v - shift[k]!),
+    };
     const key = `${question.role}:${question.file}`;
     if (key !== asking.key) {
       asking.key = key;
@@ -849,9 +874,9 @@ function askUp(question: UpQuestion): Promise<UpAnswer> {
     }
     asking.answer = resolve;
     const { rotation } = question.orientation;
-    if (asking.shown === question.file) viewer.turnQuestion(rotation, question.box);
+    if (asking.shown === question.file) viewer.turnQuestion(rotation, box);
     else {
-      viewer.showQuestion(asking.meshes[question.file]!, rotation, question.box);
+      viewer.showQuestion(asking.meshes[question.file]!, rotation, box);
       asking.shown = question.file;
     }
     const name = sources[question.file]?.name ?? '';
@@ -928,7 +953,7 @@ function confirmUp(options?: OrientationOptions): void {
   if (!state.question) return;
   const orientation =
     options ?? (state.orientation.turn ? { rotation: rotationAtQuestion()! } : asking.options);
-  answerQuestion({ orientation, confirm: true });
+  answerQuestion({ kind: 'up', orientation, confirm: true });
 }
 
 /** An answer that brings the next question; resolves when it is on screen. */
@@ -1455,7 +1480,7 @@ askInputs.up.replaceChildren(
   }),
 );
 askInputs.up.addEventListener('change', () =>
-  answerQuestion({ orientation: { up: askInputs.up.value as UpAxis }, confirm: false }),
+  answerQuestion({ kind: 'up', orientation: { up: askInputs.up.value as UpAxis }, confirm: false }),
 );
 for (const button of askInputs.turn.querySelectorAll<HTMLButtonElement>('[data-turn]')) {
   button.addEventListener('click', () =>
@@ -1467,13 +1492,14 @@ askInputs.turnByHand.addEventListener('change', () =>
 );
 askInputs.setDown.addEventListener('click', () => {
   const rotation = rotationAtQuestion();
-  if (rotation) answerQuestion({ orientation: { rotation, setDown: true }, confirm: false });
+  if (rotation)
+    answerQuestion({ kind: 'up', orientation: { rotation, setDown: true }, confirm: false });
 });
 askInputs.reset.addEventListener('click', () =>
-  answerQuestion({ orientation: {}, confirm: false }),
+  answerQuestion({ kind: 'up', orientation: {}, confirm: false }),
 );
 askInputs.swap.addEventListener('click', () =>
-  answerQuestion({ orientation: {}, confirm: false, swap: true }),
+  answerQuestion({ kind: 'up', orientation: {}, confirm: false, swap: true }),
 );
 askInputs.confirm.addEventListener('click', () => confirmUp());
 document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
@@ -1531,12 +1557,12 @@ window.__mt = {
   removeBase,
   figurePlacement,
   setUp,
-  answerUp: (options = {}) => answerAndWait({ orientation: options, confirm: false }),
+  answerUp: (options = {}) => answerAndWait({ kind: 'up', orientation: options, confirm: false }),
   confirmUp: (options) => {
     confirmUp(options);
     return Promise.resolve();
   },
-  swapAtQuestion: () => answerAndWait({ orientation: {}, confirm: false, swap: true }),
+  swapAtQuestion: () => answerAndWait({ kind: 'up', orientation: {}, confirm: false, swap: true }),
   turn,
   applyTurn: () => applyTurn(false),
   setDown: () => applyTurn(true),

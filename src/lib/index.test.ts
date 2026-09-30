@@ -21,6 +21,7 @@ describe('the library entries', () => {
       'GRID_SQUARE_MM',
       'IDENTITY',
       'LOD_SPECS',
+      'MAX_PARTS',
       'PROBLEM_MESSAGES',
       'SIZES',
       'SNIFF_BYTES',

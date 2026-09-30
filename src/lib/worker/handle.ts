@@ -1,11 +1,11 @@
-import type { AskUp, UpAnswer } from '../pipeline/ask';
+import type { Answer, AskUp } from '../pipeline/ask';
 import { meshBuffers } from '../pipeline/mesh';
 import { toProblem } from '../pipeline/problems';
 import { runPipeline } from '../pipeline/run';
 import type { Post, WorkerRequest } from './protocol';
 
 /** The jobs waiting at a question, by id: what resolves their answer. */
-const waiting = new Map<number, (answer: UpAnswer) => void>();
+const waiting = new Map<number, (answer: Answer) => void>();
 
 /** Everything the worker does, kept free of `self` so it can be unit-tested. */
 export async function handleRequest(request: WorkerRequest, post: Post): Promise<void> {
@@ -22,7 +22,10 @@ export async function handleRequest(request: WorkerRequest, post: Post): Promise
     ? (question) =>
         new Promise((resolve) => {
           waiting.set(id, resolve);
-          post({ type: 'question', id, question }, question.mesh ? meshBuffers(question.mesh) : []);
+          post(
+            { type: 'question', id, question },
+            question.meshes.flatMap(({ mesh }) => meshBuffers(mesh)),
+          );
         })
     : undefined;
   try {

@@ -1,12 +1,23 @@
 import {
+  APART_GAP_MM,
+  boxOf,
+  composeShown,
   copyForQuestion,
   reasonOf,
   reasonOfBase,
   sameOrientationOptions,
+  standShown,
   turnedBox,
+  type Answer,
   type AskedUp,
   type AskOptions,
   type AskUp,
+  type Box,
+  type MarkedPair,
+  type MeetQuestion,
+  type PartPlace,
+  type Question,
+  type Shown,
   type UpQuestion,
   type UpReason,
   type UpRole,
@@ -15,6 +26,7 @@ import {
   assembleFigure,
   MAX_PARTS,
   partMark,
+  proposedJoints,
   wholePart,
   type PartResult,
   type PartsOptions,
@@ -24,7 +36,7 @@ import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
-import { resolveMark, type PartJoint } from './marks';
+import { resolveMark, type Mark, type MarkPick, type Meeting, type PartJoint } from './marks';
 import { checkFits, checkNeeded, estimateAssemblyBytes, estimatePairBytes } from './memory';
 import {
   coverageFor,
@@ -51,6 +63,7 @@ import {
   type PairingOptions,
 } from './pair';
 import {
+  contactFootprint,
   decideFigure,
   extentOf,
   mergeMeshes,
@@ -63,11 +76,23 @@ import {
   type PlacementOptions,
 } from './place';
 import { shade } from './shade';
+import type { Vec3 } from './base';
 import { sizeMini, type BaseMeasurement, type Sizing, type SizingOptions } from './size';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
-import { angleDeg, axisVector, fileUp, IDENTITY, nearestUpAxis, type Rotation } from './rotation';
+import {
+  angleDeg,
+  apply,
+  axisVector,
+  fileUp,
+  fromAxisAngle,
+  IDENTITY,
+  invert,
+  multiply,
+  nearestUpAxis,
+  type Rotation,
+} from './rotation';
 import { readStlTriangles, sniffStl, type StlFormat } from './stl';
 
 /**
@@ -294,7 +319,7 @@ interface OrientedPair {
   /** The figure turned to a second candidate up axis, when there is one (design note §9 step 4). */
   alternative: { placed: PlacedMesh; orientation: Orientation } | undefined;
   base: PlacedMesh;
-  pairing: Pairing;
+  pairing: BasePairing;
   /** The files as welded, for the registration test; undefined when the user chose the figure's axis. */
   files: PairFiles | undefined;
   baseOrientation: Orientation;
@@ -545,6 +570,10 @@ interface PlacedPair {
   merged: PlacedMesh;
   pair: PairResult;
   orientation: Orientation;
+  /** How the figure stood before it was placed: the pair's rules, or its question. */
+  standing: Orientation;
+  /** The figure's file frame (the body's, for parts) to the base's placed frame. */
+  figureRotation: Rotation;
 }
 
 /**
@@ -613,6 +642,8 @@ function placeMarkedPair(
       parts,
     },
     orientation,
+    standing,
+    figureRotation: placed.rotation,
   };
 }
 
@@ -638,8 +669,144 @@ function placeOrientedPair(oriented: OrientedPair, placementOptions: PlacementOp
     baseOrientation: oriented.baseOrientation,
     parts,
   };
-  return { merged: placed.merged, pair, orientation };
+  // The placement turns the figure about the vertical by its yaw (a three.js rotation.y).
+  const { yawDeg } = placed.pair.placement;
+  const figureRotation =
+    yawDeg === 0
+      ? orientation.rotation
+      : multiply(fromAxisAngle([0, 1, 0], yawDeg), orientation.rotation);
+  return { merged: placed.merged, pair, orientation, standing: orientation, figureRotation };
 }
+/** Placement options without the marks: what the automatic placement takes. */
+function withoutMarks(options: PlacementOptions): PlacementOptions {
+  const rest = { ...options };
+  delete rest.marks;
+  return rest;
+}
+
+/** The first vertex of the figure: where its placed copy is compared with its file frame. */
+function figureTranslation(figure: IndexedMesh, placed: Float32Array, rotation: Rotation): Vec3 {
+  if (figure.positions.length < 3) return [0, 0, 0];
+  const turned = apply(rotation, [
+    figure.positions[0]!,
+    figure.positions[1]!,
+    figure.positions[2]!,
+  ]);
+  return [placed[0]! - turned[0], placed[1]! - turned[1], placed[2]! - turned[2]];
+}
+
+/** Where the base sits in its placed frame: turned, then shifted onto y = 0 and its centre. */
+function baseShown(oriented: OrientedPair): Shown {
+  const shift = oriented.base.shift ?? [0, 0, 0];
+  return {
+    file: oriented.pairing.baseFile,
+    rotation: oriented.sources.baseRotation,
+    translation: [0 - shift[0], 0 - shift[1], 0 - shift[2]],
+  };
+}
+
+/**
+ * The meet question's scene (#93 design note §4.4): the base's placed frame, the base where the
+ * place step put it and every part of the figure where the placement shown put it.
+ */
+function meetShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[]; box: Box } {
+  const rotation = placed.figureRotation;
+  const translation = figureTranslation(
+    oriented.sources.figure,
+    placed.merged.mesh.positions,
+    rotation,
+  );
+  return {
+    shown: [
+      baseShown(oriented),
+      ...oriented.parts.map((part) => composeShown(part, rotation, translation)),
+    ],
+    box: boxOf(placed.merged.mesh.positions),
+  };
+}
+
+/**
+ * The figure standing beside its base, `APART_GAP_MM` to its right, for marking both (#93):
+ * the base as the place step put it, the figure as it stood at its question.
+ */
+function apartShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[]; box: Box } {
+  const baseBox = boxOf(oriented.base.mesh.positions);
+  const rotation = placed.standing.rotation;
+  const figureBox = turnedBox(oriented.sources.figure.positions, rotation);
+  const translation: Vec3 = [
+    baseBox.max[0] + APART_GAP_MM - figureBox.min[0],
+    0 - figureBox.min[1],
+    0 - (figureBox.min[2] + figureBox.max[2]) / 2,
+  ];
+  const width = figureBox.max[0] - figureBox.min[0];
+  const depth = (figureBox.max[2] - figureBox.min[2]) / 2;
+  return {
+    shown: [
+      baseShown(oriented),
+      ...oriented.parts.map((part) => composeShown(part, rotation, translation)),
+    ],
+    box: {
+      min: [baseBox.min[0], Math.min(baseBox.min[1], 0), Math.min(baseBox.min[2], 0 - depth)],
+      max: [
+        baseBox.max[0] + APART_GAP_MM + width,
+        Math.max(baseBox.max[1], figureBox.max[1] - figureBox.min[1]),
+        Math.max(baseBox.max[2], depth),
+      ],
+    },
+  };
+}
+
+/**
+ * The automatic placement as pins (PM decision 2026-09-30): the figure's contact point, the
+ * vertex of its contact footprint nearest the footprint's centre, and the spot on the base where
+ * that vertex was set. Both as picks in their files' coordinates, resolved like marks.
+ */
+function proposedMeeting(
+  oriented: OrientedPair,
+  automatic: PlacedPair,
+  markOn: (pick: MarkPick) => Mark & { file: number },
+): MarkedPair[] {
+  const placed = automatic.merged.mesh.positions.subarray(0, automatic.pair.figureVertices * 3);
+  const contact = contactFootprint(placed);
+  if (contact.points.length === 0) return [];
+  let vertex = contact.points[0]!;
+  let nearest = Infinity;
+  for (const point of contact.points) {
+    const dx = placed[point * 3]! - contact.centre[0];
+    const dz = placed[point * 3 + 2]! - contact.centre[1];
+    if (dx * dx + dz * dz < nearest) {
+      nearest = dx * dx + dz * dz;
+      vertex = point;
+    }
+  }
+  // The union lists the parts in order: the vertex's part, and its place in that part's file.
+  let first = 0;
+  for (const part of oriented.parts) {
+    const { positions } = oriented.meshes[part.file]!;
+    const count = positions.length / 3;
+    if (vertex < first + count) {
+      const local = vertex - first;
+      const shift = oriented.base.shift ?? [0, 0, 0];
+      const onBase = apply(invert(oriented.sources.baseRotation), [
+        placed[vertex * 3]! + shift[0],
+        placed[vertex * 3 + 1]! + shift[1],
+        placed[vertex * 3 + 2]! + shift[2],
+      ]);
+      return [
+        {
+          spot: markOn({ file: oriented.pairing.baseFile, point: onBase }),
+          contact: markOn({
+            file: part.file,
+            point: [positions[local * 3]!, positions[local * 3 + 1]!, positions[local * 3 + 2]!],
+          }),
+        },
+      ];
+    }
+    first += count;
+  }
+  return [];
+}
+
 /** Where a figure was set on its base, without the steps after placing (development and tooling). */
 export interface PairPlacement {
   pair: PairResult;
@@ -773,51 +940,6 @@ export async function runPipeline(
     return result;
   };
 
-  const asked: AskedUp[] = [];
-  /** The meshes already sent with a question: each travels once per conversion. */
-  const meshSent = new WeakSet<IndexedMesh>();
-  /**
-   * Asks about one file until the answer confirms (design note §4): each answer is resolved
-   * from scratch by `resolve`, inside the orient step's time; waiting is in no step. A file's
-   * mesh travels with its first question only, once per conversion even when a pair is swapped.
-   * Returns early, unconfirmed, when the answer swaps.
-   */
-  const askAbout = async <T extends Standing>(
-    ask: AskUp,
-    role: UpRole,
-    file: number,
-    mesh: IndexedMesh,
-    warnings: Pairing['warnings'],
-    proposal: T,
-    options: OrientationOptions,
-    resolve: (options: OrientationOptions) => T,
-  ): Promise<{ standing: T; options: OrientationOptions; swap: boolean }> => {
-    let start: number | undefined;
-    let standing = proposal;
-    let tries = 0;
-    for (;;) {
-      const question = resume('orient', (): UpQuestion => {
-        const { orientation, reason, base } = standing;
-        const box = turnedBox(mesh.positions, orientation.rotation);
-        const asking = { role, file, orientation, reason, box, base, warnings };
-        return meshSent.has(mesh) ? asking : { ...asking, mesh: copyForQuestion(mesh) };
-      });
-      meshSent.add(mesh);
-      start ??= performance.now();
-      const answer = await ask(question);
-      if (answer.swap) return { standing, options, swap: true };
-      if (!sameOrientationOptions(answer.orientation, options)) {
-        standing = resume('orient', () => resolve(answer.orientation));
-        options = answer.orientation;
-      }
-      if (answer.confirm) {
-        asked.push({ role, tries, waitedMs: performance.now() - start });
-        return { standing, options, swap: false };
-      }
-      tries++;
-    }
-  };
-
   // With several files, read, weld and orient each run over all of them inside their step.
   const reads = run(
     'read',
@@ -858,6 +980,174 @@ export async function runPipeline(
 
   const orientedBytes = (figure: PlacedMesh, base: PlacedMesh | null): number =>
     heldBytes + figure.mesh.positions.byteLength + (base?.mesh.positions.byteLength ?? 0);
+
+  const asked: AskedUp[] = [];
+  /** Files whose welded mesh the page has had with a question: each travels once per conversion. */
+  const sentFiles = new Set<number>();
+  /** Copies of the meshes of the files shown that the page has not had yet. */
+  const meshesFor = (shown: readonly Shown[]): Question['meshes'] => {
+    const out: Question['meshes'] = [];
+    for (const { file } of shown) {
+      if (sentFiles.has(file)) continue;
+      sentFiles.add(file);
+      out.push({ file, mesh: copyForQuestion(meshes[file]!) });
+    }
+    return out;
+  };
+  /** Marks as resolved on a file, once per point: an answer that keeps a mark does not pay for it again. */
+  const resolvedMarks = new Map<string, Mark & { file: number }>();
+  const markOn = ({ file, point }: MarkPick): Mark & { file: number } => {
+    const key = `${file}:${point.join(',')}`;
+    let mark = resolvedMarks.get(key);
+    if (!mark) {
+      const resolved = resolveMark(meshes[file]!, point);
+      if (!resolved) throw new ConversionProblem('unexpected', `a mark on empty file ${file}`);
+      mark = { ...resolved, file };
+      resolvedMarks.set(key, mark);
+    }
+    return mark;
+  };
+  const markedPair = (meeting: Meeting): MarkedPair => ({
+    spot: markOn(meeting.spot),
+    contact: markOn(meeting.contact),
+  });
+  const rolesOf = (pairing: Pairing | null): Question['roles'] => ({
+    baseFile: pairing?.baseFile ?? null,
+    figureFiles: pairing ? figureFiles(pairing) : [0],
+  });
+  /** An answer of the wrong kind is the page's bug. */
+  const expectAnswer = <K extends Answer['kind']>(
+    answer: Answer,
+    kind: K,
+  ): Extract<Answer, { kind: K }> => {
+    if (answer.kind !== kind)
+      throw new ConversionProblem('unexpected', `a ${answer.kind} answer to a ${kind} question`);
+    return answer as Extract<Answer, { kind: K }>;
+  };
+
+  /** How an up question ended: confirmed, or the roles changed (a swap, or another base named). */
+  type Answered<T> =
+    | { standing: T; options: OrientationOptions; restart: null }
+    | { restart: { swap: true } | { baseFile: number | null } };
+  /**
+   * Asks which way is up about one file, or a figure's parts together, until the answer confirms
+   * (#92 design note §4): each answer is resolved from scratch by `resolve`, inside the orient
+   * step's time; waiting is in no step. Returns early when the answer changes the roles.
+   */
+  const askAbout = async <T extends Standing>(
+    ask: AskUp,
+    role: UpRole,
+    file: number,
+    figure: { parts: readonly PartPlace[]; positions: Float32Array },
+    pairing: Pairing | null,
+    proposal: T,
+    options: OrientationOptions,
+    resolve: (options: OrientationOptions) => T,
+  ): Promise<Answered<T>> => {
+    let start: number | undefined;
+    let standing = proposal;
+    let tries = 0;
+    for (;;) {
+      const question = resume('orient', (): UpQuestion => {
+        const { orientation, reason, base } = standing;
+        const drawn = standShown(figure.parts, figure.positions, orientation.rotation);
+        return {
+          kind: 'up',
+          role,
+          file,
+          orientation,
+          reason,
+          base,
+          warnings: pairing?.warnings ?? [],
+          roles: rolesOf(pairing),
+          ...drawn,
+          meshes: meshesFor(drawn.shown),
+        };
+      });
+      start ??= performance.now();
+      const answer = expectAnswer(await ask(question), 'up');
+      if (answer.swap) return { restart: { swap: true } };
+      if (answer.baseFile !== undefined && answer.baseFile !== (pairing?.baseFile ?? null))
+        return { restart: { baseFile: answer.baseFile } };
+      if (!sameOrientationOptions(answer.orientation, options)) {
+        standing = resume('orient', () => resolve(answer.orientation));
+        options = answer.orientation;
+      }
+      if (answer.confirm) {
+        asked.push({ role, tries, waitedMs: performance.now() - start });
+        return { standing, options, restart: null };
+      }
+      tries++;
+    }
+  };
+
+  /**
+   * The parts question (#93 design note §4.2): the figure's parts as they go together, turned by
+   * the body's detected up and stood on the grid, with pins where the parts in place touch.
+   * Every answer puts the parts together again, inside the assemble step's time.
+   */
+  const askParts = async (
+    ask: AskUp,
+    standing: FilesStanding,
+    pairing: Pairing,
+    joints: PartJoint[],
+  ): Promise<{ source: FigureSource; joints: PartJoint[] }> => {
+    const body = bodyFile(pairing);
+    const up = resolveOrientation(meshes[body]!, {}, standing.standing[body]!.detection).orientation
+      .rotation;
+    let current = joints;
+    let source = within('assemble', () => figureSourceOf(standing, pairing, current));
+    // Where the files put each part: proposed once, for the parts no joint moves.
+    const proposals = within('assemble', () =>
+      proposedJoints(
+        meshes,
+        figureFiles(pairing)
+          .map((file) => wholePart(file, meshes[file]!))
+          .map((part, k) => (k === 0 ? part : { ...part, source: 'files' as const })),
+      ).map((proposal) => ({
+        part: proposal.part,
+        onto: proposal.onto,
+        pins: {
+          spot: markOn({ file: proposal.onto, point: proposal.spot }),
+          contact: markOn({ file: proposal.part, point: proposal.contact }),
+        },
+      })),
+    );
+    let start: number | undefined;
+    let tries = 0;
+    for (;;) {
+      const question = resume('assemble', (): MeetQuestion => {
+        const moved = new Set(current.map((joint) => joint.part));
+        const drawn = standShown(source.parts, source.mesh.positions, up);
+        return {
+          kind: 'meet',
+          about: 'parts',
+          parts: source.parts,
+          placement: null,
+          marks: current.map(markedPair),
+          proposed: proposals
+            .filter(({ part, onto }) => !moved.has(part) && !moved.has(onto))
+            .map(({ pins }) => pins),
+          apart: null,
+          roles: rolesOf(pairing),
+          ...drawn,
+          meshes: meshesFor(drawn.shown),
+        };
+      });
+      start ??= performance.now();
+      const answer = expectAnswer(await ask(question), 'meet');
+      if (JSON.stringify(answer.joints) !== JSON.stringify(current)) {
+        current = answer.joints;
+        source = resume('assemble', () => figureSourceOf(standing, pairing, current));
+      }
+      if (answer.confirm) {
+        asked.push({ role: 'parts', tries, waitedMs: performance.now() - start });
+        return { source, joints: current };
+      }
+      tries++;
+    }
+  };
+
   const joints = partsOptions?.joints ?? [];
   let choices: UpChoices =
     files.length > 1
@@ -869,6 +1159,10 @@ export async function runPipeline(
           ...(placementOptions.marks && { placement: placementOptions }),
         }
       : { orientation: orientationOptions };
+  const askFigure = askUp !== undefined && askOptions.up !== false;
+  const askBase = askUp !== undefined && askOptions.baseUp !== false;
+  const askTheParts = askUp !== undefined && askOptions.parts !== false;
+  const askMeet = askUp !== undefined && askOptions.meet !== false;
   /** A figure without a base file after the orient step: one file, or the union of its parts. */
   interface OrientedAlone {
     figure: PlacedMesh;
@@ -886,11 +1180,20 @@ export async function runPipeline(
       () => standOne(mesh, orientationOptions),
       (o) => orientedBytes(o.figure, null),
     );
-    if (askUp && askOptions.up !== false) {
+    if (askUp && askFigure) {
       const pass = one.detection;
-      const answered = await askAbout(askUp, 'mini', 0, mesh, [], one, orientationOptions, (o) =>
-        standOne(mesh, o, pass),
+      const answered = await askAbout(
+        askUp,
+        'mini',
+        0,
+        { parts: [wholePart(0, mesh)], positions: mesh.positions },
+        null,
+        one,
+        orientationOptions,
+        (o) => standOne(mesh, o, pass),
       );
+      if (answered.restart)
+        throw new ConversionProblem('unexpected', 'the roles of a single file changed');
       one = answered.standing;
       choices = { orientation: answered.options };
     }
@@ -901,7 +1204,7 @@ export async function runPipeline(
       pairing: null,
       parts: [],
     };
-  } else if (!askUp || (askOptions.up === false && askOptions.baseUp === false)) {
+  } else if (!askUp || !(askFigure || askBase || (assembling && askTheParts))) {
     // With parts, the roles and the union are the assemble step; the orient step stands them.
     const prepared = assembling
       ? run(
@@ -909,7 +1212,11 @@ export async function runPipeline(
           () => {
             const standing = standFiles(meshes);
             const pairing = guessRoles(standing.shapes, pairingOptions, 'refuse');
-            return { standing, pairing, source: figureSourceOf(standing, pairing, joints) };
+            return {
+              standing,
+              pairing,
+              source: figureSourceOf(standing, pairing, joints),
+            };
           },
           (a) => heldBytes + meshBytes(a.source.mesh),
         )
@@ -943,10 +1250,10 @@ export async function runPipeline(
       );
     }
   } else {
-    // A pair asks about its base first, then its figure; a swap at either starts again with the
-    // other file as the base (design note §4.2). A figure in parts is asked about as their union.
-    const askBase = askOptions.baseUp !== false;
-    const askFigure = askOptions.up !== false;
+    // Several files ask about the parts, then the base, then the figure (as the union of its
+    // parts); a swap, or another base named at either up question, starts again with the parts
+    // (#92 design note §4.2, #93 §4).
+    const ask = askUp;
     // Without a flat underside on any file, the base is proposed when a person will confirm it.
     const whenNone = askBase ? 'propose' : 'refuse';
     const standing = run(
@@ -957,28 +1264,54 @@ export async function runPipeline(
     let pairingChoice = pairingOptions;
     let baseChoice = baseOrientationOptions;
     let figureChoice = orientationOptions;
+    let jointsChoice = joints;
+    /** The roles changed at a question: everything chosen about the files starts again. */
+    const restartWith = (pairing: PairingOptions): void => {
+      pairingChoice = pairing;
+      baseChoice = {};
+      figureChoice = {};
+      jointsChoice = [];
+    };
     for (;;) {
       const guessed = within(assembling ? 'assemble' : 'orient', () =>
         guessRoles(standing.shapes, pairingChoice, whenNone),
       );
-      const source =
-        figureFiles(guessed).length > 1
-          ? within('assemble', () => figureSourceOf(standing, guessed, joints))
-          : figureSourceOf(standing, guessed, joints);
+      const inParts = figureFiles(guessed).length > 1;
+      let source: FigureSource;
+      if (inParts && askTheParts) {
+        const answered = await askParts(ask, standing, guessed, jointsChoice);
+        source = answered.source;
+        jointsChoice = answered.joints;
+      } else
+        source = inParts
+          ? within('assemble', () => figureSourceOf(standing, guessed, jointsChoice))
+          : figureSourceOf(standing, guessed, jointsChoice);
+      const partsChoice: Pick<UpChoices, 'parts'> =
+        inParts && (jointsChoice.length > 0 || partsOptions)
+          ? { parts: { joints: jointsChoice } }
+          : {};
+      const figureShown = {
+        parts: source.parts,
+        positions: source.mesh.positions,
+      };
       if (!hasBase(guessed)) {
-        // Parts without a base file: asked about like one file, their union (#93).
+        // Parts without a base file: asked about like one file, their union (#93); no meeting.
         let one = within('orient', () => standOne(source.mesh, figureChoice, source.pass));
         if (askFigure) {
           const answered = await askAbout(
-            askUp,
+            ask,
             'mini',
             bodyFile(guessed),
-            source.mesh,
-            [],
+            figureShown,
+            guessed,
             one,
             figureChoice,
             (o) => standOne(source.mesh, o, source.pass),
           );
+          if (answered.restart) {
+            restartWith('swap' in answered.restart ? {} : { baseFile: answered.restart.baseFile });
+            continue;
+          }
           one = answered.standing;
           figureChoice = answered.options;
         }
@@ -992,7 +1325,7 @@ export async function runPipeline(
         choices = {
           orientation: figureChoice,
           pairing: pairingChoice,
-          ...(partsOptions && { parts: partsOptions }),
+          ...partsChoice,
         };
         break;
       }
@@ -1002,19 +1335,24 @@ export async function runPipeline(
       if (askBase) {
         const proposal = base;
         const answered = await askAbout(
-          askUp,
+          ask,
           'base',
           baseFile,
-          standing.meshes[baseFile]!,
-          warnings,
+          {
+            parts: [wholePart(baseFile, meshes[baseFile]!)],
+            positions: meshes[baseFile]!.positions,
+          },
+          base.pairing,
           base,
           baseChoice,
           (o) => standBase(standing, guessed, o),
         );
-        if (answered.swap) {
-          pairingChoice = swapped(pairingChoice, proposal.pairing);
-          baseChoice = {};
-          figureChoice = {};
+        if (answered.restart) {
+          restartWith(
+            'swap' in answered.restart
+              ? swapped(pairingChoice, proposal.pairing)
+              : { baseFile: answered.restart.baseFile },
+          );
           continue;
         }
         base = answered.standing;
@@ -1030,19 +1368,21 @@ export async function runPipeline(
       if (askFigure) {
         const top = figure.decided?.top;
         const answered = await askAbout(
-          askUp,
+          ask,
           'figure',
           bodyFile(confirmedBase.pairing),
-          source.mesh,
-          warnings,
+          figureShown,
+          confirmedBase.pairing,
           figure,
           figureChoice,
           (o) => standFigure(source, confirmedBase, o, true, top),
         );
-        if (answered.swap) {
-          pairingChoice = swapped(pairingChoice, confirmedBase.pairing);
-          baseChoice = {};
-          figureChoice = {};
+        if (answered.restart) {
+          restartWith(
+            'swap' in answered.restart
+              ? swapped(pairingChoice, confirmedBase.pairing)
+              : { baseFile: answered.restart.baseFile },
+          );
           continue;
         }
         figure = answered.standing;
@@ -1053,7 +1393,7 @@ export async function runPipeline(
         orientation: figureChoice,
         baseOrientation: baseChoice,
         pairing: pairingChoice,
-        ...(partsOptions && { parts: partsOptions }),
+        ...partsChoice,
         ...(placementOptions.marks && { placement: placementOptions }),
       };
       break;
@@ -1066,11 +1406,59 @@ export async function runPipeline(
   if (oriented.base) {
     const pairOriented = oriented;
     const { figure, base } = pairOriented;
-    const placedPair = run(
+    let meeting: Meeting | null = placementOptions.marks ?? null;
+    const placeWith = (marks: Meeting | null): PlacedPair =>
+      placeOrientedPair(pairOriented, marks ? { marks } : withoutMarks(placementOptions));
+    let placedPair = run(
       'place',
-      () => placeOrientedPair(pairOriented, placementOptions),
+      () => placeWith(meeting),
       (p) => fileBytes + meshBytes(figure.mesh) + meshBytes(base.mesh) + meshBytes(p.merged.mesh),
     );
+    if (askUp && askMeet) {
+      // Shown before the conversion for every pair (PM decision 2026-09-30): the automatic
+      // placement with its pins, until the person marks their own.
+      let automatic = meeting ? null : placedPair;
+      let proposed: MarkedPair[] | null = null;
+      let start: number | undefined;
+      let tries = 0;
+      for (;;) {
+        const question = resume('place', (): MeetQuestion => {
+          automatic ??= placeWith(null);
+          proposed ??= proposedMeeting(pairOriented, automatic, markOn);
+          return {
+            kind: 'meet',
+            about: 'base',
+            parts: pairOriented.parts,
+            placement: placedPair.pair.placement,
+            marks: meeting ? [markedPair(meeting)] : [],
+            proposed,
+            roles: rolesOf(pairOriented.pairing),
+            ...meetShown(pairOriented, placedPair),
+            apart: apartShown(pairOriented, placedPair),
+            meshes: [],
+          };
+        });
+        question.meshes = meshesFor([...question.shown, ...question.apart!.shown]);
+        start ??= performance.now();
+        const answer = expectAnswer(await askUp(question), 'meet');
+        if (JSON.stringify(answer.meeting) !== JSON.stringify(meeting)) {
+          meeting = answer.meeting;
+          placedPair = resume('place', () => placeWith(meeting));
+        }
+        if (answer.confirm) {
+          asked.push({
+            role: 'meet',
+            tries,
+            waitedMs: performance.now() - start,
+          });
+          break;
+        }
+        tries++;
+      }
+      choices = { ...choices };
+      if (meeting) choices.placement = { marks: meeting };
+      else delete choices.placement;
+    }
     pair = placedPair.pair;
     toSize = placedPair.merged;
     orientation = placedPair.orientation;

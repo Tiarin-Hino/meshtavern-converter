@@ -6,7 +6,7 @@ import {
   movedSoup,
   WINGED_FIGURE,
 } from '../../regression/shapes';
-import { assembleFigure, MAX_PARTS } from './assemble';
+import { assembleFigure, IN_PLACE_GAP_MM, MAX_PARTS, proposedJoints, wholePart } from './assemble';
 import type { Vec3 } from './base';
 import type { PartJoint } from './marks';
 import { weldVertices, type IndexedMesh } from './mesh';
@@ -114,6 +114,26 @@ describe('assembleFigure', { timeout: 60_000 }, () => {
     };
     expect(detail([joint(1, 2), joint(2, 1)])).toMatch(/go round/);
     expect(detail([joint(0, 1)])).toMatch(/a joint of file 0/);
+  });
+});
+
+describe('proposedJoints', { timeout: 60_000 }, () => {
+  it('pins where a part in place touches the body, and nothing for a part lying apart', () => {
+    const { body, wing } = generateWingedFigure();
+    const inPlace = [body, wing].map(welded);
+    const parts = inPlace.map((mesh, file) => ({
+      ...wholePart(file, mesh),
+      source: file === 0 ? ('body' as const) : ('files' as const),
+    }));
+    const [proposal] = proposedJoints(inPlace, parts);
+    expect(proposal).toMatchObject({ part: 1, onto: 0 });
+    expect(proposal!.gapMm).toBeLessThan(IN_PLACE_GAP_MM);
+    // The wing's root lies on the shoulder plate's face, x = 8.5.
+    expect(proposal!.contact[0]).toBeCloseTo(WINGED_FIGURE.joint[0], 4);
+    expect(proposal!.spot[0]).toBeCloseTo(WINGED_FIGURE.joint[0], 4);
+
+    const apart = [body, movedSoup(wing, WING_MOVE)].map(welded);
+    expect(proposedJoints(apart, parts)).toEqual([]);
   });
 });
 

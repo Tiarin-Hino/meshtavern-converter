@@ -1,13 +1,17 @@
 /**
- * The question after the orient step (issue #92, design note docs/design/up-before-reduce.md §3):
- * which way is up, asked on the full-detail mesh before anything is reduced. The pipeline asks
- * through a callback (`AskUp`), so it stays free of workers and DOM.
+ * The questions a conversion asks on the full-detail meshes before anything is reduced: which way
+ * is up (issue #92, design note docs/design/up-before-reduce.md §3), and where the parts meet
+ * (issue #93, docs/design/marks-where-parts-meet.md §3.5). The pipeline asks through a callback
+ * (`AskUp`), so it stays free of workers and DOM.
  */
+import type { PartResult } from './assemble';
 import type { Vec3 } from './base';
+import type { Mark, Meeting, PartJoint } from './marks';
 import type { IndexedMesh } from './mesh';
 import { quarterTurnAxis, TO_Y_UP, type Orientation, type OrientationOptions } from './orient';
 import type { FileOrientation, PairWarning } from './pair';
-import { toMatrix, type Rotation } from './rotation';
+import type { Placement } from './place';
+import { apply, multiply, toMatrix, type Rotation } from './rotation';
 import type { BaseMeasurement } from './size';
 
 /** Which file a question is about: the only file, or for a pair the base first, then the figure. */
@@ -32,60 +36,135 @@ export type UpReason =
   /** An axis or a turn that was chosen: by the person at the question, or by the options the conversion came with. */
   | 'chosen';
 
-export interface UpQuestion {
+/** A box in scene axes, file units. */
+export interface Box {
+  min: Vec3;
+  max: Vec3;
+}
+
+/** What the page draws at a question: one file's welded mesh at a transform, file coordinates to the scene (#93). */
+export interface Shown {
+  file: number;
+  rotation: Rotation;
+  translation: Vec3;
+}
+
+/** What every question carries: the meshes the page has not had yet, and where to draw what (#93, design note §3.5). */
+interface QuestionBase {
+  /**
+   * The welded meshes of the files not yet sent in this conversion, positions and indices only:
+   * copies, each file once. The page keeps them for the conversion and draws them as `shown` says.
+   */
+  meshes: { file: number; mesh: IndexedMesh }[];
+  /** Every file drawn, at its transform: the worker decides every transform, the page composes none. */
+  shown: Shown[];
+  /** The box of all of it in scene axes, file units, standing on the grid: for the camera. */
+  box: Box;
+  /** Which file is the base (null: none) and which are the figure's parts, the body first: for the base select. */
+  roles: { baseFile: number | null; figureFiles: number[] };
+}
+
+/** Which way is up, about one file or a figure's parts together (#92). */
+export interface UpQuestion extends QuestionBase {
+  kind: 'up';
   role: UpRole;
-  /** Which of the files given: 0 the first, 1 the second. */
+  /** The file asked about: the base, the only file, or the figure's body (standing for all its parts). */
   file: number;
   /** How the file stands now: the proposal, or what was last tried. */
   orientation: Orientation;
   reason: UpReason;
-  /**
-   * The box of the mesh turned by `orientation.rotation`, scene axes, file units, before
-   * any shift: the page stands the mesh on the grid with it.
-   */
-  box: { min: Vec3; max: Vec3 };
   /** The base the file would stand on, measured as the pipeline will measure it; null without one. */
   base: BaseMeasurement | null;
-  /** A pair only: what the guess of the roles found (`Pairing.warnings`), for the page to say. Empty for one file. */
+  /** Several files only: what the guess of the roles found (`Pairing.warnings`), for the page to say. Empty for one file. */
   warnings: PairWarning[];
-  /**
-   * The welded mesh in file coordinates, positions and indices only: a copy, sent the first
-   * time a file is asked about and never again. The page turns it by `orientation.rotation`.
-   */
-  mesh?: IndexedMesh;
 }
 
+/** Two marks where two parts meet, in the coordinates of the files they are on: what the page draws pins from. */
+export interface MarkedPair {
+  spot: Mark & { file: number };
+  contact: Mark & { file: number };
+}
+
+/** Where the parts meet (#93): the figure's parts together, or the figure on its base. */
+export interface MeetQuestion extends QuestionBase {
+  kind: 'meet';
+  /** `parts`: how the figure's parts go together. `base`: the figure on its base. */
+  about: 'parts' | 'base';
+  /** The figure's parts as they are put together now, the body first. */
+  parts: PartResult[];
+  /** `base` only: the placement shown, automatic or marked. */
+  placement: Placement | null;
+  /** The meetings marked so far, resolved: one per joint (`parts`), or the one meeting (`base`). */
+  marks: MarkedPair[];
+  /**
+   * What the converter proposes where nothing is marked, as pins (PM decision 2026-09-30): where a
+   * part the file puts in place touches the part next to it (`parts`; a part further than
+   * `IN_PLACE_GAP_MM` from every other lies apart and has none), or where the automatic placement
+   * set the figure (`base`).
+   */
+  proposed: MarkedPair[];
+  /** `base` only: the figure standing beside its base, for marking both; null for `parts`. */
+  apart: { shown: Shown[]; box: Box } | null;
+}
+
+export type Question = UpQuestion | MeetQuestion;
+
 export interface UpAnswer {
+  kind: 'up';
   /**
    * How the file should stand, resolved from scratch like `PipelineOptions.orientation`:
    * an axis, a rotation, Set down. Empty: as the converter proposes.
    */
   orientation: OrientationOptions;
-  /** True: this is right, go on. False: show me how this stands (the question comes again, without the mesh). */
+  /** True: this is right, go on. False: show me how this stands (the question comes again). */
   confirm: boolean;
-  /** A pair only: the other file is the base. The roles are exchanged and the questions start again with the base. */
+  /** Two files only: the other file is the base. The roles are exchanged and the questions start again with the base. */
   swap?: boolean;
+  /** This file is the base, or null: no base, the parts of one figure. The questions start again with the parts (#93). */
+  baseFile?: number | null;
 }
 
-/** Asked between the orient step and everything after it. Rejecting ends the conversion with that error. */
-export type AskUp = (question: UpQuestion) => Promise<UpAnswer>;
+export interface MeetAnswer {
+  kind: 'meet';
+  /** `parts`: the joints; a part left out stays where its file puts it. */
+  joints: PartJoint[];
+  /** `base`: the meeting of figure and base, or null for the automatic placement. */
+  meeting: Meeting | null;
+  /** True: this is right, go on. False: show me (the question comes again with it resolved). */
+  confirm: boolean;
+}
 
-/** Which files are asked about. A file that is not asked about stands as its options say, as today. */
+export type Answer = UpAnswer | MeetAnswer;
+
+/** Asked between the steps (#92, #93). Rejecting ends the conversion with that error. The name stays: it asks every question. */
+export type AskUp = (question: Question) => Promise<Answer>;
+
+/** Which questions are asked. A question not asked is answered by the options, as without asking. */
 export interface AskOptions {
-  /** The single file, or the figure of a pair. Default true. */
+  /** The single file, or the figure. Default true. */
   up?: boolean;
-  /** The base file of a pair. Default true. */
+  /** The base file. Default true. */
   baseUp?: boolean;
+  /** How a figure in parts goes together (#93). Default true. */
+  parts?: boolean;
+  /** Where the figure meets its base (#93): shown before the conversion for every pair (PM decision 2026-09-30). Default true. */
+  meet?: boolean;
 }
 
 /** One confirmed question, for the figures. */
 export interface AskedUp {
-  role: UpRole;
-  /** Answers with `confirm: false` before the confirming one: 0 is the one click of a right detection. */
+  role: UpRole | 'parts' | 'meet';
+  /** Answers with `confirm: false` before the confirming one: 0 is the one click of a right proposal. */
   tries: number;
   /** From posting the first question of this file to its confirming answer. Not part of any step's time. */
   waitedMs: number;
 }
+
+/**
+ * The figure is laid this far beside its base while both are marked (#93), so neither hides the
+ * other. _(proposal)_
+ */
+export const APART_GAP_MM = 10;
 
 /** The welded mesh for the page: positions and indices copied, nothing else. The pipeline keeps its own. */
 export const copyForQuestion = (mesh: IndexedMesh): IndexedMesh => ({
@@ -97,7 +176,7 @@ export const copyForQuestion = (mesh: IndexedMesh): IndexedMesh => ({
  * The box of positions turned by a rotation, without turning a copy of them. A quarter turn
  * swaps and negates coordinates exactly, as `orientAndPlace` does, so its box is exact.
  */
-export function turnedBox(positions: Float32Array, rotation: Rotation): { min: Vec3; max: Vec3 } {
+export function turnedBox(positions: Float32Array, rotation: Rotation): Box {
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   const include = (x: number, y: number, z: number): void => {
@@ -167,4 +246,47 @@ export function sameOrientationOptions(a: OrientationOptions, b: OrientationOpti
   if (a.up !== b.up || (a.setDown === true) !== (b.setDown === true)) return false;
   if (!a.rotation || !b.rotation) return a.rotation === b.rotation;
   return a.rotation.every((value, i) => Object.is(value, b.rotation![i]));
+}
+
+/** Where a part is drawn from: its file, turned and moved into the figure's frame. */
+export type PartPlace = Pick<PartResult, 'file' | 'rotation' | 'translation'>;
+
+/** A part drawn in a scene that is itself turned and moved: the part's transform, then the scene's. */
+export function composeShown(part: PartPlace, rotation: Rotation, translation: Vec3): Shown {
+  const moved = apply(rotation, part.translation);
+  return {
+    file: part.file,
+    rotation: multiply(rotation, part.rotation),
+    translation: [moved[0] + translation[0], moved[1] + translation[1], moved[2] + translation[2]],
+  };
+}
+
+/**
+ * A figure's parts turned by `rotation` and stood on the grid by the box of them all (their
+ * `positions` in the figure's frame): centred in x and z, on y = 0. What an up question and the
+ * parts question draw.
+ */
+export function standShown(
+  parts: readonly PartPlace[],
+  positions: Float32Array,
+  rotation: Rotation,
+): { shown: Shown[]; box: Box } {
+  const turned = turnedBox(positions, rotation);
+  const shift: Vec3 = [
+    0 - (turned.min[0] + turned.max[0]) / 2,
+    0 - turned.min[1],
+    0 - (turned.min[2] + turned.max[2]) / 2,
+  ];
+  return {
+    shown: parts.map((part) => composeShown(part, rotation, shift)),
+    box: {
+      min: [turned.min[0] + shift[0], turned.min[1] + shift[1], turned.min[2] + shift[2]],
+      max: [turned.max[0] + shift[0], turned.max[1] + shift[1], turned.max[2] + shift[2]],
+    },
+  };
+}
+
+/** The box of a mesh's vertices as they are. */
+export function boxOf(positions: Float32Array): Box {
+  return turnedBox(positions, [0, 0, 0, 1]);
 }

@@ -23,16 +23,27 @@ export {
   type LodStats,
   type UpChoices,
 } from './pipeline/run';
-// Which way is up, asked on the full-detail mesh before anything is reduced (issue #92).
+// The questions asked on the full-detail meshes before anything is reduced: which way is up
+// (issue #92), how a figure's parts go together and where it meets its base (issue #93).
 export type {
+  Answer,
   AskUp,
   AskOptions,
   AskedUp,
+  Box,
+  MarkedPair,
+  MeetAnswer,
+  MeetQuestion,
+  Question,
+  Shown,
   UpAnswer,
   UpQuestion,
   UpReason,
   UpRole,
 } from './pipeline/ask';
+// A figure in several files, and the marks where its parts meet (issue #93).
+export { MAX_PARTS, type PartResult, type PartsOptions } from './pipeline/assemble';
+export type { Mark, MarkPick, Meeting, PartJoint } from './pipeline/marks';
 // Why a file did not become a mini, with the sentence the user reads.
 export {
   ConversionProblem,
@@ -59,7 +70,14 @@ export {
 } from './pipeline/rotation';
 // A figure with its base file: which is the base and where the figure was set (issue #70).
 export type { Pairing, PairingOptions, PairWarning } from './pipeline/pair';
-export type { Placement, PlacementOptions, Spot, SpotKind, PairResult } from './pipeline/place';
+export type {
+  MarkedMeeting,
+  Placement,
+  PlacementOptions,
+  Spot,
+  SpotKind,
+  PairResult,
+} from './pipeline/place';
 // Size: units, creature size, base, footprint (issue #44).
 export {
   CREATURE_SIZES,

@@ -7,6 +7,7 @@
  */
 import type { Vec3 } from './base';
 import { meetingRotation, resolveMark, type Mark, type PartJoint } from './marks';
+import { TriangleBvh, type SurfaceHit } from './bvh';
 import type { IndexedMesh } from './mesh';
 import { ConversionProblem } from './problems';
 import { apply, IDENTITY, toMatrix, type Rotation } from './rotation';
@@ -211,3 +212,84 @@ export const partMark = (part: Pick<PartResult, 'rotation' | 'translation'>, mar
   point: placePoint(part, mark.point),
   normal: apply(part.rotation, mark.normal),
 });
+
+/**
+ * A part further than this from every other part of the figure lies apart in its file: it gets
+ * no proposed marks (PM decision 2026-09-30: nothing new is detected). Parts exported in place
+ * overlap or touch. _(proposal)_
+ */
+export const IN_PLACE_GAP_MM = 1;
+/** At most this many of a part's vertices are tried for where it touches the others. _(proposal)_ */
+export const PROPOSAL_SAMPLES = 20_000;
+
+/** A proposed joint: where a part in place touches a part next to it, as picks in their files. */
+export interface ProposedJoint {
+  part: number;
+  onto: number;
+  spot: Vec3;
+  contact: Vec3;
+  gapMm: number;
+}
+
+/**
+ * Where each part its file puts in place touches the others (design note §14, PM decision): the
+ * part's vertex nearest to another part's surface and the closest point there, found over at most
+ * `PROPOSAL_SAMPLES` of its vertices with a search tree per other part. A part whose nearest gap
+ * is more than `IN_PLACE_GAP_MM` lies apart and gets none. Parts placed by a joint are left out,
+ * as parts and as neighbours: their files do not put them where they are.
+ *
+ * @param meshes Every file's welded mesh, by file index.
+ * @param parts The figure's parts as put together.
+ */
+export function proposedJoints(
+  meshes: readonly IndexedMesh[],
+  parts: readonly PartResult[],
+): ProposedJoint[] {
+  const inPlace = parts.filter((part) => part.source !== 'marked');
+  const trees = new Map<number, TriangleBvh>();
+  const treeOf = (file: number): TriangleBvh => {
+    let tree = trees.get(file);
+    if (!tree) {
+      tree = new TriangleBvh(meshes[file]!);
+      trees.set(file, tree);
+    }
+    return tree;
+  };
+  const hit: SurfaceHit = { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 };
+  const proposals: ProposedJoint[] = [];
+  for (const part of inPlace) {
+    if (part.source !== 'files') continue;
+    const { positions } = meshes[part.file]!;
+    const count = positions.length / 3;
+    const stride = Math.max(1, Math.ceil(count / PROPOSAL_SAMPLES));
+    let best: ProposedJoint | null = null;
+    let bestD2 = IN_PLACE_GAP_MM * IN_PLACE_GAP_MM;
+    for (const other of inPlace) {
+      if (other.file === part.file) continue;
+      const tree = treeOf(other.file);
+      const { positions: otherPositions, indices } = meshes[other.file]!;
+      for (let v = 0; v < count; v += stride) {
+        const x = positions[v * 3]!;
+        const y = positions[v * 3 + 1]!;
+        const z = positions[v * 3 + 2]!;
+        tree.closest(hit, x, y, z, bestD2);
+        if (hit.triangle < 0 || !(hit.distanceSquared < bestD2)) continue;
+        bestD2 = hit.distanceSquared;
+        const corner = (k: number, axis: number): number =>
+          otherPositions[indices[hit.triangle * 3 + k]! * 3 + axis]!;
+        const at = (axis: number): number =>
+          hit.u * corner(0, axis) + hit.v * corner(1, axis) + hit.w * corner(2, axis);
+        best = {
+          part: part.file,
+          onto: other.file,
+          spot: [at(0), at(1), at(2)],
+          contact: [x, y, z],
+          gapMm: Math.sqrt(bestD2),
+        };
+        if (bestD2 === 0) break;
+      }
+    }
+    if (best) proposals.push(best);
+  }
+  return proposals;
+}

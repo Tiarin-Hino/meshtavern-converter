@@ -1,4 +1,4 @@
-import type { AskUp, UpQuestion } from '../pipeline/ask';
+import type { AskUp, Question } from '../pipeline/ask';
 import { ConversionProblem, toProblem } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
 import type { ConvertOptions, WorkerRequest, WorkerResponse } from './protocol';
@@ -36,12 +36,13 @@ export class Converter {
   }
 
   /**
-   * The STL buffer, and a base file's in `options.secondStl`, are transferred to the worker
-   * and are unusable on the page afterwards. A file that does not become a mini rejects with
-   * a `ConversionProblem`.
+   * The STL buffer, and the other files' in `options.secondStl` and `options.moreStl`, are
+   * transferred to the worker and are unusable on the page afterwards. A file that does not
+   * become a mini rejects with a `ConversionProblem`.
    *
-   * With `askUp` the conversion stops after the orient step and asks which way is up (#92), for
-   * the files `options.ask` names (all by default); its answer continues the conversion. When
+   * With `askUp` the conversion stops and asks (#92, #93): which way is up, how the parts go
+   * together, where the figure meets its base, as `options.ask` names them (all by default);
+   * each answer continues the conversion. When
    * it rejects, the job rejects with that error and the worker is started afresh, as on cancel.
    * Without it nothing is asked, whatever `options.ask` says.
    */
@@ -53,11 +54,17 @@ export class Converter {
   ): Promise<ConversionResult> {
     const id = this.nextId++;
     const { ask, ...rest } = options;
-    const sent = askUp ? { ...rest, ask: ask ?? { up: true, baseUp: true } } : rest;
+    const sent = askUp
+      ? { ...rest, ask: ask ?? { up: true, baseUp: true, parts: true, meet: true } }
+      : rest;
     const request: WorkerRequest = { type: 'convert', id, stl, options: sent };
     return new Promise((resolve, reject) => {
       this.jobs.set(id, { onProgress, resolve, reject, askUp });
-      this.worker.postMessage(request, options.secondStl ? [stl, options.secondStl] : [stl]);
+      const others = [
+        ...(options.secondStl ? [options.secondStl] : []),
+        ...(options.moreStl ?? []),
+      ];
+      this.worker.postMessage(request, [stl, ...others]);
     });
   }
 
@@ -102,7 +109,7 @@ export class Converter {
   }
 
   /** Passes a question to the job's callback and its answer back, unless the job ended meanwhile. */
-  private ask(id: number, job: Job, question: UpQuestion): void {
+  private ask(id: number, job: Job, question: Question): void {
     if (!job.askUp) return;
     job.askUp(question).then(
       (answer) => {
