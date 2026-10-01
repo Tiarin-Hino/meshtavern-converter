@@ -1,8 +1,17 @@
-import type { Answer, AskUp } from '../pipeline/ask';
+import type { Answer, AskUp, Question } from '../pipeline/ask';
 import { meshBuffers } from '../pipeline/mesh';
 import { toProblem } from '../pipeline/problems';
 import { runPipeline } from '../pipeline/run';
 import type { Post, WorkerRequest } from './protocol';
+
+/** What a question transfers: the meshes not sent yet, and the triangles of the patches drawn (#93). */
+function questionBuffers(question: Question): ArrayBufferLike[] {
+  const buffers = question.meshes.flatMap(({ mesh }) => meshBuffers(mesh));
+  if (question.kind === 'meet')
+    for (const { on, of } of question.pairs)
+      for (const patch of [on, of]) if (patch) buffers.push(patch.triangles.buffer);
+  return buffers;
+}
 
 /** The jobs waiting at a question, by id: what resolves their answer. */
 const waiting = new Map<number, (answer: Answer) => void>();
@@ -22,10 +31,7 @@ export async function handleRequest(request: WorkerRequest, post: Post): Promise
     ? (question) =>
         new Promise((resolve) => {
           waiting.set(id, resolve);
-          post(
-            { type: 'question', id, question },
-            question.meshes.flatMap(({ mesh }) => meshBuffers(mesh)),
-          );
+          post({ type: 'question', id, question }, questionBuffers(question));
         })
     : undefined;
   try {

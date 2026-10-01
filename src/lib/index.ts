@@ -31,19 +31,37 @@ export type {
   AskOptions,
   AskedUp,
   Box,
-  MarkedPair,
+  MeetAction,
   MeetAnswer,
   MeetQuestion,
   Question,
   Shown,
+  ShownPatch,
+  Target,
   UpAnswer,
   UpQuestion,
   UpReason,
   UpRole,
 } from './pipeline/ask';
-// A figure in several files, and the marks where its parts meet (issue #93).
-export { MAX_PARTS, type PartResult, type PartsOptions } from './pipeline/assemble';
-export type { Mark, MarkPick, Meeting, PartJoint } from './pipeline/marks';
+// A figure in several files, and the pairs of patches where its parts meet (issue #93).
+export {
+  MAX_PARTS,
+  type PairSummary,
+  type PartResult,
+  type PartsOptions,
+} from './pipeline/assemble';
+export type { Fit } from './pipeline/fit';
+export {
+  MAX_PAIRS,
+  type Hit,
+  type Meeting,
+  type MeetNote,
+  type PartJoint,
+  type PatchPair,
+  type PatchPick,
+  type PatchSummary,
+  type Stroke,
+} from './pipeline/marks';
 // Why a file did not become a mini, with the sentence the user reads.
 export {
   ConversionProblem,
