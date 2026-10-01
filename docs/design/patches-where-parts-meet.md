@@ -446,6 +446,7 @@ After trying the rework (2026-10-01, later the same day, on PR #95):
 
 7. A proposed pair can be edited: a tap, a brush stroke or × on it changes it, instead of replacing the whole proposal. This replaces the answer to question 1 below.
 8. The camera can be moved about a part while marking, since two models side by side (and kits of more parts) are not served by orbiting the middle of everything.
+9. At the parts question the parts are shown separately with their pairs marked on each, as the figure beside its base is, not in place; showing them in place is the option.
 
 The decisions of 2026-09-30 that this does not touch stay: the meeting is shown before the conversion for every pair; a tap needs no mode; no Move, Raise or Turn after a marked conversion; the marking session; no base means no meeting.
 
