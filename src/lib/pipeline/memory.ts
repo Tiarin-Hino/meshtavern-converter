@@ -28,6 +28,14 @@ export const BYTES_PER_TRIANGLE = 400;
  */
 export const FIXED_BYTES = 360 * 1024 ** 2;
 
+/**
+ * The search tree and the tap's vertex-to-triangle index of a file at the meet questions (#93,
+ * patches design note §4), per triangle: the tree's order, and per node of six triangles its box,
+ * child, first and count (28 bytes); the index's list, stamp and offsets (about 18). Every file of
+ * a pair or a kit gets both; both are released before the size step.
+ */
+export const TREE_BYTES_PER_TRIANGLE = 46;
+
 /** Share of the device's memory a conversion may use: the system and other tabs need the rest. */
 export const DEVICE_SHARE = 0.5;
 /**
@@ -56,7 +64,8 @@ export function memoryBudgetBytes(deviceMemoryGb: number | undefined): number {
 
 /**
  * Peak memory a conversion of a figure and its base file is expected to need (#70): both
- * files' estimates, with the memory every conversion needs counted once.
+ * files' estimates, with the memory every conversion needs counted once, and both files'
+ * search trees for the meet questions (#93).
  */
 export function estimatePairBytes(
   byteLength: number,
@@ -67,8 +76,28 @@ export function estimatePairBytes(
   return (
     estimateConversionBytes(byteLength, format) +
     estimateConversionBytes(secondByteLength, secondFormat) -
-    FIXED_BYTES
+    FIXED_BYTES +
+    (estimateTriangles(byteLength, format) + estimateTriangles(secondByteLength, secondFormat)) *
+      TREE_BYTES_PER_TRIANGLE
   );
+}
+
+/**
+ * Peak memory a conversion of a figure in several files is expected to need (#93): every file's
+ * estimate with the memory every conversion needs counted once, and the union of the parts once
+ * more, which lives beside the parts' own meshes until the last question is answered, and every
+ * file's search tree for the meet questions. The roles
+ * are not known before the files are read, so every file counts as a part: an upper bound.
+ */
+export function estimateAssemblyBytes(
+  files: readonly { byteLength: number; format: StlFormat }[],
+): number {
+  let bytes = 0;
+  for (const { byteLength, format } of files)
+    bytes +=
+      estimateConversionBytes(byteLength, format) +
+      estimateTriangles(byteLength, format) * (BYTES_PER_TRIANGLE + TREE_BYTES_PER_TRIANGLE);
+  return bytes - (files.length - 1) * FIXED_BYTES;
 }
 
 /** Refuses a file whose conversion is expected to need more than `budgetBytes`. */

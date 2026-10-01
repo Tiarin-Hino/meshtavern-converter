@@ -4,10 +4,12 @@ import {
   checkFits,
   DEVICE_SHARE,
   estimateConversionBytes,
+  estimateAssemblyBytes,
   estimatePairBytes,
   estimateTriangles,
   FIXED_BYTES,
   memoryBudgetBytes,
+  TREE_BYTES_PER_TRIANGLE,
   UNKNOWN_DEVICE_GB,
 } from './memory';
 import { ConversionProblem } from './problems';
@@ -69,7 +71,22 @@ describe('memory estimate', () => {
     expect(estimatePairBytes(figure, 'binary', base, 'binary')).toBe(
       estimateConversionBytes(figure, 'binary') +
         estimateConversionBytes(base, 'binary') -
-        FIXED_BYTES,
+        FIXED_BYTES +
+        (estimateTriangles(figure, 'binary') + estimateTriangles(base, 'binary')) *
+          TREE_BYTES_PER_TRIANGLE,
+    );
+  });
+
+  it('counts a figure in parts once more for its union, the fixed memory once (#93)', () => {
+    const size = 84 + 50 * 100_000;
+    const files = [size, size, size].map((byteLength) => ({
+      byteLength,
+      format: 'binary' as const,
+    }));
+    expect(estimateAssemblyBytes(files)).toBe(
+      3 * estimateConversionBytes(size, 'binary') -
+        2 * FIXED_BYTES +
+        3 * 100_000 * (BYTES_PER_TRIANGLE + TREE_BYTES_PER_TRIANGLE),
     );
   });
 });

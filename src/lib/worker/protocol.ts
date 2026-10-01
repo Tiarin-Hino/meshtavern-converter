@@ -1,4 +1,5 @@
-import type { AskOptions, UpAnswer, UpQuestion } from '../pipeline/ask';
+import type { PartsOptions } from '../pipeline/assemble';
+import type { Answer, AskOptions, Question } from '../pipeline/ask';
 import type { OrientationOptions } from '../pipeline/orient';
 import type { PairingOptions } from '../pipeline/pair';
 import type { PlacementOptions } from '../pipeline/place';
@@ -25,6 +26,13 @@ export interface ConvertOptions {
    * and unusable on the page afterwards. Which of the two is the base is guessed.
    */
   secondStl?: ArrayBuffer;
+  /**
+   * The third file onwards (#93): the figure's other parts, or its base. Transferred like the
+   * first two; at most `MAX_PARTS` files in all.
+   */
+  moreStl?: ArrayBuffer[];
+  /** A figure in parts: how they go together (#93). Left out, every part where its file puts it. */
+  parts?: PartsOptions;
   /** For a pair: the user swapped figure and base. */
   pairing?: PairingOptions;
   /** For a pair: the user moved, turned, raised or lowered the figure, relative to the detection. */
@@ -32,8 +40,9 @@ export interface ConvertOptions {
   /** For a pair: the user's axis or turn for the base file; left out, it stands on its underside. */
   baseOrientation?: OrientationOptions;
   /**
-   * Stop after the orient step and ask which way is up (#92): the worker posts a `question` and
-   * waits for an `answer`. Set by the client when the page gives it a callback, never by hand.
+   * Stop and ask (#92, #93): which way is up, how the parts go together, where the figure meets
+   * its base. The worker posts a `question` and waits for an `answer`. Set by the client when the
+   * page gives it a callback, never by hand.
    */
   ask?: AskOptions;
 }
@@ -42,12 +51,12 @@ export interface ConvertOptions {
 export type WorkerRequest =
   | { type: 'convert'; id: number; stl: ArrayBuffer; options?: ConvertOptions }
   /** The answer to the question last asked by job `id`. */
-  | { type: 'answer'; id: number; answer: UpAnswer };
+  | { type: 'answer'; id: number; answer: Answer };
 
 export type WorkerResponse =
   | { type: 'progress'; id: number; progress: Progress }
-  /** The conversion waits until an `answer` with the same id arrives. The mesh's buffers are transferred. */
-  | { type: 'question'; id: number; question: UpQuestion }
+  /** The conversion waits until an `answer` with the same id arrives. The buffers of `question.meshes` are transferred. */
+  | { type: 'question'; id: number; question: Question }
   | { type: 'done'; id: number; result: ConversionResult }
   /** A file that did not become a mini: why, for the user, and what happened, for developers. */
   | { type: 'error'; id: number; code: ProblemCode; detail?: string };

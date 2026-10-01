@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ConversionProblem, PROBLEM_MESSAGES } from '../pipeline/problems';
 import type { ConversionResult } from '../pipeline/run';
 import { ConversionCancelled, Converter, type WorkerLike } from './client';
-import type { UpAnswer, UpQuestion } from '../pipeline/ask';
+import type { Question, UpAnswer, UpQuestion } from '../pipeline/ask';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 type ConvertRequest = Extract<WorkerRequest, { type: 'convert' }>;
@@ -67,6 +67,15 @@ describe('Converter', () => {
     expect(workers[0]!.converts[0]!.options).toMatchObject({ secondStl, pairing: { swap: true } });
     void converter.convert(new ArrayBuffer(84), () => {});
     expect(workers[0]!.transfers[1]).toHaveLength(1);
+  });
+
+  it('transfers every file of a figure in parts, in the order given (#93)', () => {
+    const { converter, workers } = setUp();
+    const [stl, secondStl, third, fourth] = [84, 84, 84, 84].map((n) => new ArrayBuffer(n));
+    const moreStl = [third!, fourth!];
+    void converter.convert(stl!, () => {}, { secondStl, moreStl });
+    expect(workers[0]!.transfers[0]).toEqual([stl, secondStl, third, fourth]);
+    expect(workers[0]!.converts[0]!.options).toMatchObject({ secondStl, moreStl });
   });
 
   it('cancels by ending the worker, and converts the next file in a fresh one', async () => {
@@ -142,13 +151,13 @@ describe('Converter', () => {
 });
 
 describe('Converter asking which way is up (#92)', () => {
-  const question = { role: 'mini', file: 0 } as UpQuestion;
-  const answer: UpAnswer = { orientation: { up: '+x' }, confirm: true };
+  const question = { kind: 'up', role: 'mini', file: 0 } as UpQuestion;
+  const answer: UpAnswer = { kind: 'up', orientation: { up: '+x' }, confirm: true };
   const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
   it('asks about every file by default, and passes the answer back to the worker', async () => {
     const { converter, workers } = setUp();
-    const asked: UpQuestion[] = [];
+    const asked: Question[] = [];
     const job = converter.convert(
       new ArrayBuffer(84),
       () => {},
@@ -159,7 +168,10 @@ describe('Converter asking which way is up (#92)', () => {
       },
     );
     const worker = workers[0]!;
-    expect(worker.converts[0]!.options).toEqual({ bake: 0, ask: { up: true, baseUp: true } });
+    expect(worker.converts[0]!.options).toEqual({
+      bake: 0,
+      ask: { up: true, baseUp: true, parts: true, meet: true },
+    });
     worker.reply({ type: 'question', id: 1, question });
     await settle();
     expect(asked).toEqual([question]);

@@ -431,7 +431,7 @@ For each pair the script drops the two files, waits for the page, and shows a sm
 - **S**: verdict `placed`; the record holds `state.stats.orientation`, `state.stats.pair` and the pending `state.pair` exactly as they are (Apply is not needed and not pressed: the pending move is the data); next pair.
 - **K**: `skipped`; **N**: same as K but marked `note: 'next'`; **Escape**: end the session, everything so far is on disk.
 
-On every verdict the script takes the three views of `sheets.mjs` (`showLevel(0)`, `setCamera` front low, side, above) and writes `out/feedback/sheets/<key>.png`, so the record has a picture. A refused pair (error state) is recorded as `refused` with the message and moves on; a pair that does not finish within `FEEDBACK_TIMEOUT_MS = 600_000` likewise as `skipped` with `note: 'timeout'`. The pending state of the page is read the same way the research did (`window.__mt.state.stats.pair.placement` and `state.pair`); no new hook is needed.
+On every verdict the script takes the three views of `sheets.mjs` (`showLevel(0)`, `setCamera` front low, side, above) and writes `out/feedback/sheets/<key>.png`, so the record has a picture. A refused pair (error state) is recorded as `refused` with the message and moves on; a pair that does not finish within `FEEDBACK_TIMEOUT_MS = 600_000` likewise as `skipped` with `note: 'timeout'`. _(Since #93: the limit applies when a script answers the questions; while the PM answers there is none, and a skipped pair's note is the error's first line.)_ The pending state of the page is read the same way the research did (`window.__mt.state.stats.pair.placement` and `state.pair`); no new hook is needed.
 
 ### 13.3 Scoring: every rule against the record
 

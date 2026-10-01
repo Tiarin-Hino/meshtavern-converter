@@ -474,10 +474,138 @@ body[data-state='asking'] #cancel {
   color: var(--warn);
 }
 
-/* The Base section shows the button to add a base for one file, the pair's controls for two. */
-#pair[data-kind='single'] [data-pair='pair'],
-#pair[data-kind='pair'] [data-pair='single'] {
+/*
+ * The Base section shows the button to add a base for one file, the pair's controls for a figure
+ * on its base, the parts' lines for a figure in parts without one (#93).
+ */
+#pair[data-kind='single'] [data-pair]:not([data-pair~='single']),
+#pair[data-kind='pair'] [data-pair]:not([data-pair~='pair']),
+#pair[data-kind='parts'] [data-pair]:not([data-pair~='parts']) {
   display: none;
+}
+
+/* A marked placement: no move, raise or turn after the conversion (PM decision, #93). */
+#pair[data-marked] #placement-adjust {
+  display: none;
+}
+
+#placement-adjust {
+  display: contents;
+}
+
+/* The questions (#92, #93): the up question or the meet question, never both. */
+body:not([data-question='up']) #ask,
+body:not([data-question='meet']) #meet {
+  display: none !important;
+}
+
+#meet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+#meet p {
+  margin: 0;
+}
+
+#meet-question {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+#meet-hint,
+#meet-placement,
+#meet-parts {
+  color: var(--muted);
+}
+
+#meet-parts {
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+/* At the final view of the parts a marked part's line selects what Raise, Lower and Turn move. */
+#meet-parts li[data-part] {
+  cursor: pointer;
+}
+
+#meet-parts li[data-selected] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+#meet-marking,
+#meet-final {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+#meet-marking[hidden],
+#meet-final[hidden] {
+  display: none;
+}
+
+#meet-look {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#meet-view-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+}
+
+#meet-adjust,
+#meet-view,
+#meet-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#meet-tools button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* One chip per pair, both sides of a pair in its colour (#93, patches §7.1). */
+#meet-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#meet-pairs li {
+  display: flex;
+  gap: 4px;
+}
+
+#meet-pairs .chip {
+  border-left: 6px solid var(--chip);
+  white-space: pre;
+}
+
+#meet-pairs .chip[aria-pressed='true'] {
+  outline: 2px solid var(--chip);
+}
+
+/* The pairs' colours; viewer.ts draws them (PAIR_COLOURS). */
+:root {
+  --pair-1: #f0b35e;
+  --pair-2: #7ee0c3;
+  --pair-3: #d78ae6;
+  --pair-4: #8fb8f5;
 }
 
 #pair-files,

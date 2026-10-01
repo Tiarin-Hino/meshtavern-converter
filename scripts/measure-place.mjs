@@ -7,7 +7,9 @@
 // it). Without a base file: the generated recess base, refined to about a million triangles,
 // the size of a large sculpted base. The files are read, welded and oriented once, then
 // `placeOnBase`, the whole place step as run.ts calls it, is timed per run against
-// PLACE_BUDGET_MS. `--full` runs the whole pipeline instead and prints every step's time.
+// PLACE_BUDGET_MS, and so is the proposal of the pairs stop (#93, patches design note §5.3): the
+// base's search tree and `contactPatches` over the placed figure, against PROPOSAL_BUDGET_MS.
+// `--full` runs the whole pipeline instead and prints every step's time.
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { runnerImport } from 'vite';
@@ -26,6 +28,8 @@ const { runPipeline } = await load('./src/lib/pipeline/run.ts');
 const { encodeBinaryStl } = await load('./src/lib/pipeline/stl.ts');
 const { addRecessBase, RECESS_BASE } = await load('./src/regression/shapes.ts');
 const { PLACE_BUDGET_MS, placeOnBase } = await load('./src/lib/pipeline/place.ts');
+const { TriangleBvh } = await load('./src/lib/pipeline/bvh.ts');
+const { contactPatches, PROPOSAL_BUDGET_MS } = await load('./src/lib/pipeline/contact.ts');
 const { readStlTriangles } = await load('./src/lib/pipeline/stl.ts');
 const { weldVertices, dropInvalidTriangles } = await load('./src/lib/pipeline/mesh.ts');
 const { baseOrientation, guessRoles, placeOriented, shapeOfFile } = await load(
@@ -98,5 +102,28 @@ if (full) {
       `run ${run}: place ${ms.toFixed(0)} ms, ${verdict(ms)} the ${PLACE_BUDGET_MS} ms budget`,
     );
     if (run === 1) console.log(`  ${JSON.stringify(pair.placement.spot)}`);
+  }
+  // The proposal of the pairs stop (#93): where the placed figure touches its base.
+  const { merged, pair } = placeOnBase(figure, base, pairing);
+  const fv = pair.figureVertices;
+  const ft = pair.figureTriangles;
+  const placedFigure = {
+    positions: merged.mesh.positions.slice(0, fv * 3),
+    indices: merged.mesh.indices.slice(0, ft * 3),
+  };
+  const within = (ms) => (ms <= PROPOSAL_BUDGET_MS ? 'within' : 'OVER');
+  for (let run = 1; run <= runs; run++) {
+    const start = performance.now();
+    const tree = new TriangleBvh(base.mesh);
+    const treeMs = performance.now() - start;
+    const pairs = contactPatches(
+      { file: pairing.baseFile, mesh: base.mesh, tree },
+      { file: 1 - pairing.baseFile, mesh: placedFigure, positions: placedFigure.positions },
+    );
+    const ms = performance.now() - start;
+    console.log(
+      `run ${run}: proposal ${ms.toFixed(0)} ms (the base's tree ${treeMs.toFixed(0)} ms), ` +
+        `${pairs.length} pairs, ${within(ms)} the ${PROPOSAL_BUDGET_MS} ms budget`,
+    );
   }
 }

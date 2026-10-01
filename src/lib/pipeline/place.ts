@@ -7,9 +7,19 @@
  * Deterministic: only + - * / and sqrt on the geometry, so every machine sets the figure in
  * the same place (the regression pair depends on it).
  */
+import type { PairSummary, PartResult } from './assemble';
+import type { Vec3 } from './base';
+import { fitMeeting, nudged, type Fit } from './fit';
+import { summaryOf, turnVector, type Meeting, type PatchSummary } from './marks';
 import type { IndexedMesh } from './mesh';
-import { turnPositions, type Orientation, type PlacedMesh } from './orient';
-import type { Rotation } from './rotation';
+import {
+  quarterTurnAxis,
+  TO_Y_UP,
+  turnPositions,
+  type Orientation,
+  type PlacedMesh,
+} from './orient';
+import { apply, IDENTITY, multiply, toMatrix, type Rotation } from './rotation';
 import type { Pairing } from './pair';
 import { restingPoints } from './stance';
 
@@ -199,8 +209,11 @@ export const FLAT_PATCH_TIE_MM = 0.2;
 /** The window searched for the flattest patch is at least this many cells a side. */
 export const FLAT_PATCH_MIN_CELLS = 3;
 
-/** hole and recess: a seat won. flat: the flattest patch. registered: the files' own placement. */
-export type SpotKind = 'hole' | 'recess' | 'flat' | 'registered';
+/**
+ * hole and recess: a seat won. flat: the flattest patch. registered: the files' own placement.
+ * marked: the person marked where figure and base meet (#93).
+ */
+export type SpotKind = 'hole' | 'recess' | 'flat' | 'registered' | 'marked';
 
 export interface Spot {
   kind: SpotKind;
@@ -652,6 +665,12 @@ export interface PlacementOptions {
   liftMm?: number;
   /** Turns the figure about the vertical, on top of any alignment the detection applied (§4.5). */
   turnDeg?: number;
+  /**
+   * The figure placed on the base by pairs of patches (#93): then `moveMm`, `liftMm` and
+   * `turnDeg` are ignored, the meeting has its own. Every `on` is on the base file, every `of` on
+   * one of the figure's files.
+   */
+  marks?: Meeting;
 }
 
 export interface Placement {
@@ -665,20 +684,39 @@ export interface Placement {
    * `rotation.y`: counter-clockwise seen from above.
    */
   yawDeg: number;
-  /** `detected`: the heuristic alone. `manual`: the user moved, turned, raised or lowered it. */
-  method: 'detected' | 'manual';
-  /** Every basin that was considered, best first, for the corpus report and tuning. */
+  /**
+   * `detected`: the heuristic alone. `manual`: the user moved, turned, raised or lowered it.
+   * `marked`: the figure was placed by pairs of patches (#93).
+   */
+  method: 'detected' | 'manual' | 'marked';
+  /** Every basin that was considered, best first, for the corpus report and tuning; empty when marked. */
   candidates: Spot[];
+  /** A marked placement: the pairs in the base's frame as they ended, and how they were fitted. */
+  marks?: MarkedMeeting;
+}
+
+/** A meeting of figure and base as resolved (#93, patches design note §3.2), in the base's placed frame. */
+export interface MarkedMeeting {
+  /** The pairs as they ended, base frame. */
+  pairs: PairSummary[];
+  /** The turn the meeting added to how the figure stood at its question; exactly the identity when it only moved it. */
+  rotation: Rotation;
+  liftMm: number;
+  turnDeg: number;
+  fit: Fit;
 }
 
 export interface PairResult {
   pairing: Pairing;
-  placement: Placement;
+  /** Where the figure was set on its base; null for a figure in parts without a base file (#93). */
+  placement: Placement | null;
   /** The merged full-detail mesh lists the figure's vertices and triangles first: the page splits it there for the preview (§6). */
   figureVertices: number;
   figureTriangles: number;
-  /** How the base file stands: its detection, or the user's choice (#92). */
-  baseOrientation: Orientation;
+  /** How the base file stands: its detection, or the user's choice (#92); null without a base file. */
+  baseOrientation: Orientation | null;
+  /** The figure's parts, the body first; one entry for a figure of one file (#93). */
+  parts: PartResult[];
 }
 
 /**
@@ -1074,7 +1112,11 @@ export function placeOnBase(
   files?: PairFiles,
   alternative?: PlacedMesh,
   decided?: FigureDecision,
-): { merged: PlacedMesh; pair: Omit<PairResult, 'baseOrientation'>; candidate: 0 | 1 } {
+): {
+  merged: PlacedMesh;
+  pair: Omit<PairResult, 'baseOrientation' | 'parts' | 'placement'> & { placement: Placement };
+  candidate: 0 | 1;
+} {
   const { top, registered, candidate } = decided ?? decideFigure(figure, base, files, alternative);
   const { map, basins } = top;
   if (candidate === 1) figure = alternative!;
@@ -1114,8 +1156,125 @@ export function placeOnBase(
   };
 }
 
+/**
+ * The figure set on its base by pairs of patches (#93, patches design note §5.5): the `on`
+ * patches carried into the base's placed frame, the `of` patches into the figure's standing frame
+ * (how it stood at its question), the least change that fits with the base's up (`fitMeeting`),
+ * then the person's lift and turn about the `on` patches' normal. Nothing is guessed: the base's
+ * top is not read.
+ *
+ * @param figure The figure's welded mesh in its file frame (the union of its parts, #93).
+ * @param figureRotation How the figure stands: its file frame to its standing frame.
+ * @param base The base as placed (`placeOriented`, with its `shift`).
+ * @param baseRotation The base's rotation, file to placed frame.
+ * @param pairs The pairs as resolved: `on` in the base file's coordinates, `of` in the figure's
+ *   file frame.
+ * @returns The figure's positions in the base's frame, the placement, the figure's rotation from
+ *   file to base frame, and the turn the meeting added to how it stood.
+ */
+export function placeMarked(
+  figure: IndexedMesh,
+  figureRotation: Rotation,
+  base: PlacedMesh,
+  baseRotation: Rotation,
+  pairs: readonly { on: PatchSummary; of: PatchSummary }[],
+  meeting: Pick<Meeting, 'liftMm' | 'turnDeg' | 'turn'> = {},
+): {
+  positions: Float32Array;
+  placement: Placement;
+  rotation: Rotation;
+  meeting: Rotation;
+} {
+  const shift = base.shift ?? [0, 0, 0];
+  const inBase = (summary: PatchSummary): PatchSummary => {
+    const centre = turnVector(baseRotation, summary.centre);
+    return {
+      ...summaryOf(summary),
+      centre: [centre[0] - shift[0], centre[1] - shift[1], centre[2] - shift[2]],
+      normal: turnVector(baseRotation, summary.normal),
+    };
+  };
+  const standing = (summary: PatchSummary): PatchSummary => ({
+    ...summaryOf(summary),
+    centre: turnVector(figureRotation, summary.centre),
+    normal: turnVector(figureRotation, summary.normal),
+  });
+  const fitPairs = pairs.map(({ on, of }) => ({
+    on: inBase(on),
+    of: standing(of),
+  }));
+  const up: Vec3 = [0, 1, 0];
+  const fitted = fitMeeting(fitPairs, {
+    up,
+    ...(meeting.turn && { turn: meeting.turn }),
+  });
+  const liftMm = meeting.liftMm ?? 0;
+  const turnDeg = meeting.turnDeg ?? 0;
+  const { rotation: turn, translation } = nudged(fitted, fitPairs, liftMm, turnDeg, up);
+  const rotation = turn === IDENTITY ? figureRotation : multiply(turn, figureRotation);
+  const m = toMatrix(rotation);
+  const [tx, ty, tz] = translation;
+  const source = figure.positions;
+  const positions = new Float32Array(source.length);
+  // Exactly as the figure stood, moved, when the meeting does not turn it: a quarter turn swaps
+  // and negates.
+  const quarter = turn === IDENTITY ? quarterTurnAxis(figureRotation) : null;
+  const turned = quarter
+    ? TO_Y_UP[quarter]
+    : (x: number, y: number, z: number): Vec3 => [
+        m[0]! * x + m[1]! * y + m[2]! * z,
+        m[3]! * x + m[4]! * y + m[5]! * z,
+        m[6]! * x + m[7]! * y + m[8]! * z,
+      ];
+  for (let i = 0; i < source.length; i += 3) {
+    const [x, y, z] = turned(source[i]!, source[i + 1]!, source[i + 2]!);
+    positions[i] = x + tx;
+    positions[i + 1] = y + ty;
+    positions[i + 2] = z + tz;
+  }
+  const ended = fitPairs.map(({ on, of }) => {
+    const centre = apply(turn, of.centre);
+    return {
+      on,
+      of: {
+        ...of,
+        centre: [centre[0] + tx, centre[1] + ty, centre[2] + tz] as Vec3,
+        normal: apply(turn, of.normal),
+      },
+    };
+  });
+  // Where the figure ended: the weighted centre of its patches.
+  let total = 0;
+  const centre: Vec3 = [0, 0, 0];
+  for (const { on, of } of ended) {
+    const w = Math.max(Math.min(on.areaMm2, of.areaMm2), 1e-12);
+    total += w;
+    for (let k = 0; k < 3; k++) centre[k] = centre[k]! + w * of.centre[k]!;
+  }
+  for (let k = 0; k < 3; k++) centre[k] = centre[k]! / total;
+  return {
+    positions,
+    rotation,
+    meeting: turn,
+    placement: {
+      spot: {
+        kind: 'marked',
+        centre: [centre[0], centre[2]],
+        sizeMm: [0, 0],
+        depthMm: 0,
+        fit: 0,
+      },
+      contactMm: [0, 0],
+      offsetMm: [centre[0], centre[2], centre[1]],
+      yawDeg: turnDeg,
+      method: 'marked',
+      candidates: [],
+      marks: { pairs: ended, rotation: turn, liftMm, turnDeg, fit: fitted.fit },
+    },
+  };
+}
 /** Width, height and depth of a mesh's vertices. */
-function extentOf(positions: Float32Array): [number, number, number] {
+export function extentOf(positions: Float32Array): [number, number, number] {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < positions.length; i += 3) {

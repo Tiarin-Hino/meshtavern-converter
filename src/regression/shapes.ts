@@ -340,3 +340,99 @@ export function generateTabFigure(lengthMm: number): Float32Array {
 export function generatePuddleFigure(diameterMm: number): Float32Array {
   return figureStandingOn(0.8, (soup) => addRoundBase(soup, [0, 0], diameterMm, 0.8, 16));
 }
+
+/** The blind hole of `generateHoleBase`: 3.2 mm across, its floor 1 mm above the underside. */
+export const HOLE_BASE = { sideMm: 20, heightMm: 4, holeMm: 3.2, floorMm: 1 };
+
+/**
+ * A 20 mm square plate 4 mm thick with a blind round hole 3.2 mm across, its floor 1 mm above
+ * the underside: where a peg is marked in (#93). Z-up. The hole's wall is left out, as
+ * `generatePlate` leaves out an opening's walls.
+ */
+export function generateHoleBase(): Float32Array {
+  const { sideMm, heightMm, holeMm, floorMm } = HOLE_BASE;
+  const radius = holeMm / 2;
+  const plate = generatePlate(sideMm, heightMm, 0.2, (x, y) => x * x + y * y < radius * radius);
+  const soup: number[] = Array.from(plate);
+  addRoundBase(soup, [0, 0], holeMm, floorMm, 8);
+  return new Float32Array(soup);
+}
+
+/** The slab of `generateSlopeBase`: turned about x so its top faces (0, -3/5, 4/5), 36.87° off up. */
+export const SLOPE_BASE = { normal: [0, -0.6, 0.8] as Vec3, topCentre: [0, -1.2, 7.2] as Vec3 };
+
+/**
+ * A 30 mm square plate 2 mm thick with a 12 mm slab on it, tilted by the 3-4-5 angle (36.87°)
+ * about x: a sloped rock a figure is marked onto (#93). Z-up; the slab's top centre is
+ * `SLOPE_BASE.topCentre`.
+ */
+export function generateSlopeBase(): Float32Array {
+  const soup: number[] = Array.from(generatePlate(30, 2, 1, () => false));
+  const slab = generatePlate(12, 2, 0.5, () => false);
+  for (let i = 0; i < slab.length; i += 3) {
+    const y = slab[i + 1]!;
+    const z = slab[i + 2]!;
+    soup.push(slab[i]!, 0.8 * y - 0.6 * z, 0.6 * y + 0.8 * z + 5.6);
+  }
+  return new Float32Array(soup);
+}
+
+/** Triangles of the right arm, the last shell `generateFigure` adds: 12 × 30². */
+const ARM_TRIANGLES = 12 * 30 * 30;
+
+/**
+ * The figure on its 12 mm puddle cut into two files where its right arm is a shell of its own
+ * (#93): the body with the puddle, and the arm. The two soups one after the other are
+ * `generatePuddleFigure(diameterMm)`, bit for bit. Z-up.
+ */
+export function generatePuddleFigureParts(diameterMm: number): [Float32Array, Float32Array] {
+  const whole = generatePuddleFigure(diameterMm);
+  const cut = whole.length - ARM_TRIANGLES * 9;
+  return [whole.slice(0, cut), whole.slice(cut)];
+}
+
+/**
+ * Where the parts of `generateWingedFigure` meet: the shoulder plate's outer face on the body
+ * (+x) and the wing's root (-x) at `joint`; the wing's far end (+x) and the tip's root (-x) at
+ * `tipJoint`.
+ */
+export const WINGED_FIGURE = {
+  joint: [8.5, 0, 12] as Vec3,
+  tipJoint: [16.5, 0, 12] as Vec3,
+};
+
+/**
+ * A figure with a wing and a wing tip in files of their own (#93), Z-up: the body is the
+ * puddle figure with a shoulder plate on its side, the wing a box flush against the plate, the
+ * tip a box flush against the wing's end. `whole` is the three soups one after the other.
+ */
+export function generateWingedFigure(): {
+  whole: Float32Array;
+  body: Float32Array;
+  wing: Float32Array;
+  tip: Float32Array;
+} {
+  const body: number[] = Array.from(generatePuddleFigure(12));
+  addBox(body, [7.5, -2, 10], [8.5, 2, 14]);
+  const wing: number[] = [];
+  addBox(wing, [8.5, -1.5, 10.5], [16.5, 1.5, 13.5]);
+  const tip: number[] = [];
+  addBox(tip, [16.5, -1, 11], [18.5, 1, 13]);
+  return {
+    whole: new Float32Array([...body, ...wing, ...tip]),
+    body: new Float32Array(body),
+    wing: new Float32Array(wing),
+    tip: new Float32Array(tip),
+  };
+}
+
+/** A soup moved by `by` in its file: a part exported apart from where it belongs. */
+export function movedSoup(soup: Float32Array, by: Vec3): Float32Array {
+  const out = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) {
+    out[i] = soup[i]! + by[0];
+    out[i + 1] = soup[i + 1]! + by[1];
+    out[i + 2] = soup[i + 2]! + by[2];
+  }
+  return out;
+}

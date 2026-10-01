@@ -45,13 +45,38 @@ async function open(page: Page, search = '?bake=off'): Promise<void> {
   await page.waitForFunction(() => window.__mt?.state.ready === true);
 }
 
+type Asked = NonNullable<Window['__mt']['state']['question']>;
+type UpAsked = Extract<Asked, { kind: 'up' }>;
+
 /** Waits until a question with a serial above `after` is on screen: the next one of this conversion. */
-async function question(page: Page, after = 0) {
+async function anyQuestion(page: Page, after = 0): Promise<Asked> {
   await page.waitForFunction(
     (s) => (window.__mt.state.question?.serial ?? 0) > s && window.__mt.state.page === 'asking',
     after,
   );
   return page.evaluate(() => window.__mt.state.question!);
+}
+
+/** The next up question (#92). */
+async function question(page: Page, after = 0): Promise<UpAsked> {
+  const asked = await anyQuestion(page, after);
+  expect(asked.kind).toBe('up');
+  return asked as UpAsked;
+}
+
+/** The up question on screen. */
+const current = (page: Page): Promise<UpAsked> =>
+  page.evaluate(() => window.__mt.state.question!) as Promise<UpAsked>;
+
+/**
+ * Every pair is shown where it meets its base before it converts (#93): confirms both stops as
+ * shown, the pairs and the final view.
+ */
+async function confirmMeet(page: Page): Promise<void> {
+  const asked = await anyQuestion(page);
+  expect(asked).toMatchObject({ kind: 'meet', about: 'base', stage: 'pairs' });
+  await page.evaluate(() => window.__mt.confirmMeet());
+  await page.evaluate(() => window.__mt.confirmMeet());
 }
 
 /** Waits until the conversion ended, in a mini or an error. */
@@ -178,28 +203,29 @@ test('asks about the base of a pair, then the figure, and swaps at the question'
 
   // The base turned over and back.
   await page.evaluate(() => window.__mt.answerUp({ up: '-z' }));
-  expect(await page.evaluate(() => window.__mt.state.question!.orientation.up)).toBe('-z');
+  expect((await current(page)).orientation.up).toBe('-z');
   await page.evaluate(() => window.__mt.answerUp({}));
-  expect(await page.evaluate(() => window.__mt.state.question!.reason)).toBe('underside');
+  expect((await current(page)).reason).toBe('underside');
   await page.evaluate(() => window.__mt.confirmUp());
   const figure = await question(page);
   expect(figure).toMatchObject({ role: 'figure', file: 0 });
   await expect(page.locator('#ask-file')).toHaveText('Figure: hero.stl');
-  await expect(page.locator('#ask-confirm')).toHaveText(COPY.confirmUp);
+  await expect(page.locator('#ask-confirm')).toHaveText(COPY.confirmFigureUp);
 
   // Swap: the questions start again with the other file as the base.
   await page.evaluate(() => window.__mt.swapAtQuestion());
-  const swapped = await page.evaluate(() => window.__mt.state.question!);
+  const swapped = await current(page);
   expect(swapped).toMatchObject({ role: 'base', file: 0 });
   await expect(page.locator('#ask-file')).toHaveText('Base: hero.stl');
   await page.evaluate(() => window.__mt.confirmUp());
   await question(page);
   await page.evaluate(() => window.__mt.confirmUp());
+  await confirmMeet(page);
   await ended(page);
   const stats = await page.evaluate(() => window.__mt.state.stats!);
   expect(stats.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
   // In the order confirmed: the first base, confirmed before the swap at the figure, stays listed.
-  expect(stats.asked.map((a) => a.role)).toEqual(['base', 'base', 'figure']);
+  expect(stats.asked.map((a) => a.role)).toEqual(['base', 'base', 'figure', 'meet']);
 });
 
 test('asks which file is the base when neither has a flat underside', async ({ page }) => {
@@ -223,6 +249,7 @@ test('asks which file is the base when neither has a flat underside', async ({ p
   await page.locator('#ask-confirm').click();
   await question(page);
   await page.locator('#ask-confirm').click();
+  await confirmMeet(page);
   await ended(page);
   const stats = await page.evaluate(() => window.__mt.state.stats!);
   expect(stats.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
@@ -267,6 +294,7 @@ test('asks about a new base, and about the figure only when its up was not chose
   await page.evaluate(() => window.__mt.confirmUp());
   expect((await question(page)).role).toBe('figure');
   await page.evaluate(() => window.__mt.confirmUp());
+  await confirmMeet(page);
   await ended(page);
 
   // A figure whose up was chosen: only the base is asked about.
@@ -277,9 +305,11 @@ test('asks about a new base, and about the figure only when its up was not chose
   await base();
   expect((await question(page)).role).toBe('base');
   await page.evaluate(() => window.__mt.confirmUp());
+  await confirmMeet(page);
   await ended(page);
   expect(await page.evaluate(() => window.__mt.state.stats!.asked.map((a) => a.role))).toEqual([
     'base',
+    'meet',
   ]);
 
   // Changing the size in Adjust asks nothing.

@@ -45,6 +45,10 @@
           <p id="ask-question" data-copy="askUp"></p>
           <p id="ask-found"></p>
           <p id="ask-warning" hidden></p>
+          <label id="ask-base-choice" hidden
+            >Base
+            <select id="ask-base"></select
+          ></label>
           <label
             >Up axis in file
             <select id="ask-up"></select
@@ -63,6 +67,43 @@
           </div>
           <button id="ask-swap" type="button" data-copy="swapPair" hidden></button>
           <button id="ask-confirm" class="primary" type="button"></button>
+        </section>
+        <!-- Where the parts meet (#93): the pairs of patches, then the parts put together. -->
+        <section id="meet" aria-labelledby="meet-question" data-in="asking">
+          <p id="meet-question"></p>
+          <ul id="meet-parts" hidden></ul>
+          <!-- The pairs stop: one chip per pair, in its colour. -->
+          <div id="meet-marking" data-stage="pairs">
+            <ul id="meet-pairs" aria-label="Pairs"></ul>
+            <p id="meet-hint"></p>
+            <div id="meet-tools" role="group" aria-label="Marks">
+              <button id="meet-add" type="button" data-copy="addPair"></button>
+              <button id="meet-brush" type="button" aria-pressed="false" data-copy="brush"></button>
+              <button id="meet-erase" type="button" aria-pressed="false" data-copy="erase"></button>
+              <button id="meet-undo" type="button" data-copy="undo"></button>
+              <button id="meet-clear" type="button" data-copy="startOver"></button>
+              <button id="meet-apart" type="button" data-copy="pullApart" hidden></button>
+            </div>
+          </div>
+          <!-- The final view: the parts put together. -->
+          <div id="meet-final" data-stage="fitted">
+            <p id="meet-placement"></p>
+            <div id="meet-adjust" role="group" aria-label="Adjust where they meet">
+              <button type="button" data-meet-lift="1">Raise 0.5 mm</button>
+              <button type="button" data-meet-lift="-1">Lower 0.5 mm</button>
+              <button type="button" data-meet-turn="-15">Turn −15°</button>
+              <button type="button" data-meet-turn="15">Turn +15°</button>
+              <button id="meet-tilt" type="button" hidden></button>
+            </div>
+            <button id="meet-back" type="button" data-copy="backToMarking"></button>
+          </div>
+          <!-- Moving around while marking: a part, or all of them (#93). -->
+          <div id="meet-look">
+            <span data-copy="lookAt"></span>
+            <div id="meet-view" role="group" aria-label="Look at"></div>
+            <p id="meet-view-hint" data-copy="viewHint"></p>
+          </div>
+          <button id="meet-confirm" class="primary" type="button"></button>
         </section>
         <button id="choose-again" class="primary" type="button" data-in="empty error"></button>
         <p class="promise" data-in="empty error" data-copy="promise"></p>
@@ -152,8 +193,13 @@
           </fieldset>
           <!-- A figure with its base file (#70): data-pair says whether an element shows for one file or a pair. -->
           <fieldset id="pair" data-kind="single">
-            <legend>Base</legend>
-            <button id="add-base" type="button" data-pair="single" data-copy="addBase"></button>
+            <legend>Base and parts</legend>
+            <button
+              id="add-base"
+              type="button"
+              data-pair="single parts"
+              data-copy="addBase"
+            ></button>
             <input
               id="base-file"
               class="visually-hidden"
@@ -162,26 +208,43 @@
               tabindex="-1"
               aria-label="Base STL file"
             />
-            <p id="pair-files" data-pair="pair"></p>
+            <p id="pair-files" data-pair="pair parts"></p>
+            <p id="pair-parts" data-pair="pair parts" hidden></p>
             <button id="swap-pair" type="button" data-pair="pair" data-copy="swapPair"></button>
             <p id="pair-warning" data-pair="pair" hidden></p>
             <p id="placement" data-pair="pair"></p>
+            <button
+              id="mark-meeting"
+              type="button"
+              data-pair="pair"
+              data-copy="markMeeting"
+            ></button>
+            <button
+              id="mark-parts"
+              type="button"
+              data-pair="pair parts"
+              data-copy="markParts"
+              hidden
+            ></button>
             <div
               id="placement-controls"
               role="group"
               aria-label="Place the figure"
               data-pair="pair"
             >
-              <label class="check"
-                ><input id="move-by-hand" type="checkbox" /> <span data-copy="moveByHand"></span
-              ></label>
-              <button type="button" data-lift="1">Raise 0.5 mm</button>
-              <button type="button" data-lift="-1">Lower 0.5 mm</button>
-              <button type="button" data-yaw="-15">Turn −15°</button>
-              <button type="button" data-yaw="15">Turn +15°</button>
-              <span id="placement-pending" hidden></span>
-              <button id="placement-apply" type="button" disabled>Apply</button>
-              <button id="placement-reset" type="button" disabled>Reset</button>
+              <!-- A marked placement is not moved by hand after the conversion: mark again (PM, #93). -->
+              <div id="placement-adjust">
+                <label class="check"
+                  ><input id="move-by-hand" type="checkbox" /> <span data-copy="moveByHand"></span
+                ></label>
+                <button type="button" data-lift="1">Raise 0.5 mm</button>
+                <button type="button" data-lift="-1">Lower 0.5 mm</button>
+                <button type="button" data-yaw="-15">Turn −15°</button>
+                <button type="button" data-yaw="15">Turn +15°</button>
+                <span id="placement-pending" hidden></span>
+                <button id="placement-apply" type="button" disabled>Apply</button>
+                <button id="placement-reset" type="button" disabled>Reset</button>
+              </div>
               <button id="remove-base" type="button" data-copy="removeBase"></button>
             </div>
           </fieldset>

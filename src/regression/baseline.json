@@ -431,5 +431,103 @@
     ],
     "spot": "recess",
     "liftMm": 3
+  },
+  "figure-in-parts": {
+    "sourceTriangles": 117872,
+    "triangles": 117872,
+    "vertices": 58948,
+    "degenerateTriangles": 0,
+    "duplicateTriangles": 0,
+    "invalidTriangles": 0,
+    "sizeMm": [32, 33.93, 32],
+    "up": "+z",
+    "upMethod": "base",
+    "tiltDeg": 0,
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": "round",
+      "baseDiameterMm": 32
+    },
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54706,
+        "vertices": 27365,
+        "errorMm": 0.0198636,
+        "glbBytes": 1205376,
+        "compactGlbBytes": 392636
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 35512,
+        "vertices": 17768,
+        "errorMm": 0.0498908,
+        "glbBytes": 783124,
+        "compactGlbBytes": 262436
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5684,
+        "vertices": 2854,
+        "errorMm": 0.19797,
+        "glbBytes": 126900,
+        "compactGlbBytes": 45592
+      }
+    ],
+    "spot": "recess",
+    "liftMm": 3
+  },
+  "peg-marked-in-hole": {
+    "sourceTriangles": 139416,
+    "triangles": 139416,
+    "vertices": 70176,
+    "degenerateTriangles": 0,
+    "duplicateTriangles": 0,
+    "invalidTriangles": 0,
+    "sizeMm": [20, 34.63, 20],
+    "up": "+z",
+    "upMethod": "tallest",
+    "tiltDeg": 0,
+    "sizing": {
+      "units": "mm",
+      "size": "medium",
+      "base": "other",
+      "baseDiameterMm": 20
+    },
+    "levels": [
+      {
+        "name": "close",
+        "decidedBy": "error",
+        "triangles": 54457,
+        "vertices": 27330,
+        "errorMm": 0.0198268,
+        "glbBytes": 1202732,
+        "compactGlbBytes": 390792
+      },
+      {
+        "name": "table",
+        "decidedBy": "error",
+        "triangles": 35132,
+        "vertices": 17644,
+        "errorMm": 0.0498088,
+        "glbBytes": 776824,
+        "compactGlbBytes": 259808
+      },
+      {
+        "name": "far",
+        "decidedBy": "error",
+        "triangles": 5309,
+        "vertices": 2679,
+        "errorMm": 0.199916,
+        "glbBytes": 119000,
+        "compactGlbBytes": 43416
+      }
+    ],
+    "spot": "marked",
+    "liftMm": 1
   }
 }

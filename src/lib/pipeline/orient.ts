@@ -48,9 +48,10 @@ export interface Orientation {
    * of the two common conventions (Y-up from sculpting tools, Z-up from slicers) was taken:
    * right for standing figures, wrong for long, low creatures. `manual`: the user's choice.
    * A detection for minis without a base is open (#72, PR #79). `cut`: the print-cut plane of
-   * a figure made for a separate base (#70, #90), for the figure of a pair only.
+   * a figure made for a separate base (#70, #90), for the figure of a pair only. `marked`: the
+   * figure of a pair turned by the marks where it meets its base (#93).
    */
-  method: 'base' | 'tallest' | 'manual' | 'cut';
+  method: 'base' | 'tallest' | 'manual' | 'cut' | 'marked';
   /** base: coverage of the footprint. tallest: 0. manual: 1. */
   confidence: number;
   /** File coordinates → scene coordinates (Y-up), before the shift to the base centre and before any scale. */
@@ -99,6 +100,12 @@ export interface PlacedMesh {
   sizeMm: [number, number, number];
   /** The base the mini stands on, measured after placing; null when it has none. */
   base: BaseMeasurement | null;
+  /**
+   * What was taken off the turned positions to place them: a file point p lands at
+   * `rotation · p − shift` (#93: a mark is turned into the placed frame with it). Set by
+   * `orientAndPlace` and `placeOriented`.
+   */
+  shift?: Vec3;
 }
 
 /** Bounding box of a mesh's vertices: min x, y, z, then max x, y, z. */
@@ -508,7 +515,12 @@ export function orientAndPlace(
   }
 
   if (positions.length === 0)
-    return { mesh: { positions, indices: mesh.indices }, sizeMm: [0, 0, 0], base: null };
+    return {
+      mesh: { positions, indices: mesh.indices },
+      sizeMm: [0, 0, 0],
+      base: null,
+      shift: [0, 0, 0],
+    };
 
   const centreX = (min[0]! + max[0]!) / 2;
   const centreZ = (min[2]! + max[2]!) / 2;
@@ -521,17 +533,21 @@ export function orientAndPlace(
 
   const placed = { positions, indices: mesh.indices };
   const measured = axis ? measureBase(placed, coverage) : null;
+  const shift: Vec3 = [centreX, floor, centreZ];
   if (measured && (measured.centre[0] !== 0 || measured.centre[1] !== 0)) {
     const [baseX, baseZ] = measured.centre;
     for (let i = 0; i < positions.length; i += 3) {
       positions[i] = positions[i]! - baseX;
       positions[i + 2] = positions[i + 2]! - baseZ;
     }
+    shift[0] += baseX;
+    shift[2] += baseZ;
   }
 
   return {
     mesh: placed,
     sizeMm: [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!],
     base: measured?.base ?? null,
+    shift,
   };
 }

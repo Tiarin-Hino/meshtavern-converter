@@ -23,6 +23,10 @@ import {
   ownCopy,
 } from '../lib/three';
 
+/** The pairs' colours, as in style.css (`--pair-1` … `--pair-4`). _(proposal, #93)_ */
+const PAIR_COLOURS = [0xf0b35e, 0x7ee0c3, 0xd78ae6, 0x8fb8f5] as const;
+type Vec3 = [number, number, number];
+
 /** Squares the grid shows along each side. */
 const GRID_SQUARES = 40;
 /**
@@ -103,11 +107,14 @@ export class Viewer {
   private moveGizmo: TransformControls | null = null;
   private onMove: ((moveMm: [number, number]) => void) | null = null;
   /**
-   * The full-detail mesh at the question after the orient step (#92): in file coordinates,
-   * turned by the orientation being asked about and stood on the grid by `holder`, inside the
-   * pivot so a turn previews as it does on a converted mini. Null when no question is shown.
+   * The full-detail meshes at a question (#92, #93): each file's in file coordinates at the
+   * transform the worker gave it, under `holder`, inside the pivot so a turn previews as it
+   * does on a converted mini. Null when no question is shown.
    */
-  private question: { holder: THREE.Group; mesh: THREE.Mesh } | null = null;
+  private question: { holder: THREE.Group; meshes: Map<number, THREE.Mesh> } | null = null;
+  /** The patches at a question (#93), each a child of its file's mesh. */
+  private patches: THREE.Mesh[] = [];
+  private readonly raycaster = new THREE.Raycaster();
   /** The sculpt as the file has it: flat-shaded in the primer's grey, no look yet (PM decision, #92). */
   private readonly questionMaterial = new THREE.MeshStandardMaterial({
     color: new THREE.Color(DEFAULT_LOOK.base),
@@ -259,39 +266,216 @@ export class Viewer {
   }
 
   /**
-   * Shows the full-detail mesh of a file at its question (#92): `mesh` in file coordinates,
-   * turned by `rotation`, standing on the grid with `box` (the turned mesh's box, file units)
-   * centred in x and z. Flat shading needs no normals. The camera frames it as a new mini.
+   * Shows the full-detail meshes of a question (#92, #93): each file's welded mesh in file
+   * coordinates at the transform the worker gave it, flat-shaded, under one holder in the pivot
+   * so a turn being tried out turns them all. A later call with the same files only moves them:
+   * the geometries stay on the GPU; a file not shown before is added, one no longer shown is
+   * removed. With `reframe` the camera frames them as a new mini.
    */
-  showQuestion(mesh: IndexedMesh, rotation: Rotation, box: { min: number[]; max: number[] }): void {
-    this.clear();
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    const shown = new THREE.Mesh(geometry, this.questionMaterial);
-    const holder = new THREE.Group();
-    holder.add(shown);
-    this.question = { holder, mesh: shown };
-    this.pivot.add(holder);
-    this.scene.add(this.pivot);
-    this.turnQuestion(rotation, box);
-    this.gizmo?.attach(this.pivot);
-    this.setCamera(34, 22, 1);
+  showShown(
+    entries: readonly { file: number; mesh: IndexedMesh; rotation: Rotation; translation: Vec3 }[],
+    box: { min: Vec3; max: Vec3 },
+    reframe: boolean,
+  ): void {
+    if (!this.question) {
+      this.clear();
+      const holder = new THREE.Group();
+      this.question = { holder, meshes: new Map() };
+      this.pivot.add(holder);
+      this.scene.add(this.pivot);
+      this.gizmo?.attach(this.pivot);
+    }
+    const { holder, meshes } = this.question;
+    const kept = new Set<number>();
+    for (const { file, mesh, rotation, translation } of entries) {
+      kept.add(file);
+      let shown = meshes.get(file);
+      if (!shown) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+        geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+        shown = new THREE.Mesh(geometry, this.questionMaterial);
+        shown.userData.file = file;
+        holder.add(shown);
+        meshes.set(file, shown);
+      }
+      shown.quaternion.set(...rotation);
+      shown.position.set(...translation);
+    }
+    for (const [file, shown] of meshes) {
+      if (kept.has(file)) continue;
+      holder.remove(shown);
+      shown.geometry.dispose();
+      meshes.delete(file);
+    }
+    const [minX, minY, minZ] = box.min;
+    const [maxX, maxY, maxZ] = box.max;
+    // As `showSingle`: the pivot at half the height, so a turn pivots about the middle; what is
+    // shown is centred across, so a figure laid beside its base stays in the frame.
+    const middle = (minY + maxY) / 2;
+    holder.position.set(0 - (minX + maxX) / 2, 0 - middle, 0 - (minZ + maxZ) / 2);
+    this.pivot.position.set(0, middle, 0);
+    this.pivot.quaternion.copy(this.turn);
+    this.size.set(maxX - minX, maxY - minY, maxZ - minZ);
+    holder.updateMatrixWorld(true);
+    // At a question the wheel zooms towards what is under the cursor (#93).
+    this.controls.zoomToCursor = true;
+    if (reframe) this.setCamera(34, 22, 1);
   }
 
-  /** A later question about the same file: the mesh turns and stands again; the geometry stays on the GPU. */
-  turnQuestion(rotation: Rotation, box: { min: number[]; max: number[] }): void {
+  /**
+   * The camera's ray through canvas point (x, y), CSS pixels, at a question (#93, patches §7.3):
+   * in the coordinates the question's `shown` transforms are given in (the holder's), so the
+   * worker can carry it into each file. Null when no question is shown.
+   */
+  rayAt(x: number, y: number): { origin: Vec3; direction: Vec3 } | null {
+    if (!this.question) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const pointer = new THREE.Vector2((x / rect.width) * 2 - 1, 0 - ((y / rect.height) * 2 - 1));
+    this.raycaster.setFromCamera(pointer, this.camera);
+    const { holder } = this.question;
+    this.pivot.updateMatrixWorld(true);
+    const toLocal = holder.matrixWorld.clone().invert();
+    const origin = this.raycaster.ray.origin.clone().applyMatrix4(toLocal);
+    const direction = this.raycaster.ray.direction.clone().transformDirection(toLocal);
+    return {
+      origin: [origin.x, origin.y, origin.z],
+      direction: [direction.x, direction.y, direction.z],
+    };
+  }
+
+  /** Where a file's point is on the canvas, CSS pixels: what a test taps to mark it. Null when the file is not shown. */
+  screenOf(file: number, point: Vec3): [number, number] | null {
+    const mesh = this.question?.meshes.get(file);
+    if (!mesh) return null;
+    this.pivot.updateMatrixWorld(true);
+    // A camera moved since the last frame has not updated its matrices yet.
+    this.camera.updateMatrixWorld();
+    const world = mesh.localToWorld(new THREE.Vector3(...point));
+    world.project(this.camera);
+    const rect = this.canvas.getBoundingClientRect();
+    return [((world.x + 1) / 2) * rect.width, ((1 - world.y) / 2) * rect.height];
+  }
+
+  /**
+   * The patches at a question (#93, patches §7.3): per patch one mesh, a child of its file's mesh
+   * sharing its positions, indexed by the patch's triangles. Drawn once solid just in front of
+   * the surface and once faint through everything, so a patch under a foot or inside a joint
+   * still shows. Both sides of a pair in its colour (`PAIR_COLOURS`); a proposal paler.
+   */
+  setPatches(
+    patches: readonly { file: number; triangles: Uint32Array; pair: number; proposed: boolean }[],
+  ): void {
+    this.clearPatches();
     if (!this.question) return;
-    const [minX, minY, minZ] = box.min as [number, number, number];
-    const [maxX, maxY, maxZ] = box.max as [number, number, number];
-    const height = maxY - minY;
-    this.question.mesh.quaternion.set(...rotation);
-    this.question.mesh.position.set(0 - (minX + maxX) / 2, 0 - minY, 0 - (minZ + maxZ) / 2);
-    // As `showSingle`: the pivot at half the height, so a turn pivots about the middle.
-    this.question.holder.position.set(0, 0 - height / 2, 0);
-    this.pivot.position.set(0, height / 2, 0);
-    this.pivot.quaternion.copy(this.turn);
-    this.size.set(maxX - minX, height, maxZ - minZ);
+    for (const patch of patches) {
+      const mesh = this.question.meshes.get(patch.file);
+      if (!mesh || patch.triangles.length === 0) continue;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', mesh.geometry.getAttribute('position'));
+      const indices = new Uint32Array(patch.triangles.length * 3);
+      const source = mesh.geometry.getIndex()!.array;
+      patch.triangles.forEach((t, k) => {
+        indices[k * 3] = source[t * 3]!;
+        indices[k * 3 + 1] = source[t * 3 + 1]!;
+        indices[k * 3 + 2] = source[t * 3 + 2]!;
+      });
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      const color = PAIR_COLOURS[patch.pair % PAIR_COLOURS.length]!;
+      const solid = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: patch.proposed,
+          opacity: patch.proposed ? 0.6 : 1,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -4,
+        }),
+      );
+      const through = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: patch.proposed ? 0.15 : 0.3,
+          side: THREE.DoubleSide,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      through.renderOrder = 10;
+      mesh.add(solid, through);
+      this.patches.push(solid, through);
+    }
+  }
+
+  /**
+   * Turns the camera about a point of a file at a question (#93): the orbit's centre moves
+   * there and the camera keeps its direction, coming closer when it was far. What a right-click
+   * or a held finger on a part does, so two parts side by side can each be looked at.
+   */
+  focusOn(file: number, point: Vec3): void {
+    const mesh = this.question?.meshes.get(file);
+    if (!mesh) return;
+    this.pivot.updateMatrixWorld(true);
+    this.lookAt(mesh.localToWorld(new THREE.Vector3(...point)), null);
+  }
+
+  /** Frames one file at a question (#93): the orbit's centre at the middle of its box, the camera at its size. */
+  focusFile(file: number): void {
+    const mesh = this.question?.meshes.get(file);
+    if (!mesh) return;
+    this.pivot.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    this.lookAt(box.getCenter(new THREE.Vector3()), Math.max(size.x, size.y, size.z, 1) * 2.3);
+  }
+
+  /** The orbit's centre to `target`, the camera along its present direction at `distance` (null: keep it, at most as far as now). */
+  private lookAt(target: THREE.Vector3, distance: number | null): void {
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const length = offset.length();
+    const radius = Math.max(this.size.x, this.size.y, this.size.z, 1);
+    // A point looked at closely: no further than the size of what is shown.
+    const wanted = distance ?? Math.min(length, radius * 1.2);
+    offset.setLength(wanted);
+    this.controls.target.copy(target);
+    this.camera.position.copy(target).add(offset);
+    this.controls.update();
+  }
+
+  private clearPatches(): void {
+    const geometries = new Set<THREE.BufferGeometry>();
+    for (const patch of this.patches) {
+      patch.parent?.remove(patch);
+      geometries.add(patch.geometry);
+      (patch.material as THREE.Material).dispose();
+    }
+    // The positions are the file mesh's: only the index goes with the geometry.
+    for (const geometry of geometries) {
+      geometry.deleteAttribute('position');
+      geometry.dispose();
+    }
+    this.patches = [];
+  }
+
+  /**
+   * The brush at a question (#93, patches §7.4): while on, one finger and the left button are
+   * the page's to paint with; two fingers and the right button orbit, the middle button pans.
+   */
+  setBrush(on: boolean): void {
+    const none = -1 as unknown as THREE.MOUSE;
+    this.controls.mouseButtons = {
+      LEFT: on ? none : THREE.MOUSE.ROTATE,
+      MIDDLE: on ? THREE.MOUSE.PAN : THREE.MOUSE.DOLLY,
+      RIGHT: on ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN,
+    };
+    this.controls.touches = {
+      ONE: on ? (-1 as unknown as THREE.TOUCH) : THREE.TOUCH.ROTATE,
+      TWO: on ? THREE.TOUCH.DOLLY_ROTATE : THREE.TOUCH.DOLLY_PAN,
+    };
   }
 
   /** Adds the single mini to the scene, with the turn being tried out and the gizmo if shown. */
@@ -566,10 +750,12 @@ export class Viewer {
   clear(): void {
     this.gizmo?.detach();
     this.moveGizmo?.detach();
+    this.clearPatches();
+    this.controls.zoomToCursor = false;
     if (this.question) {
       this.pivot.remove(this.question.holder);
       this.scene.remove(this.pivot);
-      this.question.mesh.geometry.dispose();
+      for (const mesh of this.question.meshes.values()) mesh.geometry.dispose();
       this.question = null;
     }
     if (this.figure) {

@@ -9,7 +9,9 @@ import { handleRequest } from './handle';
 import type { ConvertOptions, WorkerResponse } from './protocol';
 
 /** The steps of a single file: `place` runs for a figure with its base file only. */
-const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place' && step !== 'assemble');
+/** A figure with its base file: every step but the assemble step of a figure in parts (#93). */
+const PAIR_STEPS = STEPS.filter((step) => step !== 'assemble');
 
 /** Without baking unless a test asks for it: the unwrapper takes seconds to load and warm up. */
 async function collect(stl: ArrayBuffer, id = 7, options: ConvertOptions = { bake: 0 }) {
@@ -130,9 +132,9 @@ describe('handleRequest', () => {
     const last = posted.at(-1)!;
     if (last.response.type !== 'done') throw new Error('expected done');
     const { pair, stats } = last.response.result;
-    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(stats.timings.map((t) => t.step)).toEqual([...PAIR_STEPS]);
     expect(pair).toMatchObject({ pairing: { baseFile: 1 }, placement: { method: 'manual' } });
-    expect(pair!.placement.offsetMm[0]).toBe(1);
+    expect(pair!.placement!.offsetMm[0]).toBe(1);
 
     const swapped = (
       await collect(encodeBinaryStl(generatePuddleFigure(12)), 4, {
@@ -151,7 +153,7 @@ describe('handleRequest asking which way is up (#92)', () => {
 
   it('posts a question with the mesh transferred, and goes on when the answer arrives', async () => {
     const posted: { response: WorkerResponse; transfer?: Transferable[] }[] = [];
-    const answer: UpAnswer = { orientation: { up: '+y' }, confirm: true };
+    const answer: UpAnswer = { kind: 'up', orientation: { up: '+y' }, confirm: true };
     await handleRequest(
       { type: 'convert', id: 5, stl: stl(), options: { bake: 0, ask: {} } },
       (response, transfer) => {
@@ -159,7 +161,7 @@ describe('handleRequest asking which way is up (#92)', () => {
         if (response.type !== 'question') return;
         // An answer for another job is ignored; this job's goes on.
         void handleRequest(
-          { type: 'answer', id: 6, answer: { orientation: {}, confirm: true } },
+          { type: 'answer', id: 6, answer: { kind: 'up', orientation: {}, confirm: true } },
           () => {},
         );
         setTimeout(() => void handleRequest({ type: 'answer', id: 5, answer }, () => {}), 0);
@@ -169,7 +171,7 @@ describe('handleRequest asking which way is up (#92)', () => {
     expect(types).toEqual(['progress', 'progress', 'progress', 'question', ...types.slice(4)]);
     const question = posted[3]!;
     if (question.response.type !== 'question') throw new Error('expected a question');
-    expect(question.transfer).toEqual(meshBuffers(question.response.question.mesh!));
+    expect(question.transfer).toEqual(meshBuffers(question.response.question.meshes[0]!.mesh));
     const last = posted.at(-1)!;
     if (last.response.type !== 'done') throw new Error('expected done');
     expect(last.response.result.orientation).toMatchObject({ up: '+y', method: 'manual' });

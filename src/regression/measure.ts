@@ -4,6 +4,7 @@ import {
   DEFAULT_LOOK,
   type ConversionStats,
   type LodStats,
+  type PlacementOptions,
   type SpotKind,
   type UpAxis,
 } from '../lib';
@@ -11,11 +12,15 @@ import { generateBumpySheet, runPipeline, encodeBinaryStl } from '../lib/dev';
 import {
   generateBoulder,
   generateFigure,
+  generateHoleBase,
+  generatePegFigure,
+  generatePuddleFigureParts,
   generatePuddleFigure,
   generateQuadruped,
   generateRecessBase,
   generateSwarm,
   generateTiltedFigure,
+  HOLE_BASE,
   toYUp,
 } from './shapes';
 
@@ -31,8 +36,13 @@ export interface RegressionCase {
    * base are detected (#72); the guess stands them on an edge (+y).
    */
   up?: UpAxis;
-  /** A figure with its base file (#70): the base, and the kind of spot the figure must be set in. */
-  pair?: { base: () => Float32Array; spot: SpotKind };
+  /**
+   * A figure with its base file (#70): the base, and the kind of spot the figure must be set in;
+   * `placement` for a pair placed by marks (#93).
+   */
+  pair?: { base: () => Float32Array; spot: SpotKind; placement?: PlacementOptions };
+  /** A figure in parts (#93): its other parts' files, given after the base. */
+  moreParts?: () => Float32Array[];
 }
 
 /** Bumpy-sheet size below the close level's floor, so the "small source" path stays covered. */
@@ -56,6 +66,38 @@ export const REGRESSION_CASES: readonly RegressionCase[] = [
     bake: 0,
     up: '+z',
     pair: { base: generateRecessBase, spot: 'recess' },
+  },
+  // The same figure on the same base, its right arm in a file of its own (#93): the parts where
+  // their files put them, so every figure is that of figure-on-base.
+  {
+    name: 'figure-in-parts',
+    soup: () => generatePuddleFigureParts(12)[0],
+    bake: 0,
+    up: '+z',
+    pair: { base: generateRecessBase, spot: 'recess' },
+    moreParts: () => [generatePuddleFigureParts(12)[1]],
+  },
+  // The figure's 3 mm peg marked into the blind hole of a plate (#93): a tap on its end and a
+  // tap on the hole's floor, one pair of patches.
+  {
+    name: 'peg-marked-in-hole',
+    soup: () => generatePegFigure(3.5),
+    bake: 0,
+    up: '+z',
+    pair: {
+      base: generateHoleBase,
+      spot: 'marked',
+      placement: {
+        marks: {
+          pairs: [
+            {
+              on: { file: 1, strokes: [{ tap: [0, 0, HOLE_BASE.floorMm] }] },
+              of: { file: 0, strokes: [{ tap: [0, 0, 0] }] },
+            },
+          ],
+        },
+      },
+    },
   },
 ];
 
@@ -113,6 +155,8 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
   const { lods, baked, stats } = await runPipeline(stl, {
     bake: testCase.bake,
     secondStl: testCase.pair && encodeBinaryStl(testCase.pair.base()),
+    placement: testCase.pair?.placement,
+    moreStl: testCase.moreParts?.().map((soup) => encodeBinaryStl(soup)),
   });
   const glb = (level: number, compact: boolean): number =>
     encodeGlb(lods[level]!.mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;
@@ -138,7 +182,7 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
       glbBytes: glb(level, false),
       compactGlbBytes: glb(level, true),
     })),
-    ...(stats.pair && {
+    ...(stats.pair?.placement && {
       spot: stats.pair.placement.spot.kind,
       liftMm: stats.pair.placement.offsetMm[2],
     }),

@@ -76,6 +76,41 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
   expect(kept.placed.moveMm).toEqual([0, 0]);
   expect(kept.placed.offsetMm).toEqual(kept.detected.offsetMm);
 
+  // Marked where they meet (#93): the record keeps the marks, in the choices and as resolved.
+  const meeting = {
+    pairs: [
+      {
+        on: { file: 1, strokes: [{ tap: [3, 0, 3] as [number, number, number] }] },
+        of: { file: 0, strokes: [{ tap: [0, 0, 0] as [number, number, number] }] },
+      },
+    ],
+    liftMm: 0.5,
+  };
+  const marked = reviewPair(
+    page,
+    { ...pair('test/marked'), choices: { placement: { marks: meeting } } },
+    { ...session, up: 'index' as const },
+  );
+  await overlayShown(page, 'test/marked');
+  await page.keyboard.press('s');
+  expect(await marked).toBe('placed');
+  const withMarks = read('test/marked');
+  expect(withMarks.choices.placement).toEqual({ marks: meeting });
+  expect(withMarks.marks).toMatchObject({ liftMm: 0.5, fit: { kept: 'standing' } });
+  expect(withMarks.marks.pairs[0].on.normal).toEqual([0, 1, 0]);
+  expect(withMarks.detected.method).toBe('marked');
+
+  // A record whose pair was swapped at a question is replayed swapped (#93).
+  const swapped = reviewPair(
+    page,
+    { ...pair('test/swapped'), choices: { pairing: { swap: true } } },
+    { ...session, up: 'index' as const },
+  );
+  await overlayShown(page, 'test/swapped');
+  await page.keyboard.press('s');
+  expect(await swapped).toBe('placed');
+  expect(read('test/swapped').pairing).toEqual({ baseFile: 0, method: 'manual' });
+
   // K: skipped; Escape: the session ends and nothing is written.
   const skipped = reviewPair(page, pair('test/skipped'), session);
   await overlayShown(page, 'test/skipped');

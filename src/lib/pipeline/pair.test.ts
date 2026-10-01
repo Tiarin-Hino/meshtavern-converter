@@ -19,6 +19,8 @@ import {
   printCut,
   PRINT_CUT_MIN_MM2,
   PRINT_CUT_WEAK_MM2,
+  bodyFile,
+  figureFiles,
   guessRoles,
   placeOriented,
   shapeOfFile,
@@ -238,6 +240,52 @@ describe('guessRoles', () => {
       method: 'manual',
       warnings: [],
     });
+  });
+
+  it('finds the base among a figure in parts (#93)', () => {
+    const wing = lowCreatureShape();
+    expect(guessRoles([figure, wing, base])).toMatchObject({ baseFile: 2, warnings: [] });
+    expect(guessRoles([base, figure, wing]).baseFile).toBe(0);
+    // Of two flat undersides the lowest, the warning judged against the next lowest.
+    const lower = shapeOf(roundBase(40, 3));
+    expect(guessRoles([figureOnBase, base, lower])).toMatchObject({
+      baseFile: 2,
+      warnings: ['both-look-like-bases'],
+    });
+  });
+
+  it('proposes a base among more than two files without a flat underside, never refusing (#93)', () => {
+    const low = lowCreatureShape();
+    expect(guessRoles([figure, low, figure])).toMatchObject({
+      baseFile: 1,
+      warnings: ['no-flat-underside'],
+    });
+  });
+
+  it('makes every file a part of one figure when told there is no base (#93)', () => {
+    const pairing = guessRoles([figure, base], { baseFile: null, swap: true });
+    expect(pairing).toEqual({
+      baseFile: null,
+      method: 'manual',
+      warnings: [],
+      files: [figure, base],
+    });
+    // The body is the bulkier part, whatever the order: here the low, wide one.
+    expect(figureFiles(pairing)).toEqual([1, 0]);
+    expect(bodyFile(pairing)).toBe(1);
+    // Without a bulk the order given decides.
+    const plain = guessRoles(
+      [
+        { ...figure, bulk: undefined },
+        { ...base, bulk: undefined },
+      ],
+      { baseFile: null },
+    );
+    expect(figureFiles(plain)).toEqual([0, 1]);
+    const withBase = guessRoles([base, figure, lowCreatureShape()]);
+    // The low creature is bulkier than the figure: it leads.
+    expect(figureFiles(withBase)).toEqual([2, 1]);
+    expect(bodyFile(withBase)).toBe(2);
   });
 
   it('swaps the roles on request and keeps the warnings as seen', () => {

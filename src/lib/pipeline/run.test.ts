@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { KTX2_ZSTANDARD, readKtx2Header } from './compress';
 import { generateBumpySheet } from './generate';
-import type { AskUp, UpAnswer, UpQuestion } from './ask';
+import type {
+  Answer,
+  AskUp,
+  MeetAction,
+  MeetAnswer,
+  MeetQuestion,
+  Question,
+  UpAnswer,
+  UpQuestion,
+} from './ask';
+import type { Vec3 } from './base';
+import type { Meeting, PartJoint } from './marks';
 import type { OrientationOptions } from './orient';
 import { BAKE_STEPS, runPipeline, STEPS, type ConversionResult, type Progress } from './run';
 import { AXIS_ROTATION, fromAxisAngle, multiply, type Rotation } from './rotation';
@@ -11,14 +22,21 @@ import {
   generateFigure,
   generatePegFigure,
   generatePuddleFigure,
+  generatePuddleFigureParts,
   generateQuadruped,
   generateRecessBase,
   generateSwarm,
+  generateWingedFigure,
+  movedSoup,
+  RECESS_BASE,
+  WINGED_FIGURE,
 } from '../../regression/shapes';
 import { estimateConversionBytes } from './memory';
 
 /** The steps of a single file: `place` runs for a figure with its base file only. */
-const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place');
+const ONE_FILE_STEPS = STEPS.filter((step) => step !== 'place' && step !== 'assemble');
+/** A figure with its base file: every step but the assemble step of a figure in parts (#93). */
+const PAIR_STEPS = STEPS.filter((step) => step !== 'assemble');
 
 // One test makes the encoder fail once; every other call is the real one.
 vi.mock('./compress', async (importOriginal) => {
@@ -268,7 +286,7 @@ describe('runPipeline with a base file (#70)', () => {
   it('sets the figure in the recess and merges the two before reducing', async () => {
     const result = await runPipeline(figure(), { bake: 0, secondStl: base() });
     const { pair, stats, sizing, mesh } = result;
-    expect(stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(stats.timings.map((t) => t.step)).toEqual([...PAIR_STEPS]);
     expect(pair).not.toBeNull();
     expect(stats.pair).toBe(pair);
     expect(pair!.pairing).toMatchObject({
@@ -276,8 +294,8 @@ describe('runPipeline with a base file (#70)', () => {
       method: 'guessed',
       warnings: ['figure-has-its-own-base'],
     });
-    expect(pair!.placement.spot.kind).toBe('recess');
-    expect(pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(pair!.placement!.spot.kind).toBe('recess');
+    expect(pair!.placement!.offsetMm).toEqual([0, 0, 3]);
     // Measured from the base file: 32 mm round, not the puddle.
     expect(sizing.base).toMatchObject({ shape: 'round', diameterMm: 32 });
     expect(sizing).toMatchObject({ size: 'medium', plainBase: null });
@@ -294,7 +312,7 @@ describe('runPipeline with a base file (#70)', () => {
   it('finds the base in either order, and swaps when asked', async () => {
     const reversed = await runPipeline(base(), { bake: 0, secondStl: figure() });
     expect(reversed.pair!.pairing.baseFile).toBe(0);
-    expect(reversed.pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(reversed.pair!.placement!.offsetMm).toEqual([0, 0, 3]);
     const swapped = await runPipeline(figure(), {
       bake: 0,
       secondStl: base(),
@@ -310,8 +328,8 @@ describe('runPipeline with a base file (#70)', () => {
       secondStl: base(),
       placement: { moveMm: [1, 0], liftMm: 0.5 },
     });
-    expect(moved.pair!.placement.method).toBe('manual');
-    expect(moved.pair!.placement.offsetMm[0]).toBe(1);
+    expect(moved.pair!.placement!.method).toBe('manual');
+    expect(moved.pair!.placement!.offsetMm[0]).toBe(1);
   }, 60_000);
 
   it('refuses two figures, and a pair too large for the device', async () => {
@@ -348,8 +366,8 @@ describe('runPipeline with a base file (#70)', () => {
     });
     expect(over.pair!.baseOrientation).toMatchObject({ up: '-z', method: 'manual' });
     expect(over.pair!.pairing.files[1]).toMatchObject({ up: '-z', upMethod: 'manual' });
-    expect(over.pair!.placement.spot.kind).toBe('flat');
-    expect(over.pair!.placement.offsetMm[2]).toBeCloseTo(4, 3);
+    expect(over.pair!.placement!.spot.kind).toBe('flat');
+    expect(over.pair!.placement!.offsetMm[2]).toBeCloseTo(4, 3);
     expect(over.sizing.base).toMatchObject({ shape: 'round' });
     expect(over.sizing.base!.diameterMm).toBeCloseTo(32, 0);
 
@@ -359,7 +377,7 @@ describe('runPipeline with a base file (#70)', () => {
       secondStl: base(),
       baseOrientation: { rotation },
     });
-    expect(tilted.pair!.baseOrientation.rotation).toBe(rotation);
+    expect(tilted.pair!.baseOrientation!.rotation).toBe(rotation);
     expect(tilted.choices.baseOrientation).toEqual({ rotation });
   }, 60_000);
 
@@ -368,8 +386,8 @@ describe('runPipeline with a base file (#70)', () => {
     const soup = generatePuddleFigure(12);
     for (let i = 2; i < soup.length; i += 3) soup[i] = soup[i]! + 3;
     const registered = await runPipeline(encodeBinaryStl(soup), { bake: 0, secondStl: base() });
-    expect(registered.pair!.placement.spot.kind).toBe('registered');
-    expect(registered.pair!.placement.offsetMm).toEqual([0, 0, 3]);
+    expect(registered.pair!.placement!.spot.kind).toBe('registered');
+    expect(registered.pair!.placement!.offsetMm).toEqual([0, 0, 3]);
     expect(registered.orientation).toBe(registered.stats.orientation);
     expect(registered.orientation).toMatchObject({ up: '+z', method: 'base' });
     // The user's axis for the figure is final: no registration test.
@@ -378,31 +396,48 @@ describe('runPipeline with a base file (#70)', () => {
       secondStl: base(),
       orientation: { up: '+z' },
     });
-    expect(chosen.pair!.placement.spot.kind).not.toBe('registered');
+    expect(chosen.pair!.placement!.spot.kind).not.toBe('registered');
   }, 60_000);
 });
 
-/** An `askUp` that answers from a list, in order, and keeps every question it was asked. */
-function answering(...answers: UpAnswer[]): AskUp & { questions: UpQuestion[] } {
+/**
+ * An `askUp` that answers from a list, in order, and keeps every question it was asked: the up
+ * questions in `questions`, the meet questions in `meets`, all of them in `all`. A meet question
+ * that meets an up answer, or no answer left, is confirmed as shown: the tests of #92 need not
+ * answer the meeting's two stops.
+ */
+function answering(
+  ...answers: Answer[]
+): AskUp & { questions: UpQuestion[]; meets: MeetQuestion[]; all: Question[] } {
   const questions: UpQuestion[] = [];
-  const ask = (question: UpQuestion): Promise<UpAnswer> => {
-    questions.push(question);
+  const meets: MeetQuestion[] = [];
+  const all: Question[] = [];
+  const ask = (question: Question): Promise<Answer> => {
+    all.push(question);
+    if (question.kind === 'up') questions.push(question);
+    else meets.push(question);
+    if (question.kind === 'meet' && answers[0]?.kind !== 'meet') return Promise.resolve(asShown());
     const answer = answers.shift();
-    if (!answer)
-      return Promise.reject(new Error(`no answer left for question ${questions.length}`));
+    if (!answer) return Promise.reject(new Error(`no answer left for question ${all.length}`));
     return Promise.resolve(answer);
   };
-  return Object.assign(ask, { questions });
+  return Object.assign(ask, { questions, meets, all });
 }
 
 const confirm = (orientation: OrientationOptions = {}): UpAnswer => ({
+  kind: 'up',
   orientation,
   confirm: true,
 });
 const tryOut = (orientation: OrientationOptions = {}): UpAnswer => ({
+  kind: 'up',
   orientation,
   confirm: false,
 });
+/** An action at a meet question. */
+const meet = (action: MeetAction): MeetAnswer => ({ kind: 'meet', action });
+/** A meet question confirmed as shown: at the pairs stop, put together; at the final view, go on. */
+const asShown = (): MeetAnswer => meet({ do: 'confirm' });
 
 /** The bytes of a typed array, to compare two meshes bit for bit. */
 const bits = (array: Float32Array | Uint32Array): Uint8Array =>
@@ -449,8 +484,9 @@ describe('runPipeline asking which way is up (#92)', () => {
     expect(question).toMatchObject({ role: 'mini', file: 0, reason: 'base', warnings: [] });
     expect(question!.orientation).toEqual(plain.orientation);
     expect(question!.base).toMatchObject({ shape: 'round' });
-    expect(question!.mesh!.indices.length).toBe(plain.stats.triangles * 3);
-    // The box of the turned file, before any shift: 25 mm across, as tall as the mini.
+    expect(question!.meshes.map((m) => m.file)).toEqual([0]);
+    expect(question!.meshes[0]!.mesh.indices.length).toBe(plain.stats.triangles * 3);
+    // The box of the turned file, standing on the grid: 25 mm across, as tall as the mini.
     expect(question!.box.max[0] - question!.box.min[0]).toBeCloseTo(25, 0);
     expect(question!.box.max[1] - question!.box.min[1]).toBeCloseTo(plain.stats.sizeMm[1], 4);
     expect(asked.stats.asked).toEqual([{ role: 'mini', tries: 0, waitedMs: expect.any(Number) }]);
@@ -470,9 +506,9 @@ describe('runPipeline asking which way is up (#92)', () => {
       reason: 'tallest',
       orientation: { up: '+z', method: 'tallest' },
     });
-    expect(first!.mesh).toBeDefined();
+    expect(first!.meshes).toHaveLength(1);
     expect(second).toMatchObject({ reason: 'chosen', orientation: { up: '+x', method: 'manual' } });
-    expect(second!.mesh).toBeUndefined();
+    expect(second!.meshes).toHaveLength(0);
     // Standing on +x: about 30 mm tall.
     expect(result.orientation).toMatchObject({ up: '+x', method: 'manual' });
     expect(result.stats.sizeMm[1]).toBeGreaterThan(29);
@@ -527,9 +563,9 @@ describe('runPipeline asking which way is up (#92)', () => {
   it('sends a copy: detaching it changes nothing, and the choices convert the same mini again', async () => {
     const ask: AskUp = (question) => {
       // What a worker does when it posts the question: the buffers go to the page.
-      const { positions, indices } = question.mesh!;
-      structuredClone(question.mesh, { transfer: [positions.buffer, indices.buffer] });
-      expect(question.mesh!.positions.length).toBe(0);
+      const { mesh } = question.meshes[0]!;
+      structuredClone(mesh, { transfer: [mesh.positions.buffer, mesh.indices.buffer] });
+      expect(mesh.positions.length).toBe(0);
       return Promise.resolve(confirm({ up: '+x' }));
     };
     const result = await runPipeline(lyingFigure(), { bake: 0, askUp: ask });
@@ -557,7 +593,7 @@ describe('runPipeline asking which way is up (#92)', () => {
 describe('runPipeline asking about a pair (#92)', () => {
   const figure = (): ArrayBuffer => encodeBinaryStl(generatePuddleFigure(12));
   const base = (): ArrayBuffer => encodeBinaryStl(generateRecessBase());
-  const swap: UpAnswer = { orientation: {}, confirm: false, swap: true };
+  const swap: UpAnswer = { kind: 'up', orientation: {}, confirm: false, swap: true };
 
   /** The puddle figure raised onto the recess floor in its own file: the two files share one frame. */
   function registeredFigure(): ArrayBuffer {
@@ -580,16 +616,17 @@ describe('runPipeline asking about a pair (#92)', () => {
       warnings: ['figure-has-its-own-base'],
     });
     expect(baseQuestion!.base).toMatchObject({ shape: 'round' });
-    expect(baseQuestion!.mesh!.indices.length).toBe(generateRecessBase().length / 3);
+    expect(baseQuestion!.meshes[0]!.mesh.indices.length).toBe(generateRecessBase().length / 3);
     expect(figureQuestion).toMatchObject({ role: 'figure', file: 0, reason: 'base' });
-    expect(figureQuestion!.mesh).toBeDefined();
+    expect(figureQuestion!.meshes.map((m) => m.file)).toEqual([0]);
     expect(asked.stats.asked.map((a) => [a.role, a.tries])).toEqual([
       ['base', 0],
       ['figure', 0],
+      ['meet', 0],
     ]);
     expect(asked.choices).toEqual({ orientation: {}, baseOrientation: {}, pairing: {} });
     expect(asked.pair!.pairing.method).toBe('guessed');
-    expect(asked.stats.timings.map((t) => t.step)).toEqual([...STEPS]);
+    expect(asked.stats.timings.map((t) => t.step)).toEqual([...PAIR_STEPS]);
   }, 60_000);
 
   it('shows a registered figure the way its base stands; a changed figure is not registered', async () => {
@@ -601,14 +638,14 @@ describe('runPipeline asking about a pair (#92)', () => {
     });
     expect(ask.questions[1]).toMatchObject({ role: 'figure', reason: 'registered' });
     expect(ask.questions[1]!.orientation.rotation).toEqual(ask.questions[0]!.orientation.rotation);
-    expect(registered.pair!.placement.spot.kind).toBe('registered');
+    expect(registered.pair!.placement!.spot.kind).toBe('registered');
 
     const changed = await runPipeline(registeredFigure(), {
       bake: 0,
       secondStl: base(),
       askUp: answering(confirm(), confirm({ up: '+z' })),
     });
-    expect(changed.pair!.placement.spot.kind).not.toBe('registered');
+    expect(changed.pair!.placement!.spot.kind).not.toBe('registered');
     expect(changed.orientation).toMatchObject({ up: '+z', method: 'manual' });
   }, 60_000);
 
@@ -621,9 +658,9 @@ describe('runPipeline asking about a pair (#92)', () => {
       askUp: ask,
     });
     expect(ask.questions[1]).toMatchObject({ role: 'base', reason: 'chosen' });
-    expect(ask.questions[1]!.mesh).toBeUndefined();
+    expect(ask.questions[1]!.meshes).toHaveLength(0);
     expect(ask.questions[2]).toMatchObject({ role: 'figure', reason: 'base' });
-    expect(result.pair!.placement.spot.kind).toBe('flat');
+    expect(result.pair!.placement!.spot.kind).toBe('flat');
     expect(result.pair!.baseOrientation).toMatchObject({ up: '-z', method: 'manual' });
     expect(result.choices).toEqual({
       orientation: {},
@@ -633,6 +670,7 @@ describe('runPipeline asking about a pair (#92)', () => {
     expect(result.stats.asked.map((a) => [a.role, a.tries])).toEqual([
       ['base', 1],
       ['figure', 0],
+      ['meet', 0],
     ]);
   }, 60_000);
 
@@ -643,7 +681,7 @@ describe('runPipeline asking about a pair (#92)', () => {
       secondStl: base(),
       askUp: atBase,
     });
-    expect(atBase.questions.map((q) => [q.role, q.file, q.mesh !== undefined])).toEqual([
+    expect(atBase.questions.map((q) => [q.role, q.file, q.meshes.length > 0])).toEqual([
       ['base', 1, true],
       ['base', 0, true],
       // The recess base's mesh went to the page with the first question.
@@ -700,4 +738,418 @@ describe('runPipeline asking about a pair (#92)', () => {
     expect(swapped.pair!.pairing).toMatchObject({ baseFile: 0, method: 'manual' });
     expect(swapped.choices.pairing).toEqual({ baseFile: 0 });
   }, 60_000);
+});
+describe('runPipeline asking where the parts meet (#93)', () => {
+  const figure = (): ArrayBuffer => encodeBinaryStl(generatePuddleFigure(12));
+  const base = (): ArrayBuffer => encodeBinaryStl(generateRecessBase());
+  const [bodySoup, armSoup] = generatePuddleFigureParts(12);
+  const floor = RECESS_BASE.heightMm - RECESS_BASE.recessDepthMm;
+  const WING_MOVE: Vec3 = [50, 0, 0];
+  const moved = (p: Vec3): Vec3 => [p[0] + WING_MOVE[0], p[1] + WING_MOVE[1], p[2] + WING_MOVE[2]];
+  /** Body, recess base and a wing exported 50 mm apart from where it belongs. */
+  const kit = (): [ArrayBuffer, { secondStl: ArrayBuffer; moreStl: ArrayBuffer[] }] => {
+    const { body, wing } = generateWingedFigure();
+    return [
+      encodeBinaryStl(body),
+      {
+        secondStl: base(),
+        moreStl: [encodeBinaryStl(movedSoup(wing, WING_MOVE))],
+      },
+    ];
+  };
+  const tap = (file: number, point: Vec3, pair = 0): MeetAnswer =>
+    meet({ do: 'tap', at: { file, point }, pair });
+
+  it('proposes the pairs apart, then shows the placement, and converts as without asking', async () => {
+    const plain = await runPipeline(figure(), { bake: 0, secondStl: base() });
+    const ask = answering(confirm(), confirm());
+    const asked = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+    });
+    expectSameMini(asked, plain);
+    const [baseQuestion, figureQuestion] = ask.questions;
+    expect(baseQuestion!.shown.map((s) => s.file)).toEqual([1]);
+    expect(figureQuestion!.shown.map((s) => s.file)).toEqual([0]);
+    expect(baseQuestion!.roles).toEqual({ baseFile: 1, figureFiles: [0] });
+    // Standing on the grid: the box's floor is y = 0.
+    expect(figureQuestion!.box.min[1]).toBeCloseTo(0, 4);
+    const [pairs, fitted] = ask.meets;
+    expect(pairs).toMatchObject({
+      kind: 'meet',
+      about: 'base',
+      stage: 'pairs',
+      proposed: true,
+      marks: null,
+      placement: null,
+      apart: null,
+    });
+    // Both meshes went with the up questions; none travels again.
+    expect(pairs!.meshes).toEqual([]);
+    // The figure stands beside its base, to its right.
+    expect(pairs!.shown.map((s) => s.file)).toEqual([1, 0]);
+    expect(pairs!.shown[1]!.translation[0]).toBeGreaterThan(pairs!.shown[0]!.translation[0] + 10);
+    // The proposal: the puddle's underside on the recess floor, 3 mm up in the base's file.
+    expect(pairs!.pairs).toHaveLength(1);
+    const { on, of } = pairs!.pairs[0]!;
+    expect(on!.file).toBe(1);
+    expect(of!.file).toBe(0);
+    expect(on!.centre[2]).toBeCloseTo(floor, 4);
+    expect(on!.normal[2]).toBeCloseTo(1, 6);
+    expect(of!.triangles.length).toBeGreaterThan(0);
+    expect(fitted).toMatchObject({ stage: 'fitted', proposed: true });
+    expect(fitted!.placement).toEqual(plain.pair!.placement);
+    expect(asked.choices.placement).toBeUndefined();
+    expect(asked.stats.asked.map((a) => [a.role, a.tries])).toEqual([
+      ['base', 0],
+      ['figure', 0],
+      ['meet', 0],
+    ]);
+  }, 120_000);
+
+  it('places the figure by the pairs tapped, nudged at the final view', async () => {
+    const ask = answering(
+      confirm(),
+      confirm(),
+      // The proposed pair dropped: the person marks from nothing.
+      meet({ do: 'clear', pair: 0 }),
+      tap(1, [3, 0, floor]),
+      tap(0, [0, 0, 0]),
+      meet({ do: 'fit' }),
+      meet({ do: 'nudge', liftMm: 0.5 }),
+      meet({ do: 'confirm' }),
+    );
+    const result = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+    });
+    const stages = ask.meets.map((q) => [q.stage, q.proposed, q.placement?.method ?? null]);
+    expect(stages).toEqual([
+      ['pairs', true, null],
+      ['pairs', false, null],
+      ['pairs', false, null],
+      ['pairs', false, null],
+      ['fitted', false, 'marked'],
+      ['fitted', false, 'marked'],
+    ]);
+    expect(ask.meets[1]!.pairs).toEqual([]);
+    // One side marked after the first tap: the base's.
+    expect(ask.meets[2]!.pairs.map(({ on, of }) => [on?.file, of])).toEqual([[1, null]]);
+    expect(ask.meets[2]!.pairs[0]!.on!.normal[2]).toBe(1);
+    const { placement } = result.pair!;
+    expect(placement).toMatchObject({
+      method: 'marked',
+      spot: { kind: 'marked' },
+    });
+    expect(placement!.marks!.liftMm).toBe(0.5);
+    expect(placement!.marks!.fit.kept).toBe('standing');
+    const marks: Meeting = {
+      pairs: [
+        {
+          on: { file: 1, strokes: [{ tap: [3, 0, floor] }] },
+          of: { file: 0, strokes: [{ tap: [0, 0, 0] }] },
+        },
+      ],
+      liftMm: 0.5,
+    };
+    expect(result.choices.placement).toEqual({ marks });
+    expect(result.stats.asked.map((a) => [a.role, a.tries])).toEqual([
+      ['base', 0],
+      ['figure', 0],
+      ['meet', 4],
+    ]);
+    // The choices convert the same mini again, asking nothing.
+    const again = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      ...result.choices,
+    });
+    expectSameMini(again, result);
+    // And a record set at once, fitted and confirmed, does too.
+    const replayed = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: answering(
+        confirm(),
+        confirm(),
+        meet({ do: 'set', marks }),
+        meet({ do: 'fit' }),
+        meet({ do: 'confirm' }),
+      ),
+    });
+    expectSameMini(replayed, result);
+  }, 120_000);
+
+  it('finds what a ray from the camera hits, in the file it hits', async () => {
+    const ask = answering(
+      confirm(),
+      confirm(),
+      // Straight down onto the middle of the base: the recess floor.
+      meet({
+        do: 'pick',
+        at: { ray: { origin: [0, 50, 0], direction: [0, -1, 0] } },
+      }),
+      meet({
+        do: 'pick',
+        at: { ray: { origin: [0, 50, 0], direction: [0, 1, 0] } },
+      }),
+    );
+    await runPipeline(figure(), { bake: 0, secondStl: base(), askUp: ask });
+    const [, hit, miss] = ask.meets;
+    expect(hit!.picked!.file).toBe(1);
+    // The base stands as its file does, turned Z-up to Y-up: the floor is z = 3 in its file.
+    expect(hit!.picked!.point[2]).toBeCloseTo(floor, 4);
+    expect(miss!.picked).toBeNull();
+    expect(hit!.stage).toBe('pairs');
+  }, 120_000);
+
+  it('edits the proposal with a tap, and Undo goes straight back to it', async () => {
+    const ask = answering(
+      confirm(),
+      confirm(),
+      // A tap on the base on the proposed pair: the proposal becomes editable, the tap adds to it.
+      tap(1, [-3, 0, floor]),
+      meet({ do: 'undo' }),
+      // Add a pair to the proposal.
+      tap(1, [4, 0, floor], 1),
+      tap(0, [4, 0, 0], 1),
+      meet({ do: 'fit' }),
+      meet({ do: 'confirm' }),
+    );
+    const result = await runPipeline(figure(), { bake: 0, secondStl: base(), askUp: ask });
+    const [proposed, edited, undone, , added] = ask.meets;
+    expect(proposed!.proposed).toBe(true);
+    expect(edited).toMatchObject({ proposed: false });
+    expect(edited!.pairs.map(({ on, of }) => [on?.file, of?.file])).toEqual([[1, 0]]);
+    // The proposal as brush dabs, with the tap after them.
+    const strokes = (edited!.marks as Meeting).pairs[0]!.on.strokes;
+    expect(strokes.length).toBeGreaterThan(1);
+    expect(strokes.at(-1)).toEqual({ tap: [-3, 0, floor] });
+    expect(strokes.slice(0, -1).every((stroke) => 'brush' in stroke)).toBe(true);
+    // The covered patch is at least the proposed one.
+    expect(edited!.pairs[0]!.of!.areaMm2).toBeGreaterThanOrEqual(proposed!.pairs[0]!.of!.areaMm2);
+    expect(undone).toMatchObject({ proposed: true, marks: null });
+    expect(added!.pairs.map(({ on, of }) => [on?.file, of?.file])).toEqual([
+      [1, 0],
+      [1, 0],
+    ]);
+    expect(result.pair!.placement!.method).toBe('marked');
+    expect((result.choices.placement!.marks as Meeting).pairs).toHaveLength(2);
+  }, 120_000);
+
+  it('goes back to the pairs, and Start over brings the proposal and the automatic placement back', async () => {
+    const ask = answering(
+      confirm(),
+      confirm(),
+      meet({ do: 'clear', pair: 0 }),
+      tap(1, [3, 0, floor]),
+      tap(0, [0, 0, 0]),
+      meet({ do: 'fit' }),
+      meet({ do: 'back' }),
+      meet({ do: 'clear' }),
+      meet({ do: 'fit' }),
+      meet({ do: 'confirm' }),
+    );
+    const result = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+    });
+    const back = ask.meets[5]!;
+    expect(back).toMatchObject({ stage: 'pairs', proposed: false });
+    expect(back.pairs).toHaveLength(1);
+    expect(ask.meets[6]).toMatchObject({
+      stage: 'pairs',
+      proposed: true,
+      marks: null,
+    });
+    expect(ask.meets[7]!.placement!.method).toBe('detected');
+    expect(result.pair!.placement!.method).toBe('detected');
+    expect(result.choices.placement).toBeUndefined();
+  }, 120_000);
+
+  it('nudges the automatic placement and records the nudge, not marks', async () => {
+    const ask = answering(
+      confirm(),
+      confirm(),
+      meet({ do: 'fit' }),
+      meet({ do: 'nudge', liftMm: 0.5, turnDeg: 15 }),
+      meet({ do: 'confirm' }),
+    );
+    const result = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+    });
+    const before = ask.meets[1]!.placement!;
+    const after = result.pair!.placement!;
+    expect(before.method).toBe('detected');
+    expect(after.method).toBe('manual');
+    expect(after.yawDeg - before.yawDeg).toBeCloseTo(15, 9);
+    expect(ask.meets[2]!.placement).toEqual(after);
+    expect(result.choices.placement).toEqual({ liftMm: 0.5, turnDeg: 15 });
+  }, 120_000);
+
+  it('asks only where they meet when that is all it is asked', async () => {
+    const ask = answering();
+    const result = await runPipeline(figure(), {
+      bake: 0,
+      secondStl: base(),
+      askUp: ask,
+      ask: { up: false, baseUp: false, parts: false, meet: true },
+    });
+    expect(ask.all.map((q) => (q.kind === 'meet' ? q.stage : q.kind))).toEqual(['pairs', 'fitted']);
+    // Neither mesh went with an up question: both go with the first one.
+    expect(ask.meets[0]!.meshes.map((m) => m.file).sort()).toEqual([0, 1]);
+    expect(result.stats.asked.map((a) => a.role)).toEqual(['meet']);
+  }, 120_000);
+
+  it('asks about the parts first, then the base, then the figure as their union', async () => {
+    const files = { bake: 0, secondStl: base(), moreStl: [encodeBinaryStl(armSoup)] };
+    const plain = await runPipeline(encodeBinaryStl(bodySoup), files);
+    const ask = answering(confirm(), confirm());
+    const result = await runPipeline(encodeBinaryStl(bodySoup), {
+      ...files,
+      askUp: ask,
+    });
+    expectSameMini(result, plain);
+    // A kit in place has no final view of its parts: it would be the picture just confirmed.
+    expect(ask.all.map((q) => (q.kind === 'up' ? q.role : `${q.about} ${q.stage}`))).toEqual([
+      'parts pairs',
+      'base',
+      'figure',
+      'base pairs',
+      'base fitted',
+    ]);
+    const parts = ask.meets[0]!;
+    expect(parts.meshes.map((m) => m.file)).toEqual([0, 2]);
+    expect(parts.shown.map((s) => s.file)).toEqual([0, 2]);
+    expect(parts.parts.map((p) => p.source)).toEqual(['body', 'files']);
+    // Pulled apart: the arm moved away from the body.
+    expect(parts.apart!.shown.map((s) => s.file)).toEqual([0, 2]);
+    expect(parts.apart!.shown[1]!.translation).not.toEqual(parts.shown[1]!.translation);
+    // The arm is where its file puts it: a pair where it touches the body.
+    expect(parts.proposed).toBe(true);
+    expect(parts.pairs.length).toBeGreaterThan(0);
+    expect(parts.pairs[0]!.on!.file).toBe(0);
+    expect(parts.pairs[0]!.of!.file).toBe(2);
+    const [baseQuestion, figureQuestion] = ask.questions;
+    expect(baseQuestion!.meshes.map((m) => m.file)).toEqual([1]);
+    expect(figureQuestion).toMatchObject({ role: 'figure', file: 0 });
+    expect(figureQuestion!.shown.map((s) => s.file)).toEqual([0, 2]);
+    expect(figureQuestion!.meshes).toEqual([]);
+    expect(result.stats.asked.map((a) => a.role)).toEqual(['parts', 'base', 'figure', 'meet']);
+    expect(result.pair!.parts.map((p) => p.file)).toEqual([0, 2]);
+    expect(result.choices.parts).toBeUndefined();
+  }, 120_000);
+
+  it('puts a part that lies apart where its pairs say, and the choices convert it again', async () => {
+    const [stl, files] = kit();
+    const ask = answering(
+      tap(0, WINGED_FIGURE.joint),
+      tap(2, moved(WINGED_FIGURE.joint)),
+      meet({ do: 'fit' }),
+      meet({ do: 'confirm' }),
+      confirm(),
+      confirm(),
+    );
+    const result = await runPipeline(stl, { bake: 0, ...files, askUp: ask });
+    const first = ask.meets[0]!;
+    const fitted = ask.meets[3]!;
+    // The wing lies 50 mm apart: nothing is proposed for it.
+    expect(first.pairs).toEqual([]);
+    expect(first.proposed).toBe(true);
+    expect(first.parts[1]).toMatchObject({ file: 2, source: 'files' });
+    expect(fitted).toMatchObject({
+      about: 'parts',
+      stage: 'fitted',
+      apart: null,
+    });
+    expect(fitted.parts[1]).toMatchObject({ file: 2, source: 'marked' });
+    // The wing moved 50 mm towards the body (the scene is centred on them both).
+    const apart = (question: MeetQuestion): number =>
+      question.shown[1]!.translation[0] - question.shown[0]!.translation[0];
+    expect(apart(fitted) - apart(first)).toBeCloseTo(-50, 3);
+    expect(result.pair!.parts[1]).toMatchObject({
+      source: 'marked',
+      joint: { onto: 0 },
+    });
+    const joint: PartJoint = {
+      part: 2,
+      onto: 0,
+      pairs: [
+        {
+          on: { file: 0, strokes: [{ tap: WINGED_FIGURE.joint }] },
+          of: { file: 2, strokes: [{ tap: moved(WINGED_FIGURE.joint) }] },
+        },
+      ],
+    };
+    expect(result.choices.parts).toEqual({ joints: [joint] });
+    const again = await runPipeline(stl, {
+      bake: 0,
+      ...kit()[1],
+      ...result.choices,
+    });
+    expectSameMini(again, result);
+  }, 120_000);
+
+  it('proposes nothing for parts laid out for print, and lays them in a row', async () => {
+    const { body, wing } = generateWingedFigure();
+    // Each part centred on the origin, on z = 0: as a print layout exports them.
+    const plate = (soup: Float32Array, dx: number, dy: number, dz: number) =>
+      encodeBinaryStl(movedSoup(soup, [dx, dy, dz]));
+    const ask = answering();
+    await runPipeline(plate(body, 0, 0, 0), {
+      bake: 0,
+      secondStl: plate(wing, -12.5, 0, -10.5),
+      pairing: { baseFile: null },
+      askUp: ask,
+    }).catch(() => undefined);
+    const parts = ask.meets[0]!;
+    expect(parts).toMatchObject({ about: 'parts', stage: 'pairs', proposed: true, inPlace: false });
+    expect(parts.pairs).toEqual([]);
+    // Side by side: the wing to the right of the body.
+    const [atBody, atWing] = parts.apart!.shown;
+    expect(atWing!.translation[0]).toBeGreaterThan(atBody!.translation[0]);
+    // Confirmed with nothing marked, the pile is shown before it converts: no silent placement.
+    expect(ask.meets[1]).toMatchObject({ about: 'parts', stage: 'fitted' });
+  }, 120_000);
+
+  it('makes the files parts of one figure when no base is chosen, and asks nothing about a base', async () => {
+    const noBase: UpAnswer = {
+      kind: 'up',
+      orientation: {},
+      confirm: false,
+      baseFile: null,
+    };
+    const ask = answering(noBase, confirm());
+    const result = await runPipeline(encodeBinaryStl(bodySoup), {
+      bake: 0,
+      secondStl: base(),
+      moreStl: [encodeBinaryStl(armSoup)],
+      askUp: ask,
+    });
+    expect(ask.all.map((q) => (q.kind === 'up' ? q.role : q.about))).toEqual([
+      'parts',
+      'base',
+      'parts',
+      'mini',
+    ]);
+    // Without a base the recess base is a part, and the bulkiest: the body.
+    expect(ask.meets[1]!.parts.map((p) => p.file)).toEqual([1, 0, 2]);
+    expect(ask.meets[1]!.roles).toEqual({
+      baseFile: null,
+      figureFiles: [1, 0, 2],
+    });
+    expect(result.pair).toMatchObject({
+      placement: null,
+      baseOrientation: null,
+    });
+    expect(result.choices.pairing).toEqual({ baseFile: null });
+    expect(result.stats.timings.map((t) => t.step)).not.toContain('place');
+    // The parts confirmed before the roles changed stay in the record, as a confirmed base does (#92).
+    expect(result.stats.asked.map((a) => a.role)).toEqual(['parts', 'parts', 'mini']);
+  }, 120_000);
 });

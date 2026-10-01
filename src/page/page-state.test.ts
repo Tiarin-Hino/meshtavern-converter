@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   describeAskedFile,
   describeAskPending,
+  describePairs,
   describeMini,
   describePairWarning,
+  describePart,
+  describeParts,
   describePendingPlacement,
   describePlacement,
   describeProgress,
@@ -19,8 +22,11 @@ import {
   BAKE_STEPS,
   STEPS,
   type BaseMeasurement,
+  type Fit,
   type Orientation,
+  type PartResult,
   type Placement,
+  type Rotation,
   type Sizing,
   type UpReason,
 } from '../lib';
@@ -197,7 +203,7 @@ describe('the base section', () => {
     );
   });
 
-  it('says a pair measured its base from the base file, and refuses a third file', () => {
+  it('says a pair measured its base from the base file, and refuses a seventh file', () => {
     const stats = {
       sizeMm: [32, 34, 32] as [number, number, number],
       sizing: sizing({ base: measured('round', 32), baseDiameterMm: 32 }),
@@ -206,10 +212,164 @@ describe('the base section', () => {
     expect(describeMini(stats)).toBe(
       '34 mm tall · Medium, 1 square · 32 mm round base from its own file',
     );
-    expect(describeTooManyFiles()).toBe('Drop one figure file, or a figure and its base.');
+    expect(describeTooManyFiles(6)).toBe('Drop up to 6 files: a figure, its base and its parts.');
   });
 });
 
+describe('where the parts meet (#93)', () => {
+  const summary = (normal: [number, number, number]) => ({
+    file: 0,
+    areaMm2: 10,
+    centre: [0, 3, 0] as [number, number, number],
+    normal,
+    flatness: 1,
+  });
+  const fit = (kept: Fit['kept']): Fit => ({
+    kept,
+    centreRmsMm: 0,
+    normalsDeg: 0,
+  });
+  /** A quarter turn's tilt: 18° about x has w = cos 9°. */
+  const tilt18: Rotation = [Math.sin(Math.PI / 20), 0, 0, Math.cos(Math.PI / 20)];
+  const marked = (
+    liftMm: number,
+    turnDeg: number,
+    kept: Fit['kept'] = 'standing',
+    rotation: Rotation = [0, 0, 0, 1],
+  ): Placement => ({
+    ...placement({ kind: 'marked', sizeMm: [0, 0] }, 'marked'),
+    marks: {
+      pairs: [{ on: summary([0, 1, 0]), of: summary([0, -1, 0]) }],
+      rotation,
+      liftMm,
+      turnDeg,
+      fit: fit(kept),
+    },
+  });
+  const part = (
+    source: PartResult['source'],
+    liftMm = 0,
+    turnDeg = 0,
+    kept: Fit['kept'] = 'standing',
+  ): PartResult => ({
+    file: 1,
+    source,
+    rotation: kept === 'free' ? [0, 0, Math.SQRT1_2, Math.SQRT1_2] : [0, 0, 0, 1],
+    translation: [0, 0, 0],
+    triangles: 12,
+    ...(source === 'marked' && {
+      joint: {
+        onto: 0,
+        pairs: [{ on: summary([1, 0, 0]), of: summary([-1, 0, 0]) }],
+        liftMm,
+        turnDeg,
+        fit: fit(kept),
+      },
+    }),
+  });
+
+  it('says a marked placement was set where the person marked, how it was fitted, raised and turned', () => {
+    expect(describePlacement(marked(0, 0))).toBe('Set where you marked · kept upright');
+    expect(describePlacement(marked(0.5, 0))).toBe(
+      'Set where you marked · kept upright · raised 0.5 mm',
+    );
+    expect(describePlacement(marked(-0.5, 15, 'upright'))).toBe(
+      'Set where you marked · turned to fit · lowered 0.5 mm, turned 15°',
+    );
+    expect(describePlacement(marked(0, 0, 'free', tilt18))).toBe(
+      'Set where you marked · tilted 18° to fit',
+    );
+    // The lift in the base file's units, said in mm.
+    expect(describePlacement(marked(0.02, 0), 25.4)).toBe(
+      'Set where you marked · kept upright · raised 0.5 mm',
+    );
+  });
+
+  it('says where each part is', () => {
+    expect(describePart(part('body'), 'body.stl')).toBe('body · the body');
+    expect(describePart(part('files'), 'wing-l.stl')).toBe('wing-l · where its file puts it');
+    expect(describePart(part('files'), 'wing-r.stl', true)).toBe(
+      'wing-r · lies apart: mark where it goes',
+    );
+    expect(describePart(part('marked'), 'wing-r.STL')).toBe(
+      'wing-r · set where you marked · kept upright',
+    );
+    expect(describePart(part('marked', 0.5, -15, 'free'), 'wing-r.stl')).toBe(
+      'wing-r · set where you marked · turned 90° to fit · raised 0.5 mm, turned -15°',
+    );
+    const names = ['body.stl', 'wing-l.stl', 'wing-r.stl'];
+    expect(describeParts([{ ...part('body'), file: 0 }], names)).toBeNull();
+    expect(
+      describeParts(
+        [{ ...part('body'), file: 0 }, part('files'), { ...part('marked'), file: 2 }],
+        names,
+      ),
+    ).toBe('Parts: wing-l where its file puts it · wing-r marked');
+  });
+
+  it('says what the pairs stop proposes, what to tap next, and why a tap did nothing', () => {
+    const side = { ...summary([0, 1, 0]), triangles: new Uint32Array(1) };
+    const pair = { on: side, of: side };
+    const ask = (
+      about: 'base' | 'parts',
+      proposed: boolean,
+      pairs: { on: typeof side | null; of: typeof side | null }[],
+      note?: 'missed' | 'full' | 'one-part',
+    ) => describePairs({ about, proposed, pairs, ...(note && { note }) });
+    expect(ask('base', true, [pair])).toBe(
+      'Confirm, or tap and brush to change a pair: × drops one, Start over brings them back.',
+    );
+    expect(ask('base', true, [])).toBe(
+      'Nothing found. Tap where they touch, or confirm to let the converter place it.',
+    );
+    expect(ask('parts', true, [])).toBe(
+      'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.',
+    );
+    expect(describePairs({ about: 'parts', proposed: true, pairs: [], inPlace: false })).toBe(
+      'Each part comes on its own. Tap where two parts touch, on both, to put them together.',
+    );
+    expect(ask('base', false, [])).toBe('Tap the base and the figure where they touch.');
+    expect(ask('parts', false, [pair])).toBe(
+      'Tap a part in place and the part that goes there, where they touch.',
+    );
+    expect(ask('base', false, [{ on: side, of: null }])).toBe(
+      'Mark the other side, or clear the pair.',
+    );
+    expect(ask('base', false, [pair], 'full')).toBe(
+      'This pair has both sides. Add a pair to mark another place.',
+    );
+    expect(ask('parts', false, [pair], 'one-part')).toBe('A part meets one other part.');
+    expect(ask('base', false, [], 'missed')).toBe('Nothing to mark there. Tap on a part.');
+  });
+
+  it('names the buttons of the two stops', () => {
+    expect([
+      COPY.askPairs,
+      COPY.confirmPairs,
+      COPY.addPair,
+      COPY.brush,
+      COPY.erase,
+      COPY.undo,
+      COPY.startOver,
+      COPY.pullApart,
+      COPY.backToMarking,
+      COPY.letTilt,
+      COPY.keepUpright,
+    ]).toEqual([
+      'Is this where they meet?',
+      'Yes, put them together',
+      'Add a pair',
+      'Brush',
+      'Erase',
+      'Undo',
+      'Start over',
+      'Pull apart',
+      'Back to marking',
+      'Let it tilt to fit',
+      'Keep it upright',
+    ]);
+  });
+});
 describe('the up question (#92)', () => {
   const orientation: Orientation = {
     up: '+z',

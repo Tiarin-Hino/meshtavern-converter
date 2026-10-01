@@ -11,6 +11,8 @@ export type ProblemCode =
   | 'too-large'
   /** Two files, and neither has a flat underside: no base to set the other on (issue #70). */
   | 'not-a-pair'
+  /** More files than one mini is made of (`MAX_PARTS`, issue #93). */
+  | 'too-many-files'
   /** The safety net: the estimate let the file through, but memory ran out anyway. */
   | 'out-of-memory'
   /** Anything else: a bug, or damage nobody foresaw. */
@@ -36,6 +38,8 @@ export const PROBLEM_MESSAGES: Record<ProblemCode, string> = {
   'not-a-pair':
     'Neither of these files has a flat underside, so neither can be the base of the other. ' +
     'Drop the figure on its own, or drop it together with its base file.',
+  // Six is `MAX_PARTS` in assemble.ts; problems.test.ts keeps the two in step.
+  'too-many-files': 'Drop up to 6 files: a figure, its base and its parts.',
   'out-of-memory': TOO_LARGE,
   unexpected:
     'Something went wrong while converting this file. Try again; if it happens again, the ' +
