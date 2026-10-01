@@ -28,7 +28,7 @@ The PM tried the first build of #93 (`2026-09-30-marks-where-parts-meet.md`) and
 
 - **Steps 5 to 8 could not each compile the page.** The pipeline's types changed under it, and a bridge for the old page would have been thrown away a step later. **Fix:** the pipeline, protocol and wording commits pass their unit tests; the page compiles again from its own commit. Noted on the PR.
 - **An eraser dab on nothing counted as a change.** It added an undo step and no note. **Fix:** a dab with no patch under it is a miss; a drag that lands elsewhere is not reported for the dabs that missed.
-- **Twelve e2e tests failed in the first full run.** Seven were load: the unit suite and measurements ran beside them, and two workers baking at once ran past the timeouts; alone they pass. The rest were one helper that confirmed a pair's meet question once, where there are now two stops.
+- **Twelve e2e tests failed in the first full run.** Three came from one helper in `up-question.spec.ts`, `confirmMeet`, which confirmed a pair's meet question once where there are now two stops; the three tests that call it waited at the final view (fixed in ee88a60). The other nine were load: the unit suite and measurements ran beside them, and two workers baking at once ran past the timeouts; alone they pass. (The run's report was not kept; the split is counted from the tests that call the helper.)
 - **A bash quirk ate several file edits.** Heredocs with certain contents ended early on this machine's Git Bash. Edits went through scripts written to the scratchpad instead. Not the project's problem, but it cost time.
 
 ## Dead ends
