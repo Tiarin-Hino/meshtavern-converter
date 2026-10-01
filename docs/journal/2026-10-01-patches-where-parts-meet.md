@@ -42,11 +42,13 @@ Development PC (i7-11700F, 64 GB, Windows 11, Node 20.19), 2026-10-01.
 - **The fit from the proposal** (`scripts/measure-fit.mjs`): the contact patches of every corpus pair's automatic placement, the figure moved 20 mm across, 5 up and 10 back, put back by the fit. 14 of 15 pairs have contact; all 14 fitted `standing`, the box corners back within 0.15–1.00 mm (worst `flying-01`, 1.00 mm; the stop rule is more than two pairs over 1 mm, or one over 2.5). `large-01` has none: its automatic placement (centred, lift 0) leaves no figure vertex within 5 mm of the base's surface, so the pairs stop says "Nothing found" and the person marks it.
 - **Times**: proposal 40–445 ms per pair, 1,907 ms on `swarm-01` (889 mm² of contact; budget 1,500 ms on the largest pair, which takes 356 ms). Trees 173–328 ms per million triangles, 415 on the 6 M-triangle `large-01` (budget 400). A tap after the tree 1.2–14 ms, 25 and 33 ms on `mounted-01` and `swarm-03` (budget 20; the humanoid of the stop rule 11 ms). The fit under 1 ms (budget 50).
 - **Taps at a contact piece's centre** mark 0.2–31 mm², their centre 0.07–1.6 mm from the piece's (2.9 mm on `swarm-01`'s 889 mm² piece, which a 3 mm tap cannot cover).
+- **Corpus** (`npm run corpus -- --no-bake --up index`, Chrome, window visible): 30 of 30 converted, none failed. Every corpus pair's automatic placement is the same bits as on `main` (15 of 15, `placePairOnly` of both trees side by side): nothing is marked yet, and the path without marks did not move.
 - **Regression baseline**: only `peg-marked-in-hole` moved (now two tapped patches whose centres meet; table level 35,174 → 35,132 triangles).
 - **Tests**: unit tests and the e2e suite pass (`meet.spec.ts` 3, `parts.spec.ts` 3, all others unchanged).
 
 ## Still open
 
 - The PM's marking session (`npm run feedback -- --mark`): the bat, the pairs placed by hand and a kit for the corpus; it judges criterion 5 and the four tap constants.
+- The peak memory of the largest pair with the trees (`scripts/measure-memory.mjs`): not measured in this PR; the estimate counts them (28 bytes per triangle).
 - Which kit goes into the corpus: kits in the library have 12–25 part files, `MAX_PARTS` is 6.
 - The budgets missed on `swarm-01`, `mounted-01`, `swarm-03` and `large-01` (above); none on the ordinary humanoid the stop rule names.
