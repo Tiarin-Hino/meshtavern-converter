@@ -68,10 +68,14 @@ async function question(page: Page, after = 0): Promise<UpAsked> {
 const current = (page: Page): Promise<UpAsked> =>
   page.evaluate(() => window.__mt.state.question!) as Promise<UpAsked>;
 
-/** Every pair is shown where it meets its base before it converts (#93): confirms that as shown. */
+/**
+ * Every pair is shown where it meets its base before it converts (#93): confirms both stops as
+ * shown, the pairs and the final view.
+ */
 async function confirmMeet(page: Page): Promise<void> {
   const asked = await anyQuestion(page);
-  expect(asked).toMatchObject({ kind: 'meet', about: 'base' });
+  expect(asked).toMatchObject({ kind: 'meet', about: 'base', stage: 'pairs' });
+  await page.evaluate(() => window.__mt.confirmMeet());
   await page.evaluate(() => window.__mt.confirmMeet());
 }
 
