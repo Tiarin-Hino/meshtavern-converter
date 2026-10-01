@@ -193,6 +193,11 @@ const surfaceIndexes = new WeakMap<IndexedMesh, SurfaceIndex>();
  * from triangle to triangle through it, so its cost follows the patch it takes, not everything
  * within reach (61 000 triangles within 3 mm on a dense 1.25 M-triangle sculpt).
  */
+/** Releases a mesh's tap index: the pipeline drops it with the trees, before the size step. */
+export function dropSurfaceIndex(mesh: IndexedMesh): void {
+  surfaceIndexes.delete(mesh);
+}
+
 export function surfaceIndexOf(mesh: IndexedMesh): SurfaceIndex {
   const known = surfaceIndexes.get(mesh);
   if (known) return known;

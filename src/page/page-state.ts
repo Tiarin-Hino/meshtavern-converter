@@ -90,6 +90,7 @@ export const COPY = {
   startOver: 'Start over',
   pullApart: 'Pull apart',
   showInPlace: 'Show in place',
+  markEveryPart: 'Mark where every part goes, then put them together.',
   backToMarking: 'Back to marking',
   lookAt: 'Look at',
   viewAll: 'All',

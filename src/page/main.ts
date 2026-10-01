@@ -1169,7 +1169,11 @@ function showQuestion(): void {
   }
   if (pairsStop) {
     showPairChips(question);
-    meetInputs.hint.textContent = describePairs(question);
+    const unplaced = unplacedParts(question);
+    meetInputs.hint.textContent =
+      unplaced > 0 && !question.proposed && !question.note
+        ? COPY.markEveryPart
+        : describePairs(question);
     // Parts laid out for print have no place of their own to show.
     meetInputs.apart.hidden =
       question.about !== 'parts' || !question.apart || question.inPlace === false;
@@ -1181,10 +1185,10 @@ function showQuestion(): void {
     meetInputs.undo.disabled = question.proposed && question.marks === null;
     meetInputs.clear.disabled = question.proposed;
     meetInputs.confirm.textContent = COPY.confirmPairs;
-    // A pair with one side marked is not a pair yet.
-    meetInputs.confirm.disabled = question.pairs.some(
-      ({ on, of }) => (on === null) !== (of === null),
-    );
+    // A pair with one side marked is not a pair yet; a kit laid out for print is a pile until
+    // every part is marked.
+    meetInputs.confirm.disabled =
+      unplaced > 0 || question.pairs.some(({ on, of }) => (on === null) !== (of === null));
     return;
   }
   const placement = question.placement;
@@ -1204,9 +1208,11 @@ function showQuestion(): void {
 
 /** One chip per pair at the pairs stop, in the pair's colour; the selected one takes the next tap. */
 function showPairChips(question: AskedMeet): void {
+  // A chip for each pair, and one for a new pair once Add a pair selected it; none before anything is marked.
   const count = Math.min(
     pairsOf(question),
-    Math.max(question.pairs.length, state.meet.pair + 1, 1),
+    question.pairs.length +
+      (question.pairs.length > 0 && state.meet.pair >= question.pairs.length ? 1 : 0),
   );
   const side = (patch: PatchSummary | null): string => (patch ? partName(nameOf(patch.file)) : '…');
   const chips: HTMLElement[] = [];
@@ -1253,6 +1259,16 @@ function fitOf(question: AskedMeet): Fit | null {
 
 /** Whether the pairs stop shows the parts apart: as the person chose, always for parts laid out for print. */
 const showsApart = (question: AskedMeet): boolean => state.meet.apart || question.inPlace === false;
+
+/**
+ * The parts of a kit laid out for print that no complete pair places yet: they lie at the
+ * origin, piled on the body. Zero for every other question.
+ */
+function unplacedParts(question: AskedMeet): number {
+  if (question.about !== 'parts' || question.inPlace !== false) return 0;
+  const placed = new Set(question.pairs.flatMap(({ on, of }) => (on && of ? [of.file] : [])));
+  return question.roles.figureFiles.slice(1).filter((file) => !placed.has(file)).length;
+}
 
 /** How many pairs the meet question on screen takes. */
 const pairsOf = (question: AskedMeet): number =>

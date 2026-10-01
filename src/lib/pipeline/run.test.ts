@@ -1113,6 +1113,8 @@ describe('runPipeline asking where the parts meet (#93)', () => {
     // Side by side: the wing to the right of the body.
     const [atBody, atWing] = parts.apart!.shown;
     expect(atWing!.translation[0]).toBeGreaterThan(atBody!.translation[0]);
+    // Confirmed with nothing marked, the pile is shown before it converts: no silent placement.
+    expect(ask.meets[1]).toMatchObject({ about: 'parts', stage: 'fitted' });
   }, 120_000);
 
   it('makes the files parts of one figure when no base is chosen, and asks nothing about a base', async () => {

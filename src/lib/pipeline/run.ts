@@ -55,6 +55,7 @@ import {
   startMeeting,
   summaryOf,
   surfaceIndexOf,
+  dropSurfaceIndex,
   type Hit,
   type MarkingAction,
   type Meeting,
@@ -1362,7 +1363,9 @@ export async function runPipeline(
           roles: rolesOf(pairing),
         };
       },
-      skipFinal: (state) => !state.draft?.pairs.some(complete),
+      // A kit in place with nothing marked is the picture just confirmed; a kit laid out for
+      // print is a pile at the origin until its parts are marked: always shown before it converts.
+      skipFinal: (state) => scenes.inPlace && !state.draft?.pairs.some(complete),
     });
     return {
       source: answered.placed,
@@ -1762,6 +1765,7 @@ export async function runPipeline(
 
   // The trees and patches of the questions are not needed any more.
   trees = null;
+  for (const mesh of meshes) dropSurfaceIndex(mesh);
   patches.clear();
   const placed = run(
     'size',

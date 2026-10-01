@@ -193,7 +193,7 @@ test('makes parts of one figure when there is no base, pulls them apart, refuses
 });
 
 /** A soup moved onto its own print plate: centred on the origin across x and y, on z = 0. */
-function onItsPlate(soup: Float32Array): Float32Array {
+function plateShift(soup: Float32Array): [number, number, number] {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < soup.length; i += 3)
@@ -201,8 +201,14 @@ function onItsPlate(soup: Float32Array): Float32Array {
       min[k] = Math.min(min[k]!, soup[i + k]!);
       max[k] = Math.max(max[k]!, soup[i + k]!);
     }
-  return movedSoup(soup, [-(min[0]! + max[0]!) / 2, -(min[1]! + max[1]!) / 2, -min[2]!]);
+  return [-(min[0]! + max[0]!) / 2, -(min[1]! + max[1]!) / 2, -min[2]!];
 }
+const onItsPlate = (soup: Float32Array): Float32Array => movedSoup(soup, plateShift(soup));
+const shifted = (p: readonly number[], by: readonly number[]): [number, number, number] => [
+  p[0]! + by[0]!,
+  p[1]! + by[1]!,
+  p[2]! + by[2]!,
+];
 
 test('lays a kit exported for print in a row, with nothing proposed', async ({
   page,
@@ -233,6 +239,25 @@ test('lays a kit exported for print in a row, with nothing proposed', async ({
   expect(xs[1]).toBeGreaterThan(xs[0]!);
   expect(xs[2]).toBeGreaterThan(xs[1]!);
   await shoot(page, testInfo, 'parts-laid-in-a-row');
+  // Nothing marked, nothing to put together: the parts would convert piled at the origin.
+  await expect(page.locator('#meet-pairs .chip')).toHaveCount(0);
+  await expect(page.locator('#meet-confirm')).toBeDisabled();
+  // The wing onto the body: the tip still lies apart.
+  const [byBody, byWing, byTip] = [body, wing, tip].map(plateShift);
+  await page.evaluate((p) => window.__mt.tap(0, p), shifted(WINGED_FIGURE.joint, byBody!));
+  await page.evaluate((p) => window.__mt.tap(1, p), shifted(WINGED_FIGURE.joint, byWing!));
+  await expect(page.locator('#meet-hint')).toHaveText(COPY.markEveryPart);
+  await expect(page.locator('#meet-confirm')).toBeDisabled();
+  // The tip onto the wing: every part placed.
+  await page.evaluate(() => window.__mt.addPair());
+  await page.evaluate((p) => window.__mt.tap(1, p), shifted(WINGED_FIGURE.tipJoint, byWing!));
+  await page.evaluate((p) => window.__mt.tap(2, p), shifted(WINGED_FIGURE.tipJoint, byTip!));
+  await expect(page.locator('#meet-confirm')).toBeEnabled();
+  await page.evaluate(() => window.__mt.fitMeeting());
+  const fitted = (await page.evaluate(() => window.__mt.state.question!)) as MeetAsked;
+  expect(fitted.stage).toBe('fitted');
+  expect(fitted.parts.map((p) => p.source)).toEqual(['body', 'marked', 'marked']);
+  await shoot(page, testInfo, 'parts-laid-out-joined');
   await page.evaluate(() => window.__mt.cancel());
 });
 
@@ -257,8 +282,13 @@ test('drops the joints when another base is chosen after them', async ({ page })
   await page.evaluate(() => window.__mt.chooseBase(1));
   const again = await question(page, base.serial);
   expect(again).toMatchObject({ kind: 'meet', about: 'parts', proposed: true, marks: null });
+  // The body and the recess base, both generated on the origin, read as laid out for print:
+  // confirmed with nothing marked, the final view comes before the next question.
   await page.evaluate(() => window.__mt.confirmMeet());
-  const next = await question(page, again.serial);
+  const final = await question(page, again.serial);
+  expect(final).toMatchObject({ kind: 'meet', about: 'parts', stage: 'fitted' });
+  await page.evaluate(() => window.__mt.confirmMeet());
+  const next = await question(page, final.serial);
   expect(next).toMatchObject({ kind: 'up', role: 'base', file: 1 });
   expect(await page.evaluate(() => window.__mt.state.error)).toBeNull();
   await page.evaluate(() => window.__mt.cancel());

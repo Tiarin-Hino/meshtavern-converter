@@ -32,7 +32,7 @@ export const FIXED_BYTES = 360 * 1024 ** 2;
  * The search tree and the tap's vertex-to-triangle index of a file at the meet questions (#93,
  * patches design note §4), per triangle: the tree's order, and per node of six triangles its box,
  * child, first and count (28 bytes); the index's list, stamp and offsets (about 18). Every file of
- * a pair or a kit gets both; the trees are released before the size step.
+ * a pair or a kit gets both; both are released before the size step.
  */
 export const TREE_BYTES_PER_TRIANGLE = 46;
 
