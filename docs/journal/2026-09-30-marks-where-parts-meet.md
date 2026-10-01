@@ -56,3 +56,5 @@ Development PC (i7-11700F, RTX 3060, 64 GB), 2026-09-30.
 ## Story angle
 
 "Two taps and a normal": why a point and a surface direction are all it takes to put a peg in a hole, and why most multi-part kits needed no taps at all.
+
+Later: see `2026-10-01-patches-where-parts-meet.md` (the marking reworked into patches in pairs).

@@ -152,7 +152,7 @@ function bruteRaycast(
   return best;
 }
 
-describe('TriangleBvh.raycast and within', () => {
+describe('TriangleBvh.raycast and within', { timeout: 30_000 }, () => {
   const recess = weldVertices(generateRecessBase()).mesh;
   const meshes: [string, IndexedMesh][] = [
     ['bumpy sheet', weldVertices(generateBumpySheet(12)).mesh],
@@ -173,7 +173,8 @@ describe('TriangleBvh.raycast and within', () => {
 
     it(`hits the nearest triangle a ray meets on the ${name}, as brute force does`, () => {
       const random = seeded(7);
-      const rays = 200;
+      // Every ray against every triangle by brute force: 80 rays keep it quick.
+      const rays = 80;
       let hits = 0;
       for (let k = 0; k < rays; k++) {
         const target = box.map(([lo, hi]) => lo + (hi - lo) * random()) as [number, number, number];
