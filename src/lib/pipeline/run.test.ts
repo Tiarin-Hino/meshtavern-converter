@@ -1095,6 +1095,26 @@ describe('runPipeline asking where the parts meet (#93)', () => {
     expectSameMini(again, result);
   }, 120_000);
 
+  it('proposes nothing for parts laid out for print, and lays them in a row', async () => {
+    const { body, wing } = generateWingedFigure();
+    // Each part centred on the origin, on z = 0: as a print layout exports them.
+    const plate = (soup: Float32Array, dx: number, dy: number, dz: number) =>
+      encodeBinaryStl(movedSoup(soup, [dx, dy, dz]));
+    const ask = answering();
+    await runPipeline(plate(body, 0, 0, 0), {
+      bake: 0,
+      secondStl: plate(wing, -12.5, 0, -10.5),
+      pairing: { baseFile: null },
+      askUp: ask,
+    }).catch(() => undefined);
+    const parts = ask.meets[0]!;
+    expect(parts).toMatchObject({ about: 'parts', stage: 'pairs', proposed: true, inPlace: false });
+    expect(parts.pairs).toEqual([]);
+    // Side by side: the wing to the right of the body.
+    const [atBody, atWing] = parts.apart!.shown;
+    expect(atWing!.translation[0]).toBeGreaterThan(atBody!.translation[0]);
+  }, 120_000);
+
   it('makes the files parts of one figure when no base is chosen, and asks nothing about a base', async () => {
     const noBase: UpAnswer = {
       kind: 'up',
@@ -1115,10 +1135,11 @@ describe('runPipeline asking where the parts meet (#93)', () => {
       'parts',
       'mini',
     ]);
-    expect(ask.meets[1]!.parts.map((p) => p.file)).toEqual([0, 1, 2]);
+    // Without a base the recess base is a part, and the bulkiest: the body.
+    expect(ask.meets[1]!.parts.map((p) => p.file)).toEqual([1, 0, 2]);
     expect(ask.meets[1]!.roles).toEqual({
       baseFile: null,
-      figureFiles: [0, 1, 2],
+      figureFiles: [1, 0, 2],
     });
     expect(result.pair).toMatchObject({
       placement: null,

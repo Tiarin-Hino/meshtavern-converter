@@ -57,6 +57,11 @@ export interface FileShape {
   aspect: number;
   /** A flat underside covering `MIN_BASE_COVERAGE` of the footprint: what a base has. */
   flatUnderside: boolean;
+  /**
+   * How bulky the file is, cubic file units: its enclosed volume, or its box's when the shell is
+   * open. The bulkiest figure file is the body of a figure in parts (#93). Left out: 0.
+   */
+  bulk?: number;
 }
 
 export interface Pairing {
@@ -83,10 +88,18 @@ export interface PairingOptions {
 }
 
 /** The figure's parts by file index, in the order given: every file that is not the base (#93). */
-export const figureFiles = (pairing: Pairing): number[] =>
-  pairing.files.map((_, file) => file).filter((file) => file !== pairing.baseFile);
+export function figureFiles(pairing: Pairing): number[] {
+  const files = pairing.files.map((_, file) => file).filter((file) => file !== pairing.baseFile);
+  // The body first: the bulkiest part, whatever order the files came in (a file picker lists
+  // `name-part-head.stl` before `name.stl`); the earlier on a tie. The rest in the order given.
+  let body = 0;
+  files.forEach((file, k) => {
+    if ((pairing.files[file]!.bulk ?? 0) > (pairing.files[files[body]!]!.bulk ?? 0)) body = k;
+  });
+  return [files[body]!, ...files.filter((_, k) => k !== body)];
+}
 
-/** The figure's body: its first part in the order given (#93). */
+/** The figure's body: its bulkiest part (#93). */
 export const bodyFile = (pairing: Pairing): number => figureFiles(pairing)[0]!;
 
 /**
@@ -523,7 +536,9 @@ export function shapeOfFile(mesh: IndexedMesh, oriented: FileOrientation): FileS
     const turned = TO_Y_UP[orientation.up](max[0] - min[0], max[1] - min[1], max[2] - min[2]);
     sizeMm = [Math.abs(turned[0]), Math.abs(turned[1]), Math.abs(turned[2])];
   }
-  return { ...fileShape(orientation, sizeMm), flatUnderside: oriented.flatUnderside };
+  const { min, max, volume } = scan;
+  const bulk = volume > 0 ? volume : (max[0] - min[0]) * (max[1] - min[1]) * (max[2] - min[2]);
+  return { ...fileShape(orientation, sizeMm), flatUnderside: oriented.flatUnderside, bulk };
 }
 
 /** Of these files, the one with the lowest aspect; on a tie the later, as the order keeps the first as the figure. */

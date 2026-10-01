@@ -270,11 +270,22 @@ describe('guessRoles', () => {
       warnings: [],
       files: [figure, base],
     });
-    expect(figureFiles(pairing)).toEqual([0, 1]);
-    expect(bodyFile(pairing)).toBe(0);
+    // The body is the bulkier part, whatever the order: here the low, wide one.
+    expect(figureFiles(pairing)).toEqual([1, 0]);
+    expect(bodyFile(pairing)).toBe(1);
+    // Without a bulk the order given decides.
+    const plain = guessRoles(
+      [
+        { ...figure, bulk: undefined },
+        { ...base, bulk: undefined },
+      ],
+      { baseFile: null },
+    );
+    expect(figureFiles(plain)).toEqual([0, 1]);
     const withBase = guessRoles([base, figure, lowCreatureShape()]);
-    expect(figureFiles(withBase)).toEqual([1, 2]);
-    expect(bodyFile(withBase)).toBe(1);
+    // The low creature is bulkier than the figure: it leads.
+    expect(figureFiles(withBase)).toEqual([2, 1]);
+    expect(bodyFile(withBase)).toBe(2);
   });
 
   it('swaps the roles on request and keeps the warnings as seen', () => {

@@ -263,8 +263,12 @@ export const wholePart = (file: number, mesh: IndexedMesh): PartResult => ({
  * _(proposal)_
  */
 export const IN_PLACE_GAP_MM = 1;
-/** At the parts question, each part that touches another is pulled this far from the body's middle. _(proposal)_ */
-export const EXPLODE_MM = 15;
+/** At the parts question the parts are laid this share of the body's largest side apart... _(proposal)_ */
+export const APART_SHARE = 0.15;
+/** ...and at least this far. _(proposal)_ */
+export const APART_MIN_GAP_MM = 10;
+/** A part that lands on one moved before it is moved a gap further, at most this many times. */
+const APART_MAX_STEPS = 50;
 
 /** Where a part its file puts in place touches another, as pairs of patches in their files' coordinates. */
 export interface ProposedJoint {
@@ -307,8 +311,8 @@ export function proposedJoints(
   return proposals;
 }
 
-/** The middle of a mesh's box. */
-function middleOf(positions: Float32Array): Vec3 {
+/** The box of a mesh's vertices, moved by `by`. */
+function boxOfMesh(positions: Float32Array, by: Vec3 = [0, 0, 0]): { min: Vec3; max: Vec3 } {
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < positions.length; i += 3) {
@@ -317,29 +321,120 @@ function middleOf(positions: Float32Array): Vec3 {
       if (positions[i + k]! > max[k]!) max[k] = positions[i + k]!;
     }
   }
-  return [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  return {
+    min: [min[0] + by[0], min[1] + by[1], min[2] + by[2]],
+    max: [max[0] + by[0], max[1] + by[1], max[2] + by[2]],
+  };
 }
 
+const overlap = (a: { min: Vec3; max: Vec3 }, b: { min: Vec3; max: Vec3 }, gap: number): boolean =>
+  [0, 1, 2].every((k) => a.min[k]! < b.max[k]! + gap && b.min[k]! < a.max[k]! + gap);
+
 /**
- * The parts pulled apart (patches §3.3): each part that touches another (`touching`) moved
- * `EXPLODE_MM` from the middle of the body's box towards the middle of its own; the body and the
- * parts that lie apart stay. Translations in the body's file frame.
+ * The parts laid apart for marking (#93, PM decision 2026-10-01: shown separately, as a figure
+ * beside its base): each part whose box comes within the gap of the body's is moved along the
+ * line from the middle of the body's box to the middle of its own, just far enough that its box
+ * clears the body's and those of the parts moved before it by `APART_SHARE` of the body's largest
+ * side (at least `APART_MIN_GAP_MM`). The body and parts already apart stay. The direction keeps
+ * where a part belongs (a wing to its side, a tail behind), so the connectors face each other.
+ * Translations in the body's file frame.
  */
 export function pulledApart(
   meshes: readonly IndexedMesh[],
   figureFiles: readonly number[],
-  touching: ReadonlySet<number>,
 ): { file: number; translation: Vec3 }[] {
-  const body = middleOf(meshes[figureFiles[0]!]!.positions);
+  const body = boxOfMesh(meshes[figureFiles[0]!]!.positions);
+  const side = Math.max(...[0, 1, 2].map((k) => body.max[k]! - body.min[k]!));
+  const gap = Math.max(APART_MIN_GAP_MM, APART_SHARE * side);
+  const middle = (box: { min: Vec3; max: Vec3 }): Vec3 => [
+    (box.min[0] + box.max[0]) / 2,
+    (box.min[1] + box.max[1]) / 2,
+    (box.min[2] + box.max[2]) / 2,
+  ];
+  const placed = [body];
   return figureFiles.map((file, k) => {
-    if (k === 0 || !touching.has(file)) return { file, translation: [0, 0, 0] };
-    const own = middleOf(meshes[file]!.positions);
-    const d: Vec3 = [own[0] - body[0], own[1] - body[1], own[2] - body[2]];
+    const own = boxOfMesh(meshes[file]!.positions);
+    if (k === 0 || !overlap(own, body, gap)) {
+      if (k > 0) placed.push(own);
+      return { file, translation: [0, 0, 0] };
+    }
+    const from = middle(body);
+    const to = middle(own);
+    const d: Vec3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     const length = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     const away: Vec3 = length > 0 ? [d[0] / length, d[1] / length, d[2] / length] : [1, 0, 0];
-    return {
-      file,
-      translation: [away[0] * EXPLODE_MM, away[1] * EXPLODE_MM, away[2] * EXPLODE_MM],
-    };
+    // The least move along `away` that clears the body's box on some axis.
+    let t = Infinity;
+    for (let axis = 0; axis < 3; axis++) {
+      const a = away[axis]!;
+      if (a > 1e-9) t = Math.min(t, (body.max[axis]! + gap - own.min[axis]!) / a);
+      if (a < -1e-9) t = Math.min(t, (body.min[axis]! - gap - own.max[axis]!) / a);
+    }
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    const at = (s: number): Vec3 => [away[0] * s, away[1] * s, away[2] * s];
+    // Further, a gap at a time, while it lands on a part moved before it.
+    for (let step = 0; step < APART_MAX_STEPS; step++) {
+      const moved = boxOfMesh(meshes[file]!.positions, at(t));
+      if (!placed.some((other) => overlap(moved, other, gap))) break;
+      t += gap;
+    }
+    const translation = at(t);
+    placed.push(boxOfMesh(meshes[file]!.positions, translation));
+    return { file, translation };
+  });
+}
+
+/**
+ * A part file centred on the origin within this... _(proposal)_
+ */
+export const PRINT_CENTRE_MM = 2;
+/** ...and resting on the origin's plane within this is laid out for print, on a plate of its own. _(proposal)_ */
+export const PRINT_FLOOR_MM = 0.5;
+
+/**
+ * Whether a figure's part files are laid out for print, each on a plate of its own (#93, found on
+ * the PM's kit `large-04`, 2026-10-01): every file centred on the origin across two axes and
+ * resting on the origin's plane along the third, the same axis for all. Such files say nothing
+ * about where the parts go: they all overlap at the origin. Parts exported in place share the
+ * assembled figure's frame, and at least one of them (a wing, a raised head) is off the middle.
+ */
+export function laidOutForPrint(
+  meshes: readonly IndexedMesh[],
+  figureFiles: readonly number[],
+): boolean {
+  if (figureFiles.length < 2) return false;
+  const boxes = figureFiles.map((file) => boxOfMesh(meshes[file]!.positions));
+  return [0, 1, 2].some((floor) =>
+    boxes.every(
+      ({ min, max }) =>
+        Math.abs(min[floor]!) <= PRINT_FLOOR_MM &&
+        [0, 1, 2].every((k) => k === floor || Math.abs((min[k]! + max[k]!) / 2) <= PRINT_CENTRE_MM),
+    ),
+  );
+}
+
+/**
+ * Parts laid out for print, laid side by side for marking (#93): the body first, each next part
+ * to its right along x, a gap apart (as in `pulledApart`), every part on the body's floor and
+ * against its back across the other two axes. Translations in the body's file frame.
+ */
+export function laidInARow(
+  meshes: readonly IndexedMesh[],
+  figureFiles: readonly number[],
+): { file: number; translation: Vec3 }[] {
+  const body = boxOfMesh(meshes[figureFiles[0]!]!.positions);
+  const side = Math.max(...[0, 1, 2].map((k) => body.max[k]! - body.min[k]!));
+  const gap = Math.max(APART_MIN_GAP_MM, APART_SHARE * side);
+  let right = body.max[0];
+  return figureFiles.map((file, k) => {
+    if (k === 0) return { file, translation: [0, 0, 0] };
+    const own = boxOfMesh(meshes[file]!.positions);
+    const translation: Vec3 = [
+      right + gap - own.min[0],
+      body.min[1] - own.min[1],
+      body.min[2] - own.min[2],
+    ];
+    right = own.max[0] + translation[0];
+    return { file, translation };
   });
 }

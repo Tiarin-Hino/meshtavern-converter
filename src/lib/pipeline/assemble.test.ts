@@ -6,7 +6,15 @@ import {
   movedSoup,
   WINGED_FIGURE,
 } from '../../regression/shapes';
-import { assembleFigure, EXPLODE_MM, MAX_PARTS, proposedJoints, pulledApart } from './assemble';
+import {
+  APART_MIN_GAP_MM,
+  assembleFigure,
+  laidInARow,
+  laidOutForPrint,
+  MAX_PARTS,
+  proposedJoints,
+  pulledApart,
+} from './assemble';
 import type { Vec3 } from './base';
 import type { PartJoint, PatchPair } from './marks';
 import { weldVertices, type IndexedMesh } from './mesh';
@@ -180,15 +188,83 @@ describe('proposedJoints', { timeout: 60_000 }, () => {
     expect(proposedJoints(apart, [0, 1])).toEqual([]);
   });
 
-  it('pulls the parts that touch away from the body, and leaves the others', () => {
+  it('lays the parts apart: each clear of the body and of the others, in its own direction', () => {
     const { body, wing, tip } = generateWingedFigure();
-    const meshes = [body, wing, movedSoup(tip, TIP_MOVE)].map(welded);
-    const pulled = pulledApart(meshes, [0, 1, 2], new Set([0, 1]));
+    const far = movedSoup(tip, [0, 200, 0]);
+    const meshes = [body, wing, tip, far].map(welded);
+    const pulled = pulledApart(meshes, [0, 1, 2, 3]);
     expect(pulled[0]!.translation).toEqual([0, 0, 0]);
-    expect(Math.hypot(...pulled[1]!.translation)).toBeCloseTo(EXPLODE_MM, 9);
-    // The wing lies to the body's +x.
+    // The wing and the tip lie to the body's +x: they move that way, the tip beyond the wing.
     expect(pulled[1]!.translation[0]).toBeGreaterThan(0);
-    expect(pulled[2]!.translation).toEqual([0, 0, 0]);
+    expect(pulled[2]!.translation[0]).toBeGreaterThan(0);
+    // A part already far from the body stays.
+    expect(pulled[3]!.translation).toEqual([0, 0, 0]);
+    const box = (k: number) => {
+      const p = meshes[k]!.positions;
+      const t = pulled[k]!.translation;
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < p.length; i += 3)
+        for (let a = 0; a < 3; a++) {
+          min[a] = Math.min(min[a]!, p[i + a]! + t[a]!);
+          max[a] = Math.max(max[a]!, p[i + a]! + t[a]!);
+        }
+      return { min, max };
+    };
+    const apart = (a: number, b: number) =>
+      [0, 1, 2].some((k) => box(a).min[k]! >= box(b).max[k]! || box(b).min[k]! >= box(a).max[k]!);
+    expect(apart(1, 0)).toBe(true);
+    expect(apart(2, 0)).toBe(true);
+    expect(apart(2, 1)).toBe(true);
+    // At least the minimum gap from the body's box.
+    expect(box(1).min[0]! - box(0).max[0]!).toBeGreaterThanOrEqual(APART_MIN_GAP_MM - 1e-9);
+  });
+});
+
+/** A soup moved so its box is centred on the origin across x and y and rests on z = 0: a part laid out for print. */
+function onItsPlate(soup: Float32Array): Float32Array {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < soup.length; i += 3)
+    for (let k = 0; k < 3; k++) {
+      min[k] = Math.min(min[k]!, soup[i + k]!);
+      max[k] = Math.max(max[k]!, soup[i + k]!);
+    }
+  return movedSoup(soup, [-(min[0]! + max[0]!) / 2, -(min[1]! + max[1]!) / 2, -min[2]!]);
+}
+
+describe('parts laid out for print (#93)', () => {
+  const { body, wing, tip } = generateWingedFigure();
+
+  it('tells parts laid out for print from parts exported in place', () => {
+    const plated = [body, wing, tip].map(onItsPlate).map(welded);
+    expect(laidOutForPrint(plated, [0, 1, 2])).toBe(true);
+    // In place: the wing and the tip are off the middle.
+    expect(laidOutForPrint([body, wing, tip].map(welded), [0, 1, 2])).toBe(false);
+    // One part laid out for print among parts in place is not enough.
+    expect(laidOutForPrint([onItsPlate(body), wing, tip].map(welded), [0, 1, 2])).toBe(false);
+    expect(laidOutForPrint(plated, [0])).toBe(false);
+  });
+
+  it('lays them in a row, the body first, a gap apart, on the floor of the body', () => {
+    const plated = [body, wing, tip].map(onItsPlate).map(welded);
+    const row = laidInARow(plated, [0, 1, 2]);
+    expect(row[0]!.translation).toEqual([0, 0, 0]);
+    const box = (k: number) => {
+      const p = plated[k]!.positions;
+      const t = row[k]!.translation;
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < p.length; i += 3)
+        for (let a = 0; a < 3; a++) {
+          min[a] = Math.min(min[a]!, p[i + a]! + t[a]!);
+          max[a] = Math.max(max[a]!, p[i + a]! + t[a]!);
+        }
+      return { min, max };
+    };
+    expect(box(1).min[0]! - box(0).max[0]!).toBeCloseTo(APART_MIN_GAP_MM, 4);
+    expect(box(2).min[0]! - box(1).max[0]!).toBeCloseTo(APART_MIN_GAP_MM, 4);
+    for (const k of [1, 2]) expect(box(k).min[2]).toBeCloseTo(box(0).min[2]!, 4);
   });
 });
 

@@ -28,6 +28,8 @@ import {
   MAX_PARTS,
   placeSummary,
   proposedJoints,
+  laidInARow,
+  laidOutForPrint,
   pulledApart,
   resolvePairs,
   treesOver,
@@ -1302,9 +1304,10 @@ export async function runPipeline(
       const up = resolveOrientation(meshes[body]!, {}, standing.standing[body]!.detection)
         .orientation.rotation;
       const inFiles = figureSourceOf(standing, pairing, [], treeOf);
-      const proposals = proposedJoints(meshes, files, treeOf);
-      const touching = new Set(proposals.flatMap(({ part, onto }) => [part, onto]));
-      const pulled = pulledApart(meshes, files, touching);
+      // Parts laid out for print overlap at the origin: nothing to propose, laid in a row.
+      const forPrint = laidOutForPrint(meshes, files);
+      const proposals = forPrint ? [] : proposedJoints(meshes, files, treeOf);
+      const pulled = forPrint ? laidInARow(meshes, files) : pulledApart(meshes, files);
       // The union moved part by part, for the box of the parts pulled apart.
       const moved = inFiles.mesh.positions.slice();
       let at = 0;
@@ -1326,7 +1329,7 @@ export async function runPipeline(
         moved,
         up,
       );
-      return { up, inFiles, proposals, apart };
+      return { up, inFiles, proposals, apart, inPlace: !forPrint };
     });
     const answered = await askMeeting<FigureSource>(ask, {
       step: 'assemble',
@@ -1347,6 +1350,7 @@ export async function runPipeline(
         return {
           ...standShown(source.parts, source.mesh.positions, scenes.up),
           apart: stage === 'pairs' ? scenes.apart : null,
+          inPlace: scenes.inPlace,
           parts: source.parts,
           placement: null,
           roles: rolesOf(pairing),

@@ -107,6 +107,11 @@ export interface MeetQuestion extends QuestionBase {
   placement: Placement | null;
   /** `parts`, `pairs`: the parts pulled apart, so a joint's faces can be seen and tapped; null otherwise. */
   apart: { shown: Shown[]; box: Box } | null;
+  /**
+   * `parts`: false when the part files are laid out for print, each on its own plate at the
+   * origin (`laidOutForPrint`): where the files put them means nothing, only `apart` is drawn.
+   */
+  inPlace?: boolean;
   /** What a `pick` action hit; null when it missed. Only after a `pick`. */
   picked?: Hit | null;
   /** What the last action could not do. */

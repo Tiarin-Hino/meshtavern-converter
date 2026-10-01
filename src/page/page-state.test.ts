@@ -325,6 +325,9 @@ describe('where the parts meet (#93)', () => {
     expect(ask('parts', true, [])).toBe(
       'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.',
     );
+    expect(describePairs({ about: 'parts', proposed: true, pairs: [], inPlace: false })).toBe(
+      'Each part comes on its own. Tap where two parts touch, on both, to put them together.',
+    );
     expect(ask('base', false, [])).toBe('Tap the base and the figure where they touch.');
     expect(ask('parts', false, [pair])).toBe(
       'Tap a part in place and the part that goes there, where they touch.',

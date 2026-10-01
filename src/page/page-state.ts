@@ -89,6 +89,7 @@ export const COPY = {
   undo: 'Undo',
   startOver: 'Start over',
   pullApart: 'Pull apart',
+  showInPlace: 'Show in place',
   backToMarking: 'Back to marking',
   lookAt: 'Look at',
   viewAll: 'All',
@@ -310,7 +311,7 @@ export function describeParts(
  * or why the last tap did nothing.
  */
 export function describePairs(
-  question: Pick<MeetQuestion, 'about' | 'proposed' | 'note'> & {
+  question: Pick<MeetQuestion, 'about' | 'proposed' | 'note' | 'inPlace'> & {
     pairs: readonly { on: object | null; of: object | null }[];
   },
 ): string {
@@ -328,9 +329,11 @@ export function describePairs(
   if (question.proposed)
     return question.pairs.length > 0
       ? 'Confirm, or tap and brush to change a pair: × drops one, Start over brings them back.'
-      : parts
-        ? 'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.'
-        : 'Nothing found. Tap where they touch, or confirm to let the converter place it.';
+      : parts && question.inPlace === false
+        ? 'Each part comes on its own. Tap where two parts touch, on both, to put them together.'
+        : parts
+          ? 'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.'
+          : 'Nothing found. Tap where they touch, or confirm to let the converter place it.';
   if (question.pairs.some(({ on, of }) => (on === null) !== (of === null)))
     return 'Mark the other side, or clear the pair.';
   return parts
