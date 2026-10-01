@@ -87,7 +87,7 @@ test('proposes the pair apart, shows where it puts the figure, and converts once
   expect(proposed.shown.map((s) => s.file)).toEqual([1, 0]);
   await expect(page.locator('#meet-question')).toHaveText(COPY.askPairs);
   await expect(page.locator('#meet-hint')).toHaveText(
-    'Confirm, or tap where they touch to mark your own.',
+    'Confirm, or tap and brush to change a pair: × drops one, Start over brings them back.',
   );
   await expect(page.locator('#meet-pairs .chip')).toHaveText(['1  recess-base · figure  proposed']);
   await expect(page.locator('#meet-confirm')).toHaveText(COPY.confirmPairs);
@@ -125,7 +125,13 @@ test('marks two pairs of its own, brushes and erases, fits, goes back and tilts'
 }, testInfo) => {
   test.setTimeout(240_000);
   await atMeeting(page);
-  // The first tap starts the person's own marks: one side, Confirm waits for the other.
+  // The proposed pair dropped, the first tap starts a pair of one's own: one side, Confirm
+  // waits for the other.
+  await page.locator('#meet-pairs .chip-clear').first().click();
+  await page.waitForFunction(() => {
+    const q = window.__mt.state.question;
+    return q?.kind === 'meet' && q.pairs.length === 0;
+  });
   await page.evaluate((point) => window.__mt.tap(1, point), FLOOR_A);
   let asked = await meet(page);
   expect(asked.proposed).toBe(false);
@@ -155,6 +161,7 @@ test('marks two pairs of its own, brushes and erases, fits, goes back and tilts'
   // Start over, and two pairs by taps: the second in its own colour.
   await page.evaluate(() => window.__mt.clearMarks());
   expect((await meet(page)).proposed).toBe(true);
+  await page.evaluate(() => window.__mt.clearMarks(0));
   await page.evaluate((point) => window.__mt.tap(1, point), FLOOR_A);
   await page.evaluate((point) => window.__mt.tap(0, point), SOLE_A);
   await page.evaluate(() => window.__mt.addPair());
@@ -245,6 +252,45 @@ test('marks two pairs of its own, brushes and erases, fits, goes back and tilts'
   await expect(page.locator('#placement')).toHaveText('Set in the 13 mm recess');
 });
 
+test('edits the proposal, and looks around a part', async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
+  const proposed = await atMeeting(page);
+  const area = proposed.pairs[0]!.on!.areaMm2;
+  // A tap on the proposed pair adds to it: the proposal becomes the person's pairs.
+  await page.evaluate((point) => window.__mt.tap(1, point), [-5, 2, FLOOR_MM] as [
+    number,
+    number,
+    number,
+  ]);
+  let asked = await meet(page);
+  expect(asked.proposed).toBe(false);
+  expect(sides(asked)).toEqual([[1, 0]]);
+  expect(asked.pairs[0]!.on!.areaMm2).toBeGreaterThan(area);
+  await expect(page.locator('#meet-pairs .chip')).toHaveText(['1  recess-base · figure']);
+  // Undo: the proposal again.
+  await page.evaluate(() => window.__mt.undoMark());
+  expect((await meet(page)).proposed).toBe(true);
+
+  // Look at one file, then turn the view about a spot by right-clicking it.
+  await expect(page.locator('#meet-view button')).toHaveText(['recess-base', 'figure', 'All']);
+  await page.locator('#meet-view button', { hasText: 'figure' }).click();
+  await shoot(page, testInfo, 'pairs-look-at-figure');
+  await page.locator('#meet-view button', { hasText: 'All' }).click();
+  const onRim = (await page.evaluate(() => window.__mt.screenOf(1, [12, 0, 4])))!;
+  const canvas = (await page.locator('#viewport').boundingBox())!;
+  const serial = await page.evaluate(() => window.__mt.state.question!.serial);
+  await page.mouse.click(canvas.x + onRim[0], canvas.y + onRim[1], { button: 'right' });
+  await question(page, serial);
+  asked = await meet(page);
+  expect(asked.picked?.file).toBe(1);
+  expect(asked.proposed).toBe(true);
+  // The rim's point is now in the middle of the canvas.
+  const centred = (await page.evaluate(() => window.__mt.screenOf(1, [12, 0, 4])))!;
+  expect(Math.abs(centred[0] - canvas.width / 2)).toBeLessThan(3);
+  expect(Math.abs(centred[1] - canvas.height / 2)).toBeLessThan(3);
+  await shoot(page, testInfo, 'pairs-focused');
+});
+
 test.describe('on a phone', () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
 
@@ -261,7 +307,25 @@ test.describe('on a phone', () => {
       await page.touchscreen.tap(canvas.x + at![0], canvas.y + at![1]);
       await question(page, serial);
     };
-    // The base's top, from above.
+    // A finger held on the base turns the view about it, and marks nothing.
+    const onBase = (await page.evaluate(() => window.__mt.screenOf(1, [12, 0, 4])))!;
+    const before = await page.evaluate(() => window.__mt.state.question!.serial);
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchEnd') =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints:
+          type === 'touchEnd' ? [] : [{ x: canvas.x + onBase[0], y: canvas.y + onBase[1] }],
+      });
+    await touch('touchStart');
+    await page.waitForTimeout(800);
+    await touch('touchEnd');
+    await question(page, before);
+    expect((await meet(page)).picked?.file).toBe(1);
+    expect((await meet(page)).proposed).toBe(true);
+    // The proposed pair dropped, then the base's top, from above.
+    await page.evaluate(() => window.__mt.clearMarks(0));
+    await page.evaluate(() => window.__mt.setCamera(34, 22, 1));
     await tap(await page.evaluate(() => window.__mt.screenOf(1, [12, 0, 4])));
     expect(sides(await meet(page))).toEqual([[1, null]]);
     await shoot(page, testInfo, 'pairs-phone-one-side');

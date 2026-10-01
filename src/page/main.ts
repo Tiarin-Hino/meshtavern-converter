@@ -39,6 +39,7 @@ import {
   type Fit,
   MAX_PAIRS,
   MAX_PARTS,
+  pairsAllowed,
   type MeetAction,
   type MeetQuestion,
   type PartsOptions,
@@ -255,6 +256,10 @@ declare global {
       pickAt: (x: number, y: number) => Promise<{ file: number; point: Vec3 } | null>;
       /** At a question: where a file's point is on the canvas, CSS pixels from its corner. */
       screenOf: (file: number, point: Vec3) => [number, number] | null;
+      /** At a meet question: the camera turns about the spot under (x, y), as a right-click does; resolves with what was hit. */
+      focusAt: (x: number, y: number) => Promise<{ file: number; point: Vec3 } | null>;
+      /** At a meet question: the camera frames one file, as its Look at button does. */
+      focusFile: (file: number) => void;
       /** The Base section's buttons (#93): converts again, asking only where they meet, or how the parts go together. */
       markMeeting: () => Promise<void>;
       markParts: () => Promise<void>;
@@ -363,6 +368,7 @@ const meetInputs = {
   adjust: document.querySelector<HTMLElement>('#meet-adjust')!,
   tilt: document.querySelector<HTMLButtonElement>('#meet-tilt')!,
   back: document.querySelector<HTMLButtonElement>('#meet-back')!,
+  view: document.querySelector<HTMLElement>('#meet-view')!,
   confirm: document.querySelector<HTMLButtonElement>('#meet-confirm')!,
 };
 const pairInputs = {
@@ -1113,6 +1119,7 @@ function showQuestion(): void {
     pulled ? pulled.box : question.box,
     `:${question.stage}${pulled ? ':apart' : ''}`,
   );
+  showViewButtons(pulled ? pulled.shown : question.shown);
   viewer.setPatches(
     asking.patches.flatMap(({ on, of }, pair) =>
       [on, of].flatMap((side) =>
@@ -1167,9 +1174,7 @@ function showQuestion(): void {
     meetInputs.brush.setAttribute('aria-pressed', String(state.meet.brush));
     meetInputs.erase.setAttribute('aria-pressed', String(state.meet.erase));
     meetInputs.add.disabled =
-      question.proposed ||
-      question.pairs.length >= MAX_PAIRS ||
-      state.meet.pair >= question.pairs.length;
+      question.pairs.length >= pairsOf(question) || state.meet.pair >= question.pairs.length;
     meetInputs.undo.disabled = question.proposed && question.marks === null;
     meetInputs.clear.disabled = question.proposed;
     meetInputs.confirm.textContent = COPY.confirmPairs;
@@ -1197,8 +1202,8 @@ function showQuestion(): void {
 /** One chip per pair at the pairs stop, in the pair's colour; the selected one takes the next tap. */
 function showPairChips(question: AskedMeet): void {
   const count = Math.min(
-    MAX_PAIRS,
-    Math.max(question.pairs.length, question.proposed ? 0 : state.meet.pair + 1, 1),
+    pairsOf(question),
+    Math.max(question.pairs.length, state.meet.pair + 1, 1),
   );
   const side = (patch: PatchSummary | null): string => (patch ? partName(nameOf(patch.file)) : '…');
   const chips: HTMLElement[] = [];
@@ -1210,11 +1215,12 @@ function showPairChips(question: AskedMeet): void {
     chip.type = 'button';
     chip.className = 'chip';
     chip.dataset.pair = String(k);
-    chip.setAttribute('aria-pressed', String(!question.proposed && k === state.meet.pair));
+    chip.setAttribute('aria-pressed', String(k === state.meet.pair));
     chip.textContent = `${k + 1}  ${side(pair?.on ?? null)} · ${side(pair?.of ?? null)}${question.proposed ? '  proposed' : ''}`;
     chip.addEventListener('click', () => selectPair(k));
     item.append(chip);
-    if (pair && !question.proposed) {
+    // A proposed pair can be dropped too: the rest of the proposal stays, to edit.
+    if (pair) {
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.className = 'chip-clear';
@@ -1242,11 +1248,15 @@ function fitOf(question: AskedMeet): Fit | null {
   return question.parts.find((entry) => entry.file === part)?.joint?.fit ?? null;
 }
 
+/** How many pairs the meet question on screen takes. */
+const pairsOf = (question: AskedMeet): number =>
+  pairsAllowed(question.about, question.roles.figureFiles.length);
+
 /** The pair the next tap goes to: one of the pairs, or the next, new one. */
 function selectPair(k: number): void {
   const question = meetQuestion();
   if (!question) return;
-  state.meet.pair = Math.max(0, Math.min(k, question.pairs.length, MAX_PAIRS - 1));
+  state.meet.pair = Math.max(0, Math.min(k, question.pairs.length, pairsOf(question) - 1));
   showQuestion();
 }
 
@@ -1372,6 +1382,35 @@ function queueDab(x: number, y: number): void {
   if (!at) return;
   brushing.dabs.push(at);
   brushing.frame ||= requestAnimationFrame(flushBrush);
+}
+
+/**
+ * Turns the camera about the spot under canvas point (x, y) at a meet question (#93): the worker
+ * says what is there, the viewer moves the orbit's centre to it. Resolves with what was hit.
+ */
+async function focusAt(x: number, y: number): Promise<{ file: number; point: Vec3 } | null> {
+  const at = targetAt(x, y);
+  if (!at || !meetQuestion()) return null;
+  await sendMeet({ do: 'pick', at });
+  const hit = meetQuestion()?.picked ?? null;
+  if (hit) viewer.focusOn(hit.file, hit.point);
+  return hit;
+}
+
+/** The Look at buttons of a meet question: each file shown, and all of them. */
+function showViewButtons(shown: readonly Shown[]): void {
+  const buttons = shown.map(({ file }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = partName(nameOf(file));
+    button.addEventListener('click', () => viewer.focusFile(file));
+    return button;
+  });
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.textContent = COPY.viewAll;
+  all.addEventListener('click', () => viewer.setCamera(34, 22, 1));
+  meetInputs.view.replaceChildren(...buttons, all);
 }
 
 /** Raises, lowers, turns or lets tilt what is fitted at the final view. */
@@ -2041,38 +2080,61 @@ const TAP_MAX_MS = 400;
 /** The brush: a dab every this many CSS pixels of a drag, this wide on the surface. _(proposals, patches §7.1)_ */
 const BRUSH_STEP_PX = 6;
 const BRUSH_RADIUS_MM = 1;
+/** A finger held this long without moving turns the camera about the spot under it (#93). _(proposal)_ */
+const FOCUS_HOLD_MS = 500;
 /** Fingers and buttons on the canvas: one paints with the brush on, two orbit. */
 const pointers = new Set<number>();
-let press: {
+interface Press {
   id: number;
+  button: number;
   x: number;
   y: number;
   at: number;
   last: [number, number] | null;
-} | null = null;
+  /** Set once a held finger turned the camera: its release is no tap. */
+  focused: boolean;
+  hold: number;
+}
+let press: Press | null = null;
 const canvasPoint = (event: PointerEvent): [number, number] => {
   const rect = canvas.getBoundingClientRect();
   return [event.clientX - rect.left, event.clientY - rect.top];
 };
+const endPress = (): void => {
+  if (press) clearTimeout(press.hold);
+  press = null;
+};
 canvas.addEventListener('pointerdown', (event) => {
   pointers.add(event.pointerId);
+  endPress();
   // A second finger orbits: the first one's drag is not a tap or a stroke any more.
-  press =
-    pointers.size === 1 && event.button === 0
-      ? {
-          id: event.pointerId,
-          x: event.clientX,
-          y: event.clientY,
-          at: performance.now(),
-          last: null,
-        }
-      : null;
+  if (pointers.size !== 1 || (event.button !== 0 && event.button !== 2)) return;
+  const [x, y] = canvasPoint(event);
+  const held: Press = {
+    id: event.pointerId,
+    button: event.button,
+    x: event.clientX,
+    y: event.clientY,
+    at: performance.now(),
+    last: null,
+    focused: false,
+    hold: 0,
+  };
+  // A finger held still on a part turns the view about it.
+  if (event.pointerType === 'touch')
+    held.hold = window.setTimeout(() => {
+      if (press !== held || held.last) return;
+      held.focused = true;
+      void focusAt(x, y);
+    }, FOCUS_HOLD_MS);
+  press = held;
 });
 canvas.addEventListener('pointermove', (event) => {
-  if (!press || press.id !== event.pointerId || !state.meet.brush) return;
-  if (meetQuestion()?.stage !== 'pairs') return;
-  if (!press.last && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= TAP_MAX_PX)
-    return;
+  if (!press || press.id !== event.pointerId) return;
+  const far = Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_MAX_PX;
+  if (far) clearTimeout(press.hold);
+  if (press.button !== 0 || !state.meet.brush || meetQuestion()?.stage !== 'pairs') return;
+  if (!press.last && !far) return;
   const [x, y] = canvasPoint(event);
   if (press.last && Math.hypot(x - press.last[0], y - press.last[1]) < BRUSH_STEP_PX) return;
   press.last = [x, y];
@@ -2082,11 +2144,13 @@ const release = (event: PointerEvent): void => {
   pointers.delete(event.pointerId);
   const down = press;
   if (!down || down.id !== event.pointerId) return;
-  press = null;
-  if (event.type !== 'pointerup' || down.last || !meetQuestion()) return;
+  endPress();
+  if (event.type !== 'pointerup' || down.last || down.focused || !meetQuestion()) return;
   const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
   if (moved > TAP_MAX_PX || performance.now() - down.at > TAP_MAX_MS) return;
-  void tapAt(...canvasPoint(event));
+  // A right-click turns the view about the spot; a tap marks it.
+  if (down.button === 2) void focusAt(...canvasPoint(event));
+  else void tapAt(...canvasPoint(event));
 };
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);
@@ -2182,6 +2246,8 @@ window.__mt = {
     return meetQuestion()?.picked ?? null;
   },
   screenOf: (file, point) => viewer.screenOf(file, point),
+  focusAt,
+  focusFile: (file) => viewer.focusFile(file),
   markMeeting,
   markParts,
   turn,

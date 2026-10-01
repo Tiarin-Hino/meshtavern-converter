@@ -318,6 +318,8 @@ export class Viewer {
     this.pivot.quaternion.copy(this.turn);
     this.size.set(maxX - minX, maxY - minY, maxZ - minZ);
     holder.updateMatrixWorld(true);
+    // At a question the wheel zooms towards what is under the cursor (#93).
+    this.controls.zoomToCursor = true;
     if (reframe) this.setCamera(34, 22, 1);
   }
 
@@ -347,6 +349,8 @@ export class Viewer {
     const mesh = this.question?.meshes.get(file);
     if (!mesh) return null;
     this.pivot.updateMatrixWorld(true);
+    // A camera moved since the last frame has not updated its matrices yet.
+    this.camera.updateMatrixWorld();
     const world = mesh.localToWorld(new THREE.Vector3(...point));
     world.project(this.camera);
     const rect = this.canvas.getBoundingClientRect();
@@ -407,6 +411,41 @@ export class Viewer {
     }
   }
 
+  /**
+   * Turns the camera about a point of a file at a question (#93): the orbit's centre moves
+   * there and the camera keeps its direction, coming closer when it was far. What a right-click
+   * or a held finger on a part does, so two parts side by side can each be looked at.
+   */
+  focusOn(file: number, point: Vec3): void {
+    const mesh = this.question?.meshes.get(file);
+    if (!mesh) return;
+    this.pivot.updateMatrixWorld(true);
+    this.lookAt(mesh.localToWorld(new THREE.Vector3(...point)), null);
+  }
+
+  /** Frames one file at a question (#93): the orbit's centre at the middle of its box, the camera at its size. */
+  focusFile(file: number): void {
+    const mesh = this.question?.meshes.get(file);
+    if (!mesh) return;
+    this.pivot.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    this.lookAt(box.getCenter(new THREE.Vector3()), Math.max(size.x, size.y, size.z, 1) * 2.3);
+  }
+
+  /** The orbit's centre to `target`, the camera along its present direction at `distance` (null: keep it, at most as far as now). */
+  private lookAt(target: THREE.Vector3, distance: number | null): void {
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const length = offset.length();
+    const radius = Math.max(this.size.x, this.size.y, this.size.z, 1);
+    // A point looked at closely: no further than the size of what is shown.
+    const wanted = distance ?? Math.min(length, radius * 1.2);
+    offset.setLength(wanted);
+    this.controls.target.copy(target);
+    this.camera.position.copy(target).add(offset);
+    this.controls.update();
+  }
+
   private clearPatches(): void {
     const geometries = new Set<THREE.BufferGeometry>();
     for (const patch of this.patches) {
@@ -424,13 +463,13 @@ export class Viewer {
 
   /**
    * The brush at a question (#93, patches §7.4): while on, one finger and the left button are
-   * the page's to paint with; two fingers and the right button orbit.
+   * the page's to paint with; two fingers and the right button orbit, the middle button pans.
    */
   setBrush(on: boolean): void {
     const none = -1 as unknown as THREE.MOUSE;
     this.controls.mouseButtons = {
       LEFT: on ? none : THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.DOLLY,
+      MIDDLE: on ? THREE.MOUSE.PAN : THREE.MOUSE.DOLLY,
       RIGHT: on ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN,
     };
     this.controls.touches = {
@@ -712,6 +751,7 @@ export class Viewer {
     this.gizmo?.detach();
     this.moveGizmo?.detach();
     this.clearPatches();
+    this.controls.zoomToCursor = false;
     if (this.question) {
       this.pivot.remove(this.question.holder);
       this.scene.remove(this.pivot);
