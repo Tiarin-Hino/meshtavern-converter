@@ -29,11 +29,12 @@ export const BYTES_PER_TRIANGLE = 400;
 export const FIXED_BYTES = 360 * 1024 ** 2;
 
 /**
- * The search tree of a file at the meet questions (#93, patches design note §4): its arrays per
- * triangle (the order, and per node of six triangles its box, child, first and count). Every
- * file of a pair or a kit gets one; they are released before the size step.
+ * The search tree and the tap's vertex-to-triangle index of a file at the meet questions (#93,
+ * patches design note §4), per triangle: the tree's order, and per node of six triangles its box,
+ * child, first and count (28 bytes); the index's list, stamp and offsets (about 18). Every file of
+ * a pair or a kit gets both; the trees are released before the size step.
  */
-export const TREE_BYTES_PER_TRIANGLE = 28;
+export const TREE_BYTES_PER_TRIANGLE = 46;
 
 /** Share of the device's memory a conversion may use: the system and other tabs need the rest. */
 export const DEVICE_SHARE = 0.5;

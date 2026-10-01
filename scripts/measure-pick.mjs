@@ -21,7 +21,7 @@ const option = (name) => {
 const runs = Number(option('--runs') ?? 20);
 const load = async (path) => (await runnerImport(path, { logLevel: 'silent' })).module;
 const { TriangleBvh, TREE_BUDGET_MS_PER_M } = await load('./src/lib/pipeline/bvh.ts');
-const { PICK_BUDGET_MS, resolvePatch } = await load('./src/lib/pipeline/marks.ts');
+const { PICK_BUDGET_MS, resolvePatch, surfaceIndexOf } = await load('./src/lib/pipeline/marks.ts');
 const { readStlTriangles } = await load('./src/lib/pipeline/stl.ts');
 const { dropInvalidTriangles, weldVertices } = await load('./src/lib/pipeline/mesh.ts');
 
@@ -43,6 +43,8 @@ for (const file of files) {
   const triangles = mesh.indices.length / 3;
   let start = performance.now();
   const tree = new TriangleBvh(mesh);
+  // The tap's index is built with the tree, while the question waits, as the worker does.
+  surfaceIndexOf(mesh);
   const treeMs = performance.now() - start;
   const perM = (treeMs / triangles) * 1e6;
   const min = [Infinity, Infinity, Infinity];

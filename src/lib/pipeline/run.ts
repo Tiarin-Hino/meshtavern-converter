@@ -54,6 +54,7 @@ import {
   strokesCovering,
   startMeeting,
   summaryOf,
+  surfaceIndexOf,
   type Hit,
   type MarkingAction,
   type Meeting,
@@ -1209,7 +1210,12 @@ export async function runPipeline(
       start ??= performance.now();
       const pending = ask(question);
       // The first tap should not wait for a tree.
-      resume(m.step, () => m.files.forEach((file) => treeOf(file)));
+      resume(m.step, () =>
+        m.files.forEach((file) => {
+          treeOf(file);
+          surfaceIndexOf(meshes[file]!);
+        }),
+      );
       const { action } = expectAnswer(await pending, 'meet');
       const hit = (target: Target): Hit | null =>
         hitOf(

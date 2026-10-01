@@ -176,49 +176,93 @@ function surfaceAt(
   return { seed, normal: dot(normal, normal) > 0 ? normal : own };
 }
 
-/** The triangles a tap takes (§5.2): from the nearest, across shared edges, within reach and facing the same way. */
+/** Which triangles use each vertex, and a mark per triangle for a walk: built once per mesh. */
+interface SurfaceIndex {
+  /** `list[offsets[v]]` to `list[offsets[v + 1]]`: the triangles that use vertex `v`. */
+  offsets: Uint32Array;
+  list: Uint32Array;
+  /** The walk a triangle was last taken by. */
+  stamp: Uint32Array;
+  walk: number;
+}
+
+const surfaceIndexes = new WeakMap<IndexedMesh, SurfaceIndex>();
+
+/**
+ * The vertex-to-triangle index of a mesh, built on its first tap and kept with it: a tap walks
+ * from triangle to triangle through it, so its cost follows the patch it takes, not everything
+ * within reach (61 000 triangles within 3 mm on a dense 1.25 M-triangle sculpt).
+ */
+export function surfaceIndexOf(mesh: IndexedMesh): SurfaceIndex {
+  const known = surfaceIndexes.get(mesh);
+  if (known) return known;
+  const { positions, indices } = mesh;
+  const vertices = positions.length / 3;
+  const offsets = new Uint32Array(vertices + 1);
+  for (let i = 0; i < indices.length; i++) offsets[indices[i]! + 1]!++;
+  for (let v = 0; v < vertices; v++) offsets[v + 1]! += offsets[v]!;
+  const list = new Uint32Array(indices.length);
+  const fill = offsets.slice(0, vertices);
+  for (let i = 0; i < indices.length; i++) list[fill[indices[i]!]!++] = (i / 3) | 0;
+  const index = {
+    offsets,
+    list,
+    stamp: new Uint32Array(indices.length / 3),
+    walk: 0,
+  };
+  surfaceIndexes.set(mesh, index);
+  return index;
+}
+
+/**
+ * The triangles a tap takes (§5.2): from the nearest, across shared edges, those whose centroid
+ * lies within reach and that face the same way. A triangle refused from one neighbour may still
+ * join from another: the result is the closure, whatever the order of the walk.
+ */
 function tapTriangles(mesh: IndexedMesh, tree: TriangleBvh, point: Vec3): number[] {
   const surface = surfaceAt(mesh, tree, point);
   if (!surface) return [];
   const { positions, indices } = mesh;
-  const candidates: number[] = [];
-  tree.within(point[0], point[1], point[2], TAP_REACH_MM, (t) => candidates.push(t));
-  candidates.sort((a, b) => a - b);
-  // Shared edges among the candidates, by their two vertices.
-  const vertexCount = positions.length / 3;
-  const edgeKey = (a: number, b: number): number =>
-    a < b ? a * vertexCount + b : b * vertexCount + a;
-  const byEdge = new Map<number, number[]>();
-  const normals = new Map<number, Vec3>();
-  for (const t of [surface.seed, ...candidates]) {
-    if (normals.has(t)) continue;
-    normals.set(t, unitNormal(positions, indices, t));
-    for (let k = 0; k < 3; k++) {
-      const key = edgeKey(indices[t * 3 + k]!, indices[t * 3 + ((k + 1) % 3)]!);
-      const list = byEdge.get(key);
-      if (list) list.push(t);
-      else byEdge.set(key, [t]);
-    }
+  const index = surfaceIndexOf(mesh);
+  if (index.walk === 0xffffffff) {
+    index.stamp.fill(0);
+    index.walk = 0;
   }
-  const taken = new Set<number>([surface.seed]);
-  // A triangle refused from one neighbour may still join from another: the result is the
-  // closure, whatever the order of the walk.
-  const queue = [surface.seed];
-  for (let at = 0; at < queue.length; at++) {
-    const from = queue[at]!;
-    const fromNormal = normals.get(from)!;
+  const walk = ++index.walk;
+  const [px, py, pz] = point;
+  const reach2 = TAP_REACH_MM * TAP_REACH_MM;
+  const withinReach = (t: number): boolean => {
+    const a = indices[t * 3]! * 3;
+    const b = indices[t * 3 + 1]! * 3;
+    const c = indices[t * 3 + 2]! * 3;
+    const gx = (positions[a]! + positions[b]! + positions[c]!) / 3 - px;
+    const gy = (positions[a + 1]! + positions[b + 1]! + positions[c + 1]!) / 3 - py;
+    const gz = (positions[a + 2]! + positions[b + 2]! + positions[c + 2]!) / 3 - pz;
+    return gx * gx + gy * gy + gz * gz <= reach2;
+  };
+  const uses = (t: number, v: number): boolean =>
+    indices[t * 3] === v || indices[t * 3 + 1] === v || indices[t * 3 + 2] === v;
+  const taken = [surface.seed];
+  index.stamp[surface.seed] = walk;
+  for (let at = 0; at < taken.length; at++) {
+    const from = taken[at]!;
+    const fromNormal = unitNormal(positions, indices, from);
     for (let k = 0; k < 3; k++) {
-      const key = edgeKey(indices[from * 3 + k]!, indices[from * 3 + ((k + 1) % 3)]!);
-      for (const next of byEdge.get(key)!) {
-        if (taken.has(next)) continue;
-        const n = normals.get(next)!;
+      const a = indices[from * 3 + k]!;
+      const b = indices[from * 3 + ((k + 1) % 3)]!;
+      // The triangles across edge a–b: those of vertex a that use b too.
+      for (let i = index.offsets[a]!; i < index.offsets[a + 1]!; i++) {
+        const next = index.list[i]!;
+        if (next === from || index.stamp[next] === walk || !uses(next, b)) continue;
+        if (!withinReach(next)) continue;
+        const n = unitNormal(positions, indices, next);
         if (dot(n, surface.normal) < TAP_CONE_COS || dot(n, fromNormal) < TAP_CREASE_COS) continue;
-        taken.add(next);
-        queue.push(next);
+        index.stamp[next] = walk;
+        taken.push(next);
       }
     }
   }
-  return [...taken];
+  return taken;
 }
 
 /** Applies one stroke to a patch's triangles (§5.1): a brush drag costs one stroke at a time. */
@@ -603,9 +647,10 @@ function addStroke(
 
 /**
  * One marking action applied to a meet question's state (§5.6): pure, the state given is not
- * changed. A tap or a dab on the proposal starts the person's own marks from nothing; `clear`
- * without a pair brings the proposal back; `undo` takes back one action. Returns the new state
- * and why the action did not do what it asked, if it did not.
+ * changed. To edit a proposal the caller seeds it as a draft first (`strokesCovering`, PM
+ * decision 2026-10-01), so this function only sees a draft or none: on none, a tap starts the
+ * person's own marks. `clear` without a pair brings the proposal back; `undo` takes back one
+ * action. Returns the new state and why the action did not do what it asked, if it did not.
  */
 export function applyMeetAction(
   state: MeetState,

@@ -21,7 +21,7 @@ const { placePairOnly } = await load('./src/lib/pipeline/run.ts');
 const { TriangleBvh, TREE_BUDGET_MS_PER_M } = await load('./src/lib/pipeline/bvh.ts');
 const { contactPatches, PROPOSAL_BUDGET_MS } = await load('./src/lib/pipeline/contact.ts');
 const { fitMeeting, FIT_BUDGET_MS, FIT_CHECK_MM } = await load('./src/lib/pipeline/fit.ts');
-const { PICK_BUDGET_MS, resolvePatch } = await load('./src/lib/pipeline/marks.ts');
+const { PICK_BUDGET_MS, resolvePatch, surfaceIndexOf } = await load('./src/lib/pipeline/marks.ts');
 const { apply } = await load('./src/lib/pipeline/rotation.ts');
 
 /** The figure moved this far away before the fit puts it back: across, up and back. */
@@ -80,7 +80,12 @@ for (const { figure, base } of pairs) {
     indices: mesh.indices.slice(ft * 3).map((i) => i - fv),
   };
   const [baseTree, baseTreeMs] = timed(() => new TriangleBvh(baseMesh));
-  const [figureTree, figureTreeMs] = timed(() => new TriangleBvh(figureMesh));
+  const [figureTree, figureTreeMs] = timed(() => {
+    const tree = new TriangleBvh(figureMesh);
+    // The tap's index is built with the tree, while the question waits, as the worker does.
+    surfaceIndexOf(figureMesh);
+    return tree;
+  });
   const triangles = (baseMesh.indices.length + figureMesh.indices.length) / 3;
   const treeMsPerM = ((baseTreeMs + figureTreeMs) / triangles) * 1e6;
   const [found, proposalMs] = timed(() =>
