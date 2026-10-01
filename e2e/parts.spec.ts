@@ -166,10 +166,12 @@ test('makes parts of one figure when there is no base, pulls them apart, refuses
   // The wing is where its file puts it: the pair where it touches the body is proposed.
   expect(parts.pairs).toHaveLength(1);
   expect(parts.apart!.shown.map((s) => s.file)).toEqual([0, 1]);
-  await expect(page.locator('#meet-apart')).toBeVisible();
-  await page.locator('#meet-apart').click();
-  await expect(page.locator('#meet-apart')).toHaveAttribute('aria-pressed', 'true');
+  // The parts start laid apart; Show in place puts them where their files put them.
+  await expect(page.locator('#meet-apart')).toHaveText(COPY.showInPlace);
   await shoot(page, testInfo, 'parts-pulled-apart');
+  await page.locator('#meet-apart').click();
+  await expect(page.locator('#meet-apart')).toHaveText(COPY.pullApart);
+  await shoot(page, testInfo, 'parts-in-place');
   // A kit in place has no final view: one Confirm.
   await page.evaluate(() => window.__mt.confirmMeet());
   const mini = await question(page, parts.serial);

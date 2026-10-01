@@ -1015,7 +1015,8 @@ function askUp(question: Question): Promise<Answer> {
       const before = state.question;
       // A new meeting starts with the first pair selected and the tools off.
       if (before?.kind !== 'meet' || before.about !== question.about) {
-        state.meet = meetUi();
+        // The parts start laid apart, as a figure beside its base (PM decision 2026-10-01).
+        state.meet = { ...meetUi(), apart: question.about === 'parts' };
         viewer.setBrush(false);
       }
       if (question.proposed) state.meet.pair = 0;
@@ -1113,7 +1114,7 @@ function showQuestion(): void {
   }
   // Where the parts meet (#93, patches §7): the pairs with the parts apart, then put together.
   const pairsStop = question.stage === 'pairs';
-  const pulled = pairsStop && state.meet.apart && question.apart;
+  const pulled = pairsStop && showsApart(question) && question.apart;
   drawShown(
     pulled ? pulled.shown : question.shown,
     pulled ? pulled.box : question.box,
@@ -1169,8 +1170,10 @@ function showQuestion(): void {
   if (pairsStop) {
     showPairChips(question);
     meetInputs.hint.textContent = describePairs(question);
-    meetInputs.apart.hidden = question.about !== 'parts' || !question.apart;
-    meetInputs.apart.setAttribute('aria-pressed', String(state.meet.apart));
+    // Parts laid out for print have no place of their own to show.
+    meetInputs.apart.hidden =
+      question.about !== 'parts' || !question.apart || question.inPlace === false;
+    meetInputs.apart.textContent = state.meet.apart ? COPY.showInPlace : COPY.pullApart;
     meetInputs.brush.setAttribute('aria-pressed', String(state.meet.brush));
     meetInputs.erase.setAttribute('aria-pressed', String(state.meet.erase));
     meetInputs.add.disabled =
@@ -1216,7 +1219,7 @@ function showPairChips(question: AskedMeet): void {
     chip.className = 'chip';
     chip.dataset.pair = String(k);
     chip.setAttribute('aria-pressed', String(k === state.meet.pair));
-    chip.textContent = `${k + 1}  ${side(pair?.on ?? null)} · ${side(pair?.of ?? null)}${question.proposed ? '  proposed' : ''}`;
+    chip.textContent = `${k + 1}  ${side(pair?.on ?? null)} · ${side(pair?.of ?? null)}${question.proposed && pair ? '  proposed' : ''}`;
     chip.addEventListener('click', () => selectPair(k));
     item.append(chip);
     // A proposed pair can be dropped too: the rest of the proposal stays, to edit.
@@ -1247,6 +1250,9 @@ function fitOf(question: AskedMeet): Fit | null {
   const part = movingPart(question);
   return question.parts.find((entry) => entry.file === part)?.joint?.fit ?? null;
 }
+
+/** Whether the pairs stop shows the parts apart: as the person chose, always for parts laid out for print. */
+const showsApart = (question: AskedMeet): boolean => state.meet.apart || question.inPlace === false;
 
 /** How many pairs the meet question on screen takes. */
 const pairsOf = (question: AskedMeet): number =>
@@ -1350,7 +1356,7 @@ function targetAt(x: number, y: number): Target | null {
   const ray = viewer.rayAt(x, y);
   if (!ray) return null;
   const question = meetQuestion();
-  const apart = question?.stage === 'pairs' && state.meet.apart && question.apart !== null;
+  const apart = question?.stage === 'pairs' && showsApart(question) && question.apart !== null;
   return { ray, ...(apart && { apart: true }) };
 }
 
