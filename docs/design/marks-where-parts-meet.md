@@ -525,7 +525,7 @@ Asked on the hand-over PR; the build proceeds with the proposals.
 3. **One tap, no mode**: as proposed.
 4. **Raise, Lower and Turn along and about the spot's normal at the questions, once marks are set; none after the conversion.** After a marked placement the Base section offers no Move, Raise, Lower or Turn; "Mark where they meet" converts again with the meet question.
 5. **`Orientation.method: 'marked'`** with the composed rotation: as proposed.
-6. **The corpus kit and the marking session.** The minis are the ones placed by hand or called hard before (the records of `scripts/corpus-placements.json` that are not `right`, and the bat `flying/flying-01`), and the kits the PM adds. The PM marks them in a session that opens each in turn with every question, bakes it, and writes a results file that later conversions and the corpus run read to place those minis again without asking.
+6. **The corpus kit and the marking session.** _(Widened on 2026-10-01: every corpus group with a base or parts, `docs/design/patches-where-parts-meet.md` §15 decision 10.)_ The minis are the ones placed by hand or called hard before (the records of `scripts/corpus-placements.json` that are not `right`, and the bat `flying/flying-01`), and the kits the PM adds. The PM marks them in a session that opens each in turn with every question, bakes it, and writes a results file that later conversions and the corpus run read to place those minis again without asking.
 7. **No base as proposed; once no base is confirmed, the meeting with a base is skipped.**
 
 ### PM decision (2026-10-01, [PR #95 comment](https://github.com/Tiarin-Hino/meshtavern-converter/pull/95#issuecomment-5922310339))
