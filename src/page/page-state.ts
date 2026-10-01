@@ -1,14 +1,18 @@
-import type {
-  ConversionStats,
-  PairWarning,
-  PartResult,
-  Placement,
-  Progress,
-  StepName,
-  CreatureSize,
-  Units,
-  UpQuestion,
-  UpRole,
+import {
+  turnAngleDeg,
+  type ConversionStats,
+  type Fit,
+  type MeetQuestion,
+  type PairWarning,
+  type PartResult,
+  type Placement,
+  type Rotation,
+  type Progress,
+  type StepName,
+  type CreatureSize,
+  type Units,
+  type UpQuestion,
+  type UpRole,
 } from '../lib';
 
 /**
@@ -70,27 +74,28 @@ export const COPY = {
   confirmFigureUp: 'Yes, next: where they meet',
   noBase: 'No base: these are the parts of one figure',
   askParts: 'Are the parts where they belong?',
-  partsHint:
-    'Tap the spot on a part that is in place, then the contact on the part that goes there.',
   confirmParts: 'Yes, the parts are in place',
   askMeet: 'Is the figure where it belongs on its base?',
-  meetHint: 'Tap the spot on the base, then the contact on the figure.',
   markMeeting: 'Mark where they meet',
   markParts: 'Mark where the parts meet',
-  undoMark: 'Undo the last mark',
-  resetMarks: 'Reset marks',
   raise: 'Raise',
   lower: 'Lower',
+  // #93, the rework: pairs of patches, then the final view.
+  askPairs: 'Is this where they meet?',
+  confirmPairs: 'Yes, put them together',
+  addPair: 'Add a pair',
+  brush: 'Brush',
+  erase: 'Erase',
+  undo: 'Undo',
+  startOver: 'Start over',
+  pullApart: 'Pull apart',
+  backToMarking: 'Back to marking',
+  letTilt: 'Let it tilt to fit',
+  keepUpright: 'Keep it upright',
 } as const;
 
-/** How far one press of Turn turns a marked part about the spot's normal. _(proposal, #93)_ */
+/** How far one press of Turn turns a part at the final view. _(proposal, #93)_ */
 export const TURN_STEP_DEG = 15;
-/**
- * A tap's raycast at a question should take no longer, on an ordinary corpus mini (1.25 M
- * triangles) on the development PC: three.js tests every triangle, without a search tree.
- * `scripts/measure-pick.mjs` measures it. _(proposal, #93 design note §8)_
- */
-export const PICK_BUDGET_MS = 300;
 
 /** How far one press of Raise or Lower moves the figure on its base. _(proposal, #70)_ */
 export const LIFT_STEP_MM = 0.5;
@@ -171,6 +176,21 @@ export function describeTooManyFiles(max: number): string {
 /** A file's name as the page lists it: without `.stl`. */
 export const partName = (fileName: string): string => fileName.replace(/\.stl$/i, '');
 
+/**
+ * " · kept upright", " · turned to fit", " · tilted 18° to fit": how the fit placed a part (#93,
+ * patches §7.4). `about` is what a free turn is called: a tilt on a base, a turn for a part.
+ */
+function fitWords(fit: Fit, rotation: Rotation, about: 'base' | 'parts'): string {
+  switch (fit.kept) {
+    case 'standing':
+      return ' · kept upright';
+    case 'upright':
+      return ' · turned to fit';
+    case 'free':
+      return ` · ${about === 'base' ? 'tilted' : 'turned'} ${Math.round(turnAngleDeg(rotation))}° to fit`;
+  }
+}
+
 /** " · raised 0.5 mm, turned 15°" for a marked meeting's lift and turn; empty without either. */
 function liftAndTurn(liftMm: number, turnDeg: number): string {
   const said: string[] = [];
@@ -190,9 +210,12 @@ const ROUND_SPOT = 0.1;
  */
 export function describePlacement(placement: Placement, scale = 1): string {
   const { spot } = placement;
-  // Marked by the person (#93): where they marked, raised and turned along the spot's normal.
-  if (placement.method === 'marked')
-    return `Set where you marked${liftAndTurn((placement.marks?.liftMm ?? 0) * scale, placement.marks?.turnDeg ?? 0)}`;
+  // Marked by the person (#93): where they marked, how it was fitted, raised and turned.
+  if (placement.method === 'marked') {
+    const { marks } = placement;
+    const fitted = marks ? fitWords(marks.fit, marks.rotation, 'base') : '';
+    return `Set where you marked${fitted}${liftAndTurn((marks?.liftMm ?? 0) * scale, marks?.turnDeg ?? 0)}`;
+  }
   const [a, b] = [...spot.sizeMm].map((mm) => mm * scale).sort((x, y) => y - x) as [number, number];
   const size =
     a - b <= a * ROUND_SPOT ? millimetres(a) : `${millimetres(a).slice(0, -3)} × ${millimetres(b)}`;
@@ -249,16 +272,17 @@ export function describePendingPlacement(pending: {
 
 /**
  * One line per part at the parts question and in the Base section (#93): "wing-l · where its
- * file puts it", "wing-r · marked, raised 0.5 mm", "wing-r · lies apart: mark where it goes",
- * "body · the body". `apart` says the part is not where it belongs in its file: nothing was
- * proposed for it.
+ * file puts it", "wing-r · set where you marked · turned 90° to fit · raised 0.5 mm",
+ * "wing-r · lies apart: mark where it goes", "body · the body". `apart` says the part is not
+ * where it belongs in its file: nothing was proposed for it.
  */
 export function describePart(part: PartResult, name: string, apart = false): string {
   const label = partName(name);
   if (part.source === 'body') return `${label} · the body`;
   if (part.source === 'marked') {
     const joint = part.joint;
-    return `${label} · marked${liftAndTurn(joint?.liftMm ?? 0, joint?.turnDeg ?? 0).replace(' · ', ', ')}`;
+    const fitted = joint ? fitWords(joint.fit, part.rotation, 'parts') : '';
+    return `${label} · set where you marked${fitted}${liftAndTurn(joint?.liftMm ?? 0, joint?.turnDeg ?? 0)}`;
   }
   return apart ? `${label} · lies apart: mark where it goes` : `${label} · where its file puts it`;
 }
@@ -278,28 +302,34 @@ export function describeParts(
 }
 
 /**
- * What the meet question says under its heading (#93): the placement shown, or, while the
- * person is marking, which mark comes next.
+ * What the pairs stop says under its chips (#93, patches §7.4): the proposal, what to tap next,
+ * or why the last tap did nothing.
  */
-export function describeMeeting(
-  placement: Placement | null,
-  marking: { spot: boolean; contact: boolean },
-  about: 'parts' | 'base',
+export function describePairs(
+  question: Pick<MeetQuestion, 'about' | 'proposed' | 'pairs' | 'note'>,
 ): string {
-  if (marking.spot !== marking.contact) {
-    const next = marking.spot ? 'contact' : 'spot';
-    const on =
-      about === 'base'
-        ? next === 'spot'
-          ? 'on the base'
-          : 'on the figure'
-        : next === 'spot'
-          ? 'on a part in place'
-          : 'on the part that goes there';
-    return `Now tap the ${next} ${on}.`;
+  const parts = question.about === 'parts';
+  switch (question.note) {
+    case 'full':
+      return 'This pair has both sides. Add a pair to mark another place.';
+    case 'one-part':
+      return 'A part meets one other part.';
+    case 'missed':
+      return 'Nothing to mark there. Tap on a part.';
+    default:
+      break;
   }
-  if (about === 'parts') return COPY.partsHint;
-  return placement ? describePlacement(placement) : COPY.meetHint;
+  if (question.proposed)
+    return question.pairs.length > 0
+      ? 'Confirm, or tap where they touch to mark your own.'
+      : parts
+        ? 'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.'
+        : 'Nothing found. Tap where they touch, or confirm to let the converter place it.';
+  if (question.pairs.some(({ on, of }) => (on === null) !== (of === null)))
+    return 'Mark the other side, or clear the pair.';
+  return parts
+    ? 'Tap a part in place and the part that goes there, where they touch.'
+    : 'Tap the base and the figure where they touch.';
 }
 
 /** "Base: base.stl" or "Figure: figure.stl" above a pair's question; null for a single file. */
