@@ -257,12 +257,6 @@ export const wholePart = (file: number, mesh: IndexedMesh): PartResult => ({
   triangles: mesh.indices.length / 3,
 });
 
-/**
- * A part further than this from every other part of the figure lies apart in its file: it is
- * not pulled apart further at the parts question. Parts exported in place overlap or touch.
- * _(proposal)_
- */
-export const IN_PLACE_GAP_MM = 1;
 /** At the parts question the parts are laid this share of the body's largest side apart... _(proposal)_ */
 export const APART_SHARE = 0.15;
 /** ...and at least this far. _(proposal)_ */
@@ -291,6 +285,13 @@ export function proposedJoints(
   treeOf: TreeOf = treesOver(meshes),
 ): ProposedJoint[] {
   const proposals: ProposedJoint[] = [];
+  /** The parts proposed so far, each onto its neighbour: a proposal never makes two parts hang on each other. */
+  const ontoOf = new Map<number, number>();
+  const goesRound = (part: number, onto: number): boolean => {
+    for (let at: number | undefined = onto; at !== undefined; at = ontoOf.get(at))
+      if (at === part) return true;
+    return false;
+  };
   for (const part of figureFiles.slice(1)) {
     let best: ProposedJoint | null = null;
     let bestArea = 0;
@@ -306,7 +307,10 @@ export function proposedJoints(
         best = { part, onto, pairs };
       }
     }
-    if (best) proposals.push(best);
+    if (best && !goesRound(best.part, best.onto)) {
+      ontoOf.set(best.part, best.onto);
+      proposals.push(best);
+    }
   }
   return proposals;
 }

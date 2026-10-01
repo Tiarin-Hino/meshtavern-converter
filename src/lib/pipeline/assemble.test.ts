@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addBox,
   generatePuddleFigureParts,
   generateRecessBase,
   generateWingedFigure,
@@ -186,6 +187,25 @@ describe('proposedJoints', { timeout: 60_000 }, () => {
 
     const apart = [body, movedSoup(wing, WING_MOVE)].map(welded);
     expect(proposedJoints(apart, [0, 1])).toEqual([]);
+  });
+
+  it('never proposes two parts hanging on each other', () => {
+    // The body, a thin bar, barely meets A; A and B share a whole face. Each of A and B
+    // touches the other most: proposing both would make them hang on each other.
+    const box = (from: Vec3, to: Vec3): IndexedMesh => {
+      const soup: number[] = [];
+      addBox(soup, from, to);
+      return welded(new Float32Array(soup));
+    };
+    const meshes = [
+      box([0, 4, 4], [10, 6, 6]),
+      box([10, 0, 0], [14, 10, 10]),
+      box([14, 0, 0], [18, 10, 10]),
+    ];
+    const proposals = proposedJoints(meshes, [0, 1, 2]);
+    const onto = new Map(proposals.map(({ part, onto: o }) => [part, o]));
+    for (const [part, o] of onto) expect(onto.get(o)).not.toBe(part);
+    expect(proposals.length).toBeGreaterThan(0);
   });
 
   it('lays the parts apart: each clear of the body and of the others, in its own direction', () => {
