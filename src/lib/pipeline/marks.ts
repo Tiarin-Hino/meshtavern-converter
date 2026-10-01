@@ -8,6 +8,7 @@
  * every machine. The turn about the normal uses trigonometry, like every turn a person asks for.
  */
 import type { Vec3 } from './base';
+import type { TriangleBvh } from './bvh';
 import type { IndexedMesh } from './mesh';
 import { quarterTurnAxis, TO_Y_UP } from './orient';
 import { apply, dot, fromAxisAngle, fromTo, multiply, normalise, type Rotation } from './rotation';
@@ -297,3 +298,227 @@ export function meetingRotation(nContact: Vec3, nSpot: Vec3, turnDeg = 0): Rotat
   if (turnDeg === 0) return aligned;
   return multiply(fromAxisAngle(nSpot, turnDeg), aligned);
 }
+
+// Patches (the rework, design note docs/design/patches-where-parts-meet.md §3.1, §5.1–5.2): a
+// mark is an area of a part's surface, made by taps and brush dabs recorded as points.
+
+/** One thing a person did on a part's surface, in that file's coordinates. */
+export type Stroke =
+  /** A tap: the surface around this point that faces the same way (§5.2). */
+  | { tap: Vec3 }
+  /** A dab of the brush: every triangle within the radius that faces the way the surface does at the point. */
+  | { brush: Vec3; radiusMm: number }
+  /** A dab of the eraser: every triangle of the patch within the radius. */
+  | { erase: Vec3; radiusMm: number };
+
+/** A patch as the person made it: what is recorded. */
+export interface PatchPick {
+  file: number;
+  strokes: Stroke[];
+}
+
+/** A resolved patch without its triangles, in the frame stated where it is used. */
+export interface PatchSummary {
+  file: number;
+  areaMm2: number;
+  /** Area-weighted centre and mean normal. */
+  centre: Vec3;
+  normal: Vec3;
+  /** |Σ area × normal| / Σ area: 1 for a flat patch, towards 0 for one that wraps around. */
+  flatness: number;
+}
+
+/** A patch as resolved on its file's welded mesh, file coordinates. */
+export interface Patch extends PatchSummary {
+  /** Triangle indices into the welded mesh, ascending. */
+  triangles: Uint32Array;
+}
+
+/** Two patches that touch: `on` the part in place (the base, the body), `of` the part that goes there. */
+export interface PatchPair {
+  on: PatchPick;
+  of: PatchPick;
+}
+
+/** At most this many pairs where two parts meet; more are ignored. _(proposal)_ */
+export const MAX_PAIRS = 4;
+/** At most this many strokes make a patch; more are ignored. _(proposal)_ */
+export const MAX_STROKES = 400;
+/** A tap's surface normal: the triangles within this distance of the point... _(proposal)_ */
+export const TAP_NORMAL_RADIUS_MM = 1;
+/** A tap takes triangles whose centroid lies within this distance of the point... _(proposal)_ */
+export const TAP_REACH_MM = 3;
+/** ...whose normal is within this angle of the surface's normal at the point... _(proposal)_ */
+export const TAP_CONE_DEG = 30;
+/** ...and within this angle of the triangle it is reached from, across a shared edge. _(proposal)_ */
+export const TAP_CREASE_DEG = 40;
+
+const TAP_CONE_COS = Math.cos((TAP_CONE_DEG * Math.PI) / 180);
+const TAP_CREASE_COS = Math.cos((TAP_CREASE_DEG * Math.PI) / 180);
+
+const unitNormal = (positions: Float32Array, indices: Uint32Array, t: number): Vec3 =>
+  normalise(areaNormal(positions, indices, t));
+
+/**
+ * The surface's normal at a point (§5.2 step 2): the area-weighted mean of the triangles whose
+ * centroid lies within `TAP_NORMAL_RADIUS_MM` and whose normal is within `MARK_NORMAL_CONE_DEG`
+ * of the nearest triangle's, the nearest always among them. Null for a mesh without triangles.
+ */
+function surfaceAt(
+  mesh: IndexedMesh,
+  tree: TriangleBvh,
+  point: Vec3,
+): { seed: number; normal: Vec3 } | null {
+  const hit = tree.closest(
+    { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: Infinity },
+    point[0],
+    point[1],
+    point[2],
+    Infinity,
+  );
+  const seed = hit.triangle;
+  if (seed < 0) return null;
+  const { positions, indices } = mesh;
+  const own = unitNormal(positions, indices, seed);
+  const near: number[] = [];
+  tree.within(point[0], point[1], point[2], TAP_NORMAL_RADIUS_MM, (t) => near.push(t));
+  near.sort((a, b) => a - b);
+  const seedArea = areaNormal(positions, indices, seed);
+  let sx = seedArea[0];
+  let sy = seedArea[1];
+  let sz = seedArea[2];
+  for (const t of near) {
+    if (t === seed) continue;
+    const n = areaNormal(positions, indices, t);
+    const length = Math.sqrt(dot(n, n));
+    if (length > 0 && dot(n, own) >= CONE_COS * length) {
+      sx += n[0];
+      sy += n[1];
+      sz += n[2];
+    }
+  }
+  const normal = normalise([sx, sy, sz]);
+  return { seed, normal: dot(normal, normal) > 0 ? normal : own };
+}
+
+/** The triangles a tap takes (§5.2): from the nearest, across shared edges, within reach and facing the same way. */
+function tapTriangles(mesh: IndexedMesh, tree: TriangleBvh, point: Vec3): number[] {
+  const surface = surfaceAt(mesh, tree, point);
+  if (!surface) return [];
+  const { positions, indices } = mesh;
+  const candidates: number[] = [];
+  tree.within(point[0], point[1], point[2], TAP_REACH_MM, (t) => candidates.push(t));
+  candidates.sort((a, b) => a - b);
+  // Shared edges among the candidates, by their two vertices.
+  const vertexCount = positions.length / 3;
+  const edgeKey = (a: number, b: number): number =>
+    a < b ? a * vertexCount + b : b * vertexCount + a;
+  const byEdge = new Map<number, number[]>();
+  const normals = new Map<number, Vec3>();
+  for (const t of [surface.seed, ...candidates]) {
+    if (normals.has(t)) continue;
+    normals.set(t, unitNormal(positions, indices, t));
+    for (let k = 0; k < 3; k++) {
+      const key = edgeKey(indices[t * 3 + k]!, indices[t * 3 + ((k + 1) % 3)]!);
+      const list = byEdge.get(key);
+      if (list) list.push(t);
+      else byEdge.set(key, [t]);
+    }
+  }
+  const taken = new Set<number>([surface.seed]);
+  // A triangle refused from one neighbour may still join from another: the result is the
+  // closure, whatever the order of the walk.
+  const queue = [surface.seed];
+  for (let at = 0; at < queue.length; at++) {
+    const from = queue[at]!;
+    const fromNormal = normals.get(from)!;
+    for (let k = 0; k < 3; k++) {
+      const key = edgeKey(indices[from * 3 + k]!, indices[from * 3 + ((k + 1) % 3)]!);
+      for (const next of byEdge.get(key)!) {
+        if (taken.has(next)) continue;
+        const n = normals.get(next)!;
+        if (dot(n, surface.normal) < TAP_CONE_COS || dot(n, fromNormal) < TAP_CREASE_COS) continue;
+        taken.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return [...taken];
+}
+
+/** Applies one stroke to a patch's triangles (§5.1): a brush drag costs one stroke at a time. */
+export function applyStroke(
+  mesh: IndexedMesh,
+  tree: TriangleBvh,
+  set: Set<number>,
+  stroke: Stroke,
+): void {
+  if ('tap' in stroke) {
+    for (const t of tapTriangles(mesh, tree, stroke.tap)) set.add(t);
+    return;
+  }
+  if ('erase' in stroke) {
+    const [x, y, z] = stroke.erase;
+    tree.within(x, y, z, stroke.radiusMm, (t) => set.delete(t));
+    return;
+  }
+  const surface = surfaceAt(mesh, tree, stroke.brush);
+  if (!surface) return;
+  const { positions, indices } = mesh;
+  const [x, y, z] = stroke.brush;
+  // Facing the way the surface does: the other side of a thin wall stays out.
+  tree.within(x, y, z, stroke.radiusMm, (t) => {
+    if (dot(areaNormal(positions, indices, t), surface.normal) > 0) set.add(t);
+  });
+}
+
+/** Area, centre, mean normal and flatness of a set of triangles (§3.1), in the mesh's coordinates. */
+export function summarise(file: number, mesh: IndexedMesh, triangles: Uint32Array): Patch {
+  const { positions, indices } = mesh;
+  let twiceArea = 0;
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (const t of triangles) {
+    const n = areaNormal(positions, indices, t);
+    const twice = Math.sqrt(dot(n, n));
+    const a = indices[t * 3]! * 3;
+    const b = indices[t * 3 + 1]! * 3;
+    const c = indices[t * 3 + 2]! * 3;
+    twiceArea += twice;
+    cx += (twice * (positions[a]! + positions[b]! + positions[c]!)) / 3;
+    cy += (twice * (positions[a + 1]! + positions[b + 1]! + positions[c + 1]!)) / 3;
+    cz += (twice * (positions[a + 2]! + positions[b + 2]! + positions[c + 2]!)) / 3;
+    nx += n[0];
+    ny += n[1];
+    nz += n[2];
+  }
+  const sum: Vec3 = [nx, ny, nz];
+  return {
+    file,
+    triangles,
+    areaMm2: twiceArea / 2,
+    centre: twiceArea > 0 ? [cx / twiceArea, cy / twiceArea, cz / twiceArea] : [0, 0, 0],
+    normal: normalise(sum),
+    flatness: twiceArea > 0 ? Math.sqrt(dot(sum, sum)) / twiceArea : 0,
+  };
+}
+
+/** A patch resolved on its file's welded mesh (§5.1): the strokes in order, at most `MAX_STROKES`. */
+export function resolvePatch(mesh: IndexedMesh, tree: TriangleBvh, pick: PatchPick): Patch {
+  const set = new Set<number>();
+  for (const stroke of pick.strokes.slice(0, MAX_STROKES)) applyStroke(mesh, tree, set, stroke);
+  return summarise(pick.file, mesh, Uint32Array.from([...set].sort((a, b) => a - b)));
+}
+
+/** A patch without its triangles. */
+export const summaryOf = ({
+  file,
+  areaMm2,
+  centre,
+  normal,
+  flatness,
+}: PatchSummary): PatchSummary => ({ file, areaMm2, centre, normal, flatness });

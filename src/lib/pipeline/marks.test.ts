@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   generateHoleBase,
   generatePegFigure,
+  generatePlate,
   generateRecessBase,
   generateSlopeBase,
   HOLE_BASE,
@@ -10,12 +11,17 @@ import {
 } from '../../regression/shapes';
 import type { Vec3 } from './base';
 import { generateBumpySheet } from './generate';
+import { TriangleBvh } from './bvh';
 import {
+  MAX_STROKES,
   meetingRotation,
   nearestTriangle,
   resolveMark,
+  resolvePatch,
+  TAP_REACH_MM,
   triangleCorners,
   type Meeting,
+  type Stroke,
 } from './marks';
 import { weldVertices, type IndexedMesh } from './mesh';
 import { angleDeg, apply, dot, normalise, turnAngleDeg } from './rotation';
@@ -277,4 +283,120 @@ describe('the marked placement (#93)', () => {
     expect(again.mesh.positions).toEqual(first.mesh.positions);
     expect(again.pair).toEqual(first.pair);
   }, 120_000);
+});
+
+describe('patches (the rework, §5.1–5.2)', () => {
+  const treeOf = (mesh: IndexedMesh): TriangleBvh => new TriangleBvh(mesh);
+  const centroid = (mesh: IndexedMesh, t: number): Vec3 =>
+    [0, 1, 2].map(
+      (axis) =>
+        (mesh.positions[mesh.indices[t * 3]! * 3 + axis]! +
+          mesh.positions[mesh.indices[t * 3 + 1]! * 3 + axis]! +
+          mesh.positions[mesh.indices[t * 3 + 2]! * 3 + axis]!) /
+        3,
+    ) as Vec3;
+  const distance = (a: Vec3, b: Vec3): number => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+  it('takes the recess floor around a tap and nothing of its walls or the top', () => {
+    const mesh = welded(generateRecessBase());
+    const floor = RECESS_BASE.heightMm - RECESS_BASE.recessDepthMm;
+    const tap: Vec3 = [0.2, -0.1, floor];
+    const patch = resolvePatch(mesh, treeOf(mesh), { file: 0, strokes: [{ tap }] });
+    // Every floor triangle whose centroid lies within reach, and no other.
+    const expected: number[] = [];
+    for (let t = 0; t < mesh.indices.length / 3; t++) {
+      const g = centroid(mesh, t);
+      if (g[2] === floor && distance(g, tap) <= TAP_REACH_MM) expected.push(t);
+    }
+    expect([...patch.triangles]).toEqual(expected);
+    expect(plain(patch.normal)).toEqual([0, 0, 1]);
+    expect(patch.flatness).toBe(1);
+    expect(patch.areaMm2).toBeGreaterThan(Math.PI * TAP_REACH_MM ** 2 * 0.8);
+  });
+
+  it('takes a disc of the reach on a plate larger than it, centred on the tap', () => {
+    const mesh = welded(generatePlate(20, 2, 0.25, () => false));
+    const tap: Vec3 = [1.3, -0.7, 2];
+    const patch = resolvePatch(mesh, treeOf(mesh), { file: 3, strokes: [{ tap }] });
+    expect(patch.file).toBe(3);
+    expect(Math.hypot(patch.centre[0] - tap[0], patch.centre[1] - tap[1])).toBeLessThan(0.1);
+    expect(patch.centre[2]).toBe(2);
+    for (const t of patch.triangles)
+      expect(distance(centroid(mesh, t), tap)).toBeLessThanOrEqual(TAP_REACH_MM);
+    expect(patch.areaMm2).toBeCloseTo(Math.PI * TAP_REACH_MM ** 2, -0.5);
+  });
+
+  it('takes a curved surface around the tap, nearly flat and centred near it', () => {
+    const mesh = welded(generateBumpySheet(200));
+    // A crest of the sheet: sin(0.9 x) = 1 at x = π / 1.8, cos(0.7 y) = 1 at y = 0... on a vertex column.
+    const tap: Vec3 = [1.75, 10 * (50 / 200), 0];
+    tap[2] = 2 * Math.sin(tap[0] * 0.9) * Math.cos(tap[1] * 0.7) + 3;
+    const patch = resolvePatch(mesh, treeOf(mesh), { file: 0, strokes: [{ tap }] });
+    expect(patch.triangles.length).toBeGreaterThan(20);
+    expect(patch.flatness).toBeGreaterThan(0.9);
+    expect(distance(patch.centre, tap)).toBeLessThan(0.5);
+  });
+
+  it('adds a second tap, and resolves the same strokes to the same triangles every time', () => {
+    const mesh = welded(generatePlate(20, 2, 0.25, () => false));
+    const one = resolvePatch(mesh, treeOf(mesh), { file: 0, strokes: [{ tap: [-5, 0, 2] }] });
+    const two = resolvePatch(mesh, treeOf(mesh), {
+      file: 0,
+      strokes: [{ tap: [-5, 0, 2] }, { tap: [5, 0, 2] }],
+    });
+    const again = resolvePatch(mesh, treeOf(mesh), {
+      file: 0,
+      strokes: [{ tap: [-5, 0, 2] }, { tap: [5, 0, 2] }],
+    });
+    expect(two.areaMm2).toBeCloseTo(2 * one.areaMm2, 6);
+    expect([...two.triangles]).toEqual(expect.arrayContaining([...one.triangles]));
+    expect([...again.triangles]).toEqual([...two.triangles]);
+    expect(again.centre).toEqual(two.centre);
+  });
+
+  it('brushes the triangles in its radius and not the far side of a 1 mm wall; erases them again', () => {
+    const mesh = welded(generatePlate(20, 1, 0.25, () => false));
+    const tree = treeOf(mesh);
+    const brushed = resolvePatch(mesh, tree, {
+      file: 0,
+      strokes: [{ brush: [0, 0, 1], radiusMm: 2 }],
+    });
+    expect(brushed.triangles.length).toBeGreaterThan(0);
+    for (const t of brushed.triangles) {
+      const g = centroid(mesh, t);
+      expect(g[2]).toBe(1);
+      expect(distance(g, [0, 0, 1])).toBeLessThanOrEqual(2);
+    }
+    expect(plain(brushed.normal)).toEqual([0, 0, 1]);
+    const erased = resolvePatch(mesh, tree, {
+      file: 0,
+      strokes: [
+        { brush: [0, 0, 1], radiusMm: 2 },
+        { erase: [1, 0, 1], radiusMm: 1 },
+      ],
+    });
+    expect(erased.areaMm2).toBeLessThan(brushed.areaMm2);
+    for (const t of erased.triangles)
+      expect(distance(centroid(mesh, t), [1, 0, 1])).toBeGreaterThan(1);
+  });
+
+  it(`ignores strokes after the first ${MAX_STROKES}`, () => {
+    const mesh = welded(generatePlate(20, 2, 0.5, () => false));
+    const strokes: Stroke[] = Array.from({ length: MAX_STROKES }, () => ({
+      tap: [-5, 0, 2] as Vec3,
+    }));
+    const kept = resolvePatch(mesh, treeOf(mesh), { file: 0, strokes });
+    const more = resolvePatch(mesh, treeOf(mesh), {
+      file: 0,
+      strokes: [...strokes, { tap: [5, 0, 2] }],
+    });
+    expect([...more.triangles]).toEqual([...kept.triangles]);
+  });
+
+  it('resolves no strokes, or a mesh without triangles, to an empty patch', () => {
+    const empty = { positions: new Float32Array(0), indices: new Uint32Array(0) };
+    const patch = resolvePatch(empty, treeOf(empty), { file: 0, strokes: [{ tap: [0, 0, 0] }] });
+    expect(patch.triangles.length).toBe(0);
+    expect(patch.areaMm2).toBe(0);
+  });
 });
