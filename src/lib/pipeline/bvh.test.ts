@@ -235,6 +235,21 @@ describe('TriangleBvh.raycast and within', { timeout: 30_000 }, () => {
     expect(hit!.t).toBeCloseTo(47, 5);
   });
 
+  it('tests only the triangles near the ray, also when it misses (#93: 0.7 s a tap on a 6 M mesh)', () => {
+    const sheet = weldVertices(generateBumpySheet(200)).mesh;
+    const tree = new TriangleBvh(sheet);
+    const triangles = sheet.indices.length / 3;
+    // Beside the sheet, through its box's corner region, missing it.
+    expect(tree.raycast([-5, -5, 50], [0, 0, -1])).toBeNull();
+    expect(tree.lastRayTests).toBe(0);
+    // Above the sheet along it, inside its box but over no triangle's box for most of the way.
+    tree.raycast([-1, 25, 6], [1, 0, 0]);
+    expect(tree.lastRayTests).toBeLessThan(triangles / 20);
+    // Straight down onto it.
+    expect(tree.raycast([25.1, 25.1, 50], [0, 0, -1])).not.toBeNull();
+    expect(tree.lastRayTests).toBeLessThan(100);
+  });
+
   it('answers nothing on a mesh without triangles', () => {
     const empty = new TriangleBvh({ positions: new Float32Array(0), indices: new Uint32Array(0) });
     expect(empty.raycast([0, 0, 0], [0, 0, 1])).toBeNull();

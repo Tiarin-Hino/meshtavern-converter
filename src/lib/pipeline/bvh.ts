@@ -73,6 +73,8 @@ export class TriangleBvh {
   private readonly count: Uint32Array;
   private nodes = 0;
   private readonly stack = new Int32Array(128);
+  /** How many triangles the last `raycast` tested: what keeps its pruning honest in the tests. */
+  lastRayTests = 0;
 
   constructor(private readonly mesh: IndexedMesh) {
     const { positions, indices } = mesh;
@@ -234,17 +236,20 @@ export class TriangleBvh {
     const iz = 1 / dz;
     let best = -1;
     let bestT = Infinity;
+    let tests = 0;
     let top = 0;
     this.stack[top++] = 0;
     while (top > 0) {
       const node = this.stack[--top]!;
       const entry = this.boxEntry(node, ox, oy, oz, ix, iy, iz);
-      if (entry > bestT) continue;
+      // A box the ray misses enters at Infinity: never worth a visit, hit or no hit yet.
+      if (entry === Infinity || entry > bestT) continue;
       const left = this.child[node]!;
       if (left < 0) {
         const end = this.first[node]! + this.count[node]!;
         for (let i = this.first[node]!; i < end; i++) {
           const triangle = this.order[i]!;
+          tests++;
           const t = this.rayTriangle(triangle, ox, oy, oz, dx, dy, dz);
           if (t < bestT || (t === bestT && triangle < best)) {
             bestT = t;
@@ -256,14 +261,17 @@ export class TriangleBvh {
       const el = this.boxEntry(left, ox, oy, oz, ix, iy, iz);
       const er = this.boxEntry(left + 1, ox, oy, oz, ix, iy, iz);
       // Nearer child last, so it is popped first.
+      const visitLeft = el !== Infinity && el <= bestT;
+      const visitRight = er !== Infinity && er <= bestT;
       if (el < er) {
-        if (er <= bestT) this.stack[top++] = left + 1;
-        if (el <= bestT) this.stack[top++] = left;
+        if (visitRight) this.stack[top++] = left + 1;
+        if (visitLeft) this.stack[top++] = left;
       } else {
-        if (el <= bestT) this.stack[top++] = left;
-        if (er <= bestT) this.stack[top++] = left + 1;
+        if (visitLeft) this.stack[top++] = left;
+        if (visitRight) this.stack[top++] = left + 1;
       }
     }
+    this.lastRayTests = tests;
     return best < 0 ? null : { triangle: best, t: bestT };
   }
 
