@@ -812,6 +812,8 @@ describe('runPipeline asking where the parts meet (#93)', () => {
     const ask = answering(
       confirm(),
       confirm(),
+      // The proposed pair dropped: the person marks from nothing.
+      meet({ do: 'clear', pair: 0 }),
       tap(1, [3, 0, floor]),
       tap(0, [0, 0, 0]),
       meet({ do: 'fit' }),
@@ -828,12 +830,14 @@ describe('runPipeline asking where the parts meet (#93)', () => {
       ['pairs', true, null],
       ['pairs', false, null],
       ['pairs', false, null],
+      ['pairs', false, null],
       ['fitted', false, 'marked'],
       ['fitted', false, 'marked'],
     ]);
+    expect(ask.meets[1]!.pairs).toEqual([]);
     // One side marked after the first tap: the base's.
-    expect(ask.meets[1]!.pairs.map(({ on, of }) => [on?.file, of])).toEqual([[1, null]]);
-    expect(ask.meets[1]!.pairs[0]!.on!.normal[2]).toBe(1);
+    expect(ask.meets[2]!.pairs.map(({ on, of }) => [on?.file, of])).toEqual([[1, null]]);
+    expect(ask.meets[2]!.pairs[0]!.on!.normal[2]).toBe(1);
     const { placement } = result.pair!;
     expect(placement).toMatchObject({
       method: 'marked',
@@ -854,7 +858,7 @@ describe('runPipeline asking where the parts meet (#93)', () => {
     expect(result.stats.asked.map((a) => [a.role, a.tries])).toEqual([
       ['base', 0],
       ['figure', 0],
-      ['meet', 3],
+      ['meet', 4],
     ]);
     // The choices convert the same mini again, asking nothing.
     const again = await runPipeline(figure(), {
@@ -901,10 +905,45 @@ describe('runPipeline asking where the parts meet (#93)', () => {
     expect(hit!.stage).toBe('pairs');
   }, 120_000);
 
+  it('edits the proposal with a tap, and Undo goes straight back to it', async () => {
+    const ask = answering(
+      confirm(),
+      confirm(),
+      // A tap on the base on the proposed pair: the proposal becomes editable, the tap adds to it.
+      tap(1, [-3, 0, floor]),
+      meet({ do: 'undo' }),
+      // Add a pair to the proposal.
+      tap(1, [4, 0, floor], 1),
+      tap(0, [4, 0, 0], 1),
+      meet({ do: 'fit' }),
+      meet({ do: 'confirm' }),
+    );
+    const result = await runPipeline(figure(), { bake: 0, secondStl: base(), askUp: ask });
+    const [proposed, edited, undone, , added] = ask.meets;
+    expect(proposed!.proposed).toBe(true);
+    expect(edited).toMatchObject({ proposed: false });
+    expect(edited!.pairs.map(({ on, of }) => [on?.file, of?.file])).toEqual([[1, 0]]);
+    // The proposal as brush dabs, with the tap after them.
+    const strokes = (edited!.marks as Meeting).pairs[0]!.on.strokes;
+    expect(strokes.length).toBeGreaterThan(1);
+    expect(strokes.at(-1)).toEqual({ tap: [-3, 0, floor] });
+    expect(strokes.slice(0, -1).every((stroke) => 'brush' in stroke)).toBe(true);
+    // The covered patch is at least the proposed one.
+    expect(edited!.pairs[0]!.of!.areaMm2).toBeGreaterThanOrEqual(proposed!.pairs[0]!.of!.areaMm2);
+    expect(undone).toMatchObject({ proposed: true, marks: null });
+    expect(added!.pairs.map(({ on, of }) => [on?.file, of?.file])).toEqual([
+      [1, 0],
+      [1, 0],
+    ]);
+    expect(result.pair!.placement!.method).toBe('marked');
+    expect((result.choices.placement!.marks as Meeting).pairs).toHaveLength(2);
+  }, 120_000);
+
   it('goes back to the pairs, and Start over brings the proposal and the automatic placement back', async () => {
     const ask = answering(
       confirm(),
       confirm(),
+      meet({ do: 'clear', pair: 0 }),
       tap(1, [3, 0, floor]),
       tap(0, [0, 0, 0]),
       meet({ do: 'fit' }),
@@ -918,15 +957,15 @@ describe('runPipeline asking where the parts meet (#93)', () => {
       secondStl: base(),
       askUp: ask,
     });
-    const back = ask.meets[4]!;
+    const back = ask.meets[5]!;
     expect(back).toMatchObject({ stage: 'pairs', proposed: false });
     expect(back.pairs).toHaveLength(1);
-    expect(ask.meets[5]).toMatchObject({
+    expect(ask.meets[6]).toMatchObject({
       stage: 'pairs',
       proposed: true,
       marks: null,
     });
-    expect(ask.meets[6]!.placement!.method).toBe('detected');
+    expect(ask.meets[7]!.placement!.method).toBe('detected');
     expect(result.pair!.placement!.method).toBe('detected');
     expect(result.choices.placement).toBeUndefined();
   }, 120_000);

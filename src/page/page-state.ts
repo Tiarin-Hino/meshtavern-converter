@@ -90,6 +90,10 @@ export const COPY = {
   startOver: 'Start over',
   pullApart: 'Pull apart',
   backToMarking: 'Back to marking',
+  lookAt: 'Look at',
+  viewAll: 'All',
+  viewHint:
+    'Right-click a spot, or hold a finger on it, to turn the view about it. The wheel zooms to the pointer.',
   letTilt: 'Let it tilt to fit',
   keepUpright: 'Keep it upright',
 } as const;
@@ -323,7 +327,7 @@ export function describePairs(
   }
   if (question.proposed)
     return question.pairs.length > 0
-      ? 'Confirm, or tap where they touch to mark your own.'
+      ? 'Confirm, or tap and brush to change a pair: × drops one, Start over brings them back.'
       : parts
         ? 'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.'
         : 'Nothing found. Tap where they touch, or confirm to let the converter place it.';

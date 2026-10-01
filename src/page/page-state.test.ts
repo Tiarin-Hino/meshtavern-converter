@@ -316,7 +316,9 @@ describe('where the parts meet (#93)', () => {
       pairs: { on: typeof side | null; of: typeof side | null }[],
       note?: 'missed' | 'full' | 'one-part',
     ) => describePairs({ about, proposed, pairs, ...(note && { note }) });
-    expect(ask('base', true, [pair])).toBe('Confirm, or tap where they touch to mark your own.');
+    expect(ask('base', true, [pair])).toBe(
+      'Confirm, or tap and brush to change a pair: × drops one, Start over brings them back.',
+    );
     expect(ask('base', true, [])).toBe(
       'Nothing found. Tap where they touch, or confirm to let the converter place it.',
     );

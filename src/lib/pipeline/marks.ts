@@ -110,6 +110,13 @@ export interface PatchPair {
 export const PICK_BUDGET_MS = 20;
 /** At most this many pairs where two parts meet; more are ignored. _(proposal)_ */
 export const MAX_PAIRS = 4;
+
+/**
+ * How many pairs a meet question takes: `MAX_PAIRS` where the figure meets its base, and as many
+ * for each part at the parts question, whose pairs are one list over all its joints.
+ */
+export const pairsAllowed = (about: 'parts' | 'base', figureParts: number): number =>
+  about === 'base' ? MAX_PAIRS : MAX_PAIRS * Math.max(1, figureParts - 1);
 /** At most this many strokes make a patch; more are ignored. _(proposal)_ */
 export const MAX_STROKES = 400;
 /** A tap's surface normal: the triangles within this distance of the point... _(proposal)_ */
@@ -281,6 +288,49 @@ export function resolvePatch(mesh: IndexedMesh, tree: TriangleBvh, pick: PatchPi
   for (const stroke of pick.strokes.slice(0, MAX_STROKES)) applyStroke(mesh, tree, set, stroke);
   return summarise(pick.file, mesh, Uint32Array.from([...set].sort((a, b) => a - b)));
 }
+
+/**
+ * A proposed patch made editable (PM decision 2026-10-01, after the rework): brush dabs that
+ * cover it, so it is recorded as strokes like any patch. Greedy over its triangles in ascending
+ * order, a dab at each triangle's centroid not yet within a dab's radius of another. The radius
+ * grows with the area so a large contact stays within `MAX_STROKES`; the brush may take a rim
+ * of up to one radius around the patch.
+ */
+export function strokesCovering(mesh: IndexedMesh, tree: TriangleBvh, patch: Patch): Stroke[] {
+  const radiusMm = Math.min(
+    COVER_MAX_RADIUS_MM,
+    Math.max(COVER_MIN_RADIUS_MM, Math.sqrt(patch.areaMm2 / (COVER_SHARE * MAX_STROKES))),
+  );
+  const { positions, indices } = mesh;
+  const inPatch = new Set(patch.triangles);
+  const covered = new Set<number>();
+  const strokes: Stroke[] = [];
+  for (const t of patch.triangles) {
+    if (covered.has(t)) continue;
+    if (strokes.length >= MAX_STROKES) break;
+    const a = indices[t * 3]! * 3;
+    const b = indices[t * 3 + 1]! * 3;
+    const c = indices[t * 3 + 2]! * 3;
+    const centre: Vec3 = [
+      (positions[a]! + positions[b]! + positions[c]!) / 3,
+      (positions[a + 1]! + positions[b + 1]! + positions[c + 1]!) / 3,
+      (positions[a + 2]! + positions[b + 2]! + positions[c + 2]!) / 3,
+    ];
+    strokes.push({ brush: centre, radiusMm });
+    covered.add(t);
+    tree.within(centre[0], centre[1], centre[2], radiusMm, (u) => {
+      if (inPatch.has(u)) covered.add(u);
+    });
+  }
+  return strokes;
+}
+
+/** A proposal's patch is covered by dabs at least this wide... _(proposal)_ */
+export const COVER_MIN_RADIUS_MM = 0.75;
+/** ...and at most this wide... _(proposal)_ */
+export const COVER_MAX_RADIUS_MM = 3;
+/** ...so that a patch takes about this share of `MAX_STROKES` dabs. _(proposal)_ */
+export const COVER_SHARE = 0.4;
 
 /** A patch without its triangles. */
 export const summaryOf = ({
@@ -496,7 +546,7 @@ function addStroke(
   stroke: Stroke,
   context: MeetContext,
 ): MeetNote | null {
-  if (k >= MAX_PAIRS) return 'full';
+  if (k >= pairsAllowed(context.about, context.figureFiles.length)) return 'full';
   const index = Math.min(k, draft.pairs.length);
   const existing = draft.pairs[index];
   const pair: DraftPair = existing

@@ -53,6 +53,7 @@ export {
 export type { Fit } from './pipeline/fit';
 export {
   MAX_PAIRS,
+  pairsAllowed,
   type Hit,
   type Meeting,
   type MeetNote,

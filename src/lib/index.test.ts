@@ -37,6 +37,7 @@ describe('the library entries', () => {
       'glbEncoderReady',
       'memoryBudgetBytes',
       'multiply',
+      'pairsAllowed',
       'readKtx2Header',
       'readStlFile',
       'sizeLabel',

@@ -17,7 +17,9 @@ import {
   marksOf,
   MAX_PAIRS,
   MAX_STROKES,
+  pairsAllowed,
   resolvePatch,
+  strokesCovering,
   startMeeting,
   TAP_REACH_MM,
   type MarkingAction,
@@ -362,6 +364,32 @@ describe('applyMeetAction (§5.6)', () => {
     expect(state.draft!.pairs[0]!.on!.strokes).toHaveLength(MAX_STROKES);
   });
 });
+describe('strokesCovering and pairsAllowed (a proposal made editable)', () => {
+  it('covers a patch with brush dabs that resolve to at least it, and little more', () => {
+    const mesh = welded(generatePlate(30, 2, 0.25, () => false));
+    const tree = new TriangleBvh(mesh);
+    const patch = resolvePatch(mesh, tree, {
+      file: 2,
+      strokes: [{ tap: [-4, 0, 2] }, { tap: [4, 0, 2] }],
+    });
+    const strokes = strokesCovering(mesh, tree, patch);
+    expect(strokes.length).toBeGreaterThan(1);
+    expect(strokes.length).toBeLessThanOrEqual(MAX_STROKES);
+    expect(strokes.every((stroke) => 'brush' in stroke)).toBe(true);
+    const again = resolvePatch(mesh, tree, { file: 2, strokes });
+    expect([...again.triangles]).toEqual(expect.arrayContaining([...patch.triangles]));
+    // A rim of one dab's radius at most around two 3 mm discs.
+    expect(again.areaMm2).toBeLessThan(patch.areaMm2 * 1.8);
+    expect(strokesCovering(mesh, tree, { ...patch, triangles: new Uint32Array(0) })).toEqual([]);
+  });
+
+  it(`takes ${MAX_PAIRS} pairs where the figure meets its base, and as many per part`, () => {
+    expect(pairsAllowed('base', 3)).toBe(MAX_PAIRS);
+    expect(pairsAllowed('parts', 2)).toBe(MAX_PAIRS);
+    expect(pairsAllowed('parts', 6)).toBe(5 * MAX_PAIRS);
+  });
+});
+
 describe('patches (the rework, §5.1–5.2)', () => {
   const treeOf = (mesh: IndexedMesh): TriangleBvh => new TriangleBvh(mesh);
   const centroid = (mesh: IndexedMesh, t: number): Vec3 =>

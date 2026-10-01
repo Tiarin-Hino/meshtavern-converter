@@ -47,13 +47,16 @@ import {
   complete,
   MAX_PAIRS,
   marksOf,
+  pairsAllowed,
   resolvePatch,
+  strokesCovering,
   startMeeting,
   summaryOf,
   type Hit,
   type MarkingAction,
   type Meeting,
   type MeetContext,
+  type MeetDraft,
   type MeetNote,
   type MeetState,
   type PartJoint,
@@ -1093,6 +1096,38 @@ export async function runPipeline(
     return answer as Extract<Answer, { kind: K }>;
   };
 
+  /**
+   * The proposal as the person's pairs, to edit (PM decision 2026-10-01): each patch as brush
+   * dabs that cover it (`strokesCovering`). At the parts question a pair that would make two
+   * parts hang on each other is left out.
+   */
+  const proposalDraft = (
+    proposal: readonly { on: Patch; of: Patch }[],
+    context: MeetContext,
+  ): MeetDraft => {
+    const onto = new Map<number, number>();
+    const pairs: MeetDraft['pairs'] = [];
+    for (const { on, of } of proposal) {
+      if (context.about === 'parts') {
+        let goesRound = false;
+        for (let at: number | undefined = on.file; at !== undefined; at = onto.get(at))
+          if (at === of.file) goesRound = true;
+        const already = onto.get(of.file);
+        if (goesRound || (already !== undefined && already !== on.file)) continue;
+        onto.set(of.file, on.file);
+      }
+      const side = (patch: Patch): PatchPick => ({
+        file: patch.file,
+        strokes: strokesCovering(meshes[patch.file]!, treeOf(patch.file), patch),
+      });
+      pairs.push({ on: side(on), of: side(of) });
+    }
+    return {
+      pairs: pairs.slice(0, pairsAllowed(context.about, context.figureFiles.length)),
+      nudges: [],
+    };
+  };
+
   /** What a meet question needs to know about its step (patches design note §5.6). */
   interface MeetingAsk<P> {
     step: 'assemble' | 'place';
@@ -1180,8 +1215,22 @@ export async function runPipeline(
           'ray' in target && target.apart && question.apart ? question.apart.shown : question.shown,
         );
       const mark = (marking: MarkingAction): void => {
+        // A tap, a dab or a pair cleared on the proposal edits it: the proposal becomes the
+        // person's pairs first, and Undo goes straight back to it (PM decision 2026-10-01).
+        const before = state;
+        const edits =
+          marking.do === 'tap' ||
+          marking.do === 'brush' ||
+          (marking.do === 'clear' && marking.pair !== undefined);
+        if (edits && !state.draft && proposal && proposal.length > 0) {
+          const seed = resume(m.step, () => proposalDraft(proposal!, m.context));
+          state = { ...state, draft: seed };
+        }
         const applied = resume(m.step, () => applyMeetAction(state, marking, m.context));
-        state = applied.state;
+        if (before !== state && applied.state === state) state = before;
+        else if (before !== state)
+          state = { ...applied.state, history: [null, ...applied.state.history.slice(1)] };
+        else state = applied.state;
         note = applied.note;
         tries++;
       };
