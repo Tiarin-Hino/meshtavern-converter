@@ -15,13 +15,14 @@
 // them to the PM on the page; detected confirms the proposals; index answers with the pair's
 // `up`, `rotation` and `baseUp` (in a --pairs list, or scripts/corpus-index.json for the corpus).
 //
-// --mark is the marking session (#93, PM decision 2026-09-30): the corpus minis placed by hand or
-// called hard before (the records of scripts/corpus-placements.json that are not `right`, and
-// the bat flying/flying-01) and every figure in parts (`<name>-part-<label>.stl`), one after the
-// other, every question left to the PM, baked. The PM marks where the parts meet and the figure
-// meets its base, adjusts, converts, and presses R or S. At the end the session's records go into
-// scripts/corpus-placements.json: `npm run corpus -- --up index` and `npm run score-placements`
-// then put those minis together and place them as marked, without asking.
+// --mark is the marking session (#93, PM decisions 2026-09-30 and 2026-10-01): every corpus
+// group, a figure with its base file (`<name>-base.stl`) or its parts (`<name>-part-<label>.stl`)
+// or both, one after the other, every question left to the PM, baked. The PM stands the files up,
+// marks where the parts meet and the figure meets its base, adjusts, converts, and presses R or S
+// in the page. At the end every record of the session's folder, this run's and earlier ones', goes
+// into scripts/corpus-placements.json: `npm run corpus -- --up index` and
+// `npm run score-placements` then put those minis together and place them as marked, without
+// asking. A figure of one file is not a group: its up is in scripts/corpus-index.json.
 import { execSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
@@ -30,8 +31,6 @@ import { baseFileFor, CORPUS, corpusFiles, partFilesFor } from './lib/corpus-fil
 import { installFeedback, recordPath, reviewPair } from './lib/feedback-session.mjs';
 import { CORPUS_PLACEMENTS, FEEDBACK_DIR } from './lib/placements.mjs';
 
-/** The bat whose peg goes into the side of its spire: the case the marks were made for (#91, #93). */
-const MARK_ALWAYS = ['flying/flying-01'];
 const marking = process.argv.includes('--mark');
 /** A marking session keeps its records apart from the placement reviews. */
 const OUT_DIR = marking ? join(FEEDBACK_DIR, 'marks') : FEEDBACK_DIR;
@@ -62,9 +61,6 @@ if (option('--pairs')) {
   }));
 } else {
   const index = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
-  const recorded = existsSync(CORPUS_PLACEMENTS)
-    ? JSON.parse(readFileSync(CORPUS_PLACEMENTS, 'utf8'))
-    : {};
   pairs = corpusFiles()
     .map((figure) => ({ figure, base: baseFileFor(figure), parts: partFilesFor(figure) }))
     .filter((pair) => pair.base || pair.parts.length > 0)
@@ -78,15 +74,11 @@ if (option('--pairs')) {
         ...answers(index[key] ?? {}),
       };
     })
-    // A placement review is about pairs; the marking session about the hard ones and the kits.
-    .filter((pair) =>
-      marking
-        ? pair.parts.length > 0 ||
-          MARK_ALWAYS.includes(pair.key) ||
-          (recorded[pair.key] && recorded[pair.key].verdict !== 'right')
-        : pair.base,
-    );
+    // A placement review is about pairs; the marking session about every group, kits included.
+    .filter((pair) => marking || pair.base);
 }
+/** Every group of the session before --only, --from and the records already made narrow it. */
+const allPairs = pairs;
 if (option('--only')) pairs = pairs.filter((pair) => pair.key.includes(option('--only')));
 if (option('--from')) {
   const at = pairs.findIndex((pair) => pair.key === option('--from'));
@@ -97,6 +89,7 @@ if (!args.includes('--redo'))
   pairs = pairs.filter((pair) => !existsSync(recordPath(OUT_DIR, pair.key)));
 if (pairs.length === 0) {
   console.log('No pairs left to review (use --redo to review recorded ones again).');
+  if (marking) promote();
   process.exit(0);
 }
 
@@ -143,14 +136,17 @@ console.log(
   }. Records in ${OUT_DIR}.`,
 );
 
-// The marking session's results (#93): every mini recorded right or placed goes into the
-// committed records, with the choices that put it together and place it again.
-if (marking) {
+// The marking session's results (#93): every mini recorded right or placed, in this run or an
+// earlier one that ended early, goes into the committed records, with the choices that put it
+// together and place it again.
+if (marking) promote();
+
+function promote() {
   const committed = existsSync(CORPUS_PLACEMENTS)
     ? JSON.parse(readFileSync(CORPUS_PLACEMENTS, 'utf8'))
     : {};
   let promoted = 0;
-  for (const pair of pairs) {
+  for (const pair of allPairs) {
     const path = recordPath(OUT_DIR, pair.key);
     if (!existsSync(path)) continue;
     const record = JSON.parse(readFileSync(path, 'utf8'));
@@ -174,5 +170,7 @@ if (marking) {
     Object.entries(committed).sort(([a], [b]) => a.localeCompare(b)),
   );
   writeFileSync(CORPUS_PLACEMENTS, `${JSON.stringify(sorted, null, 2)}\n`);
+  // As the repository formats it, so the file can be committed as it is.
+  execSync(`npx prettier --write ${CORPUS_PLACEMENTS}`, { stdio: 'ignore' });
   console.log(`${promoted} marked minis written to ${CORPUS_PLACEMENTS}.`);
 }
