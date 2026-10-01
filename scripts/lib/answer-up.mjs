@@ -1,5 +1,5 @@
 // Answers the page's questions (issue #92, design note docs/design/up-before-reduce.md §7; issue
-// #93, docs/design/marks-where-parts-meet.md §7) for runs nobody watches: the corpus run, the feedback mode
+// #93, docs/design/patches-where-parts-meet.md §8) for runs nobody watches: the corpus run, the feedback mode
 // with --up detected or index, the memory measurement. The page is driven through its hooks
 // (window.__mt), as a person would press Confirm.
 
@@ -18,12 +18,19 @@ export function fromChoices(choices, otherwise = asDetected) {
   return (question) => {
     const baseFile = choices.pairing?.baseFile;
     if (question.kind === 'meet') {
-      if (question.about !== 'parts') return { meeting: choices.placement?.marks ?? null };
+      if (question.about !== 'parts') {
+        const { marks, liftMm, turnDeg } = choices.placement ?? {};
+        // The automatic placement nudged at the final view (#93): no marks, a lift and a turn.
+        const nudge =
+          !marks && (liftMm || turnDeg) ? { liftMm: liftMm ?? 0, turnDeg: turnDeg ?? 0 } : null;
+        return { marks: marks ?? null, ...(nudge && { nudge }) };
+      }
       // Under other roles than the record's the joints do not fit: the parts are confirmed as
       // shown, the base question names the recorded base, and the parts are asked again under it.
+      const joints = choices.parts?.joints ?? [];
       return baseFile !== undefined && baseFile !== question.roles.baseFile
         ? {}
-        : { joints: choices.parts?.joints ?? [] };
+        : { marks: joints.length > 0 ? joints : null };
     }
     if (baseFile !== undefined && baseFile !== question.roles.baseFile) return { baseFile };
     // A swap of a guessed pair is recorded as `swap`, not as the base it named.
@@ -38,9 +45,11 @@ export function fromChoices(choices, otherwise = asDetected) {
 
 /**
  * Waits until the conversion started on `page` asks or ends, answers each up question with
- * `confirmUp(pick(question))` and each meet question (#93) with what `pick(question)` returns
- * (`{ joints }`, `{ meeting }`, or `{}` for what is shown), and returns when the conversion ended
- * in a mini or an error.
+ * `confirmUp(pick(question))` and each meet question (#93) with what `pick(question)` returns:
+ * `{ marks }` (a meeting, the joints, or null for the proposal) is set at the pairs stop unless
+ * the question has them already, `{ nudge }` is applied once to the automatic placement at the
+ * final view, `{}` confirms what is shown; both stops are confirmed. Returns when the conversion
+ * ended in a mini or an error.
  * Throws when it does not end within `timeoutMs`. A page opened with `?ask=off` asks nothing:
  * then this only waits for the end.
  *
@@ -63,10 +72,27 @@ export async function convertAnswering(page, pick, timeoutMs) {
     if ((await handle.jsonValue()) === 'ended') return;
     const question = await page.evaluate(() => window.__mt.state.question);
     if (question.kind === 'meet') {
-      // Where the parts meet (#93): the joints or the meeting `pick` names, else what is shown.
+      // Where the parts meet (#93): the marks `pick` names at the pairs stop, then both stops.
       const answer = pick(question) ?? {};
-      if (answer.joints !== undefined || answer.meeting !== undefined)
-        await page.evaluate((changes) => window.__mt.answerMeet(changes), answer);
+      if (
+        question.stage === 'pairs' &&
+        answer.marks !== undefined &&
+        JSON.stringify(answer.marks) !== JSON.stringify(question.marks)
+      ) {
+        await page.evaluate((marks) => window.__mt.answerMeet({ do: 'set', marks }), answer.marks);
+        continue;
+      }
+      if (
+        question.stage === 'fitted' &&
+        answer.nudge &&
+        question.placement?.method === 'detected'
+      ) {
+        await page.evaluate(
+          (change) => window.__mt.answerMeet({ do: 'nudge', ...change }),
+          answer.nudge,
+        );
+        continue;
+      }
       await page.evaluate(() => window.__mt.confirmMeet());
       continue;
     }

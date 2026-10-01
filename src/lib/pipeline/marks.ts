@@ -103,6 +103,11 @@ export interface PatchPair {
   of: PatchPick;
 }
 
+/**
+ * One tap once the file's tree exists: the ray, the growth and the summary, on an ordinary corpus
+ * mini, development PC, Node. `scripts/measure-fit.mjs` measures it. _(proposal)_
+ */
+export const PICK_BUDGET_MS = 20;
 /** At most this many pairs where two parts meet; more are ignored. _(proposal)_ */
 export const MAX_PAIRS = 4;
 /** At most this many strokes make a patch; more are ignored. _(proposal)_ */

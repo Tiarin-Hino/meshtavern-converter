@@ -8,6 +8,11 @@ import type { IndexedMesh } from './mesh';
  */
 
 const LEAF_SIZE = 6;
+/**
+ * Building a file's tree for the meet questions (#93) should take no longer per million
+ * triangles, development PC, Node. `scripts/measure-fit.mjs` measures it. _(proposal)_
+ */
+export const TREE_BUDGET_MS_PER_M = 400;
 const MORTON_BITS = 10;
 
 export interface SurfaceHit {

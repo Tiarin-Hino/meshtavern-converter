@@ -9,6 +9,7 @@ import {
   estimateTriangles,
   FIXED_BYTES,
   memoryBudgetBytes,
+  TREE_BYTES_PER_TRIANGLE,
   UNKNOWN_DEVICE_GB,
 } from './memory';
 import { ConversionProblem } from './problems';
@@ -70,7 +71,9 @@ describe('memory estimate', () => {
     expect(estimatePairBytes(figure, 'binary', base, 'binary')).toBe(
       estimateConversionBytes(figure, 'binary') +
         estimateConversionBytes(base, 'binary') -
-        FIXED_BYTES,
+        FIXED_BYTES +
+        (estimateTriangles(figure, 'binary') + estimateTriangles(base, 'binary')) *
+          TREE_BYTES_PER_TRIANGLE,
     );
   });
 
@@ -83,7 +86,7 @@ describe('memory estimate', () => {
     expect(estimateAssemblyBytes(files)).toBe(
       3 * estimateConversionBytes(size, 'binary') -
         2 * FIXED_BYTES +
-        3 * 100_000 * BYTES_PER_TRIANGLE,
+        3 * 100_000 * (BYTES_PER_TRIANGLE + TREE_BYTES_PER_TRIANGLE),
     );
   });
 });

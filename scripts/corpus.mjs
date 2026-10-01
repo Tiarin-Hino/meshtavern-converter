@@ -312,7 +312,7 @@ function pairFigures(pair) {
   const parts = pair.parts.map((part) => ({
     file: part.file,
     source: part.source,
-    ...(part.joint && { onto: part.joint.onto }),
+    ...(part.joint && { onto: part.joint.onto, fit: part.joint.fit.kept }),
   }));
   const placement = pair.placement;
   return {
@@ -325,6 +325,8 @@ function pairFigures(pair) {
       offsetMm: placement.offsetMm.map((mm) => round(mm, 2)),
       yawDeg: round(placement.yawDeg, 1),
       placement: placement.method,
+      // How the marks were fitted (#93, patches design note §8): moved, turned upright, or tilted.
+      ...(placement.marks && { fit: placement.marks.fit.kept }),
       candidates: placement.candidates.map(spot),
     }),
   };

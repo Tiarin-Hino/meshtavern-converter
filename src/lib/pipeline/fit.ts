@@ -47,6 +47,11 @@ export const FIT_CENTRE_SLACK_SHARE = 0.1;
 export const FLAT_MIN = 0.5;
 /** A flat pair's normals may fail to oppose by this much and the fit still holds. _(proposal)_ */
 export const FIT_NORMAL_SLACK_DEG = 15;
+/**
+ * `scripts/measure-fit.mjs`: the fit from the contact patches of an automatic placement, the
+ * figure moved away, must put the corners of its box back within this. _(proposal)_
+ */
+export const FIT_CHECK_MM = 1;
 /** `fitMeeting` on the largest corpus pair, development PC, Node; placing the vertices excluded. _(proposal)_ */
 export const FIT_BUDGET_MS = 50;
 
