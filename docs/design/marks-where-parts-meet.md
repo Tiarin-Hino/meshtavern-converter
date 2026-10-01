@@ -527,3 +527,7 @@ Asked on the hand-over PR; the build proceeds with the proposals.
 5. **`Orientation.method: 'marked'`** with the composed rotation: as proposed.
 6. **The corpus kit and the marking session.** The minis are the ones placed by hand or called hard before (the records of `scripts/corpus-placements.json` that are not `right`, and the bat `flying/flying-01`), and the kits the PM adds. The PM marks them in a session that opens each in turn with every question, bakes it, and writes a results file that later conversions and the corpus run read to place those minis again without asking.
 7. **No base as proposed; once no base is confirmed, the meeting with a base is skipped.**
+
+### PM decision (2026-10-01, [PR #95 comment](https://github.com/Tiarin-Hino/meshtavern-converter/pull/95#issuecomment-5922310339))
+
+The marking is reworked: marks are painted areas in pairs, proposed by the converter on the parts without placing them, confirmed or marked differently, and only then fitted and shown as a final view. `docs/design/patches-where-parts-meet.md` replaces what this note says about marks, meetings, the two meet questions and the pins (§3.1, §3.5, §4.2 to §4.4, §6.2 to §6.5, §6.7, §6.8, §8); several files, the roles, the `assemble` step, `shown` and the records' plumbing stay as written here.
