@@ -129,6 +129,21 @@ describe('fitMeeting', () => {
     expect(fit.fit.normalsDeg).toBeLessThan(0.01);
   });
 
+  it('only moves when no turn makes the normals agree but the centres already meet', () => {
+    // Three claws on a rock: two face back up, one sits on an edge, its sides 25° apart. A turn
+    // cannot oppose all three: the figure is moved, not tilted.
+    const edge: Vec3 = [Math.sin((25 * Math.PI) / 180), Math.cos((25 * Math.PI) / 180), 0];
+    const pairs: FitPair[] = [
+      { on: patch([-18, 0, -10], [0, 1, 0], 6), of: patch([-18, 3, -10], [0, -1, 0], 6) },
+      { on: patch([27, 0, 7], [0, 1, 0], 5), of: patch([27, 3, 7], [0, -1, 0], 5) },
+      { on: patch([30, 0, 6], edge, 3), of: patch([30, 3, 6], [0, -1, 0], 3) },
+    ];
+    const fit = fitMeeting(pairs, { up: UP });
+    expect(fit.fit.kept).toBe('standing');
+    expect(fit.rotation).toBe(IDENTITY);
+    expect(fit.fit.centreRmsMm).toBeCloseTo(0, 9);
+  });
+
   it('only moves one pair whose patches wrap around', () => {
     const fit = fitMeeting(
       [{ on: patch([0, 0, 0], TILTED, 10, 0.2), of: patch([1, 1, 1], [0, -1, 0], 10, 0.2) }],

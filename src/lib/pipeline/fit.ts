@@ -295,7 +295,10 @@ function spreadOf(pairs: readonly FitPair[], weights: number[]): number {
 /**
  * The least change that brings the `of` patches onto the `on` patches (§5.4): moved only, else
  * also turned about `up` (with `up` and two or more pairs), else turned freely; the first that
- * fits is taken, else the free turn. `turn: 'keep'` only moves, `turn: 'free'` turns freely.
+ * fits is taken. When none fits, the least change whose centres meet is taken, and only else
+ * the free turn: a turn that leaves the normals as far apart as before buys nothing (a claw on a
+ * rock's edge tilted a 100 mm dragon 3°, 5 mm at its corners, measured on `large-04`).
+ * `turn: 'keep'` only moves, `turn: 'free'` turns freely.
  * The result takes a point `x` of the part as it stands now to `rotation · x + translation`.
  *
  * @param pairs At least one; `on` in the target frame, `of` as the part stands now, same frame.
@@ -310,7 +313,7 @@ export function fitMeeting(
   const candidate = (
     kept: Fit['kept'],
     rotation: Rotation,
-  ): { rotation: Rotation; translation: Vec3; fit: Fit; fits: boolean } => {
+  ): { rotation: Rotation; translation: Vec3; fit: Fit; fits: boolean; centresMeet: boolean } => {
     const translation = translationFor(rotation, pairs, weights);
     const { centreRmsMm, normalsDeg, normalsHold } = measure(pairs, weights, rotation, translation);
     return {
@@ -318,6 +321,7 @@ export function fitMeeting(
       translation,
       fit: { kept, centreRmsMm, normalsDeg },
       fits: normalsHold && centreRmsMm <= slack,
+      centresMeet: centreRmsMm <= slack,
     };
   };
   const strip = ({
@@ -338,11 +342,16 @@ export function fitMeeting(
   };
   if (options.turn === 'free') return strip(free());
   if (standing.fits) return strip(standing);
-  if (options.up && pairs.length >= 2) {
-    const upright = candidate('upright', uprightTurn(pairs, weights, options.up));
-    if (upright.fits) return strip(upright);
-  }
-  return strip(free());
+  const upright =
+    options.up && pairs.length >= 2
+      ? candidate('upright', uprightTurn(pairs, weights, options.up))
+      : null;
+  if (upright?.fits) return strip(upright);
+  const turned = free();
+  if (turned.fits) return strip(turned);
+  // None fits: the least change whose centres meet.
+  for (const least of [standing, upright, turned]) if (least?.centresMeet) return strip(least);
+  return strip(turned);
 }
 
 /**
