@@ -68,20 +68,40 @@
           <button id="ask-swap" type="button" data-copy="swapPair" hidden></button>
           <button id="ask-confirm" class="primary" type="button"></button>
         </section>
-        <!-- Where the parts meet (#93): the figure's parts, or the figure on its base. -->
+        <!-- Where the parts meet (#93): the pairs of patches, then the parts put together. -->
         <section id="meet" aria-labelledby="meet-question" data-in="asking">
           <p id="meet-question"></p>
           <ul id="meet-parts" hidden></ul>
-          <p id="meet-hint"></p>
-          <div id="meet-adjust" role="group" aria-label="Adjust where they meet" hidden>
-            <button type="button" data-meet-lift="1">Raise 0.5 mm</button>
-            <button type="button" data-meet-lift="-1">Lower 0.5 mm</button>
-            <button type="button" data-meet-turn="-15">Turn −15°</button>
-            <button type="button" data-meet-turn="15">Turn +15°</button>
+          <!-- The pairs stop: one chip per pair, in its colour. -->
+          <div id="meet-marking" data-stage="pairs">
+            <ul id="meet-pairs" aria-label="Pairs"></ul>
+            <p id="meet-hint"></p>
+            <div id="meet-tools" role="group" aria-label="Marks">
+              <button id="meet-add" type="button" data-copy="addPair"></button>
+              <button id="meet-brush" type="button" aria-pressed="false" data-copy="brush"></button>
+              <button id="meet-erase" type="button" aria-pressed="false" data-copy="erase"></button>
+              <button id="meet-undo" type="button" data-copy="undo"></button>
+              <button id="meet-clear" type="button" data-copy="startOver"></button>
+              <button
+                id="meet-apart"
+                type="button"
+                aria-pressed="false"
+                data-copy="pullApart"
+                hidden
+              ></button>
+            </div>
           </div>
-          <div id="meet-marks" role="group" aria-label="Marks">
-            <button id="meet-undo" type="button" data-copy="undoMark"></button>
-            <button id="meet-reset" type="button" data-copy="resetMarks"></button>
+          <!-- The final view: the parts put together. -->
+          <div id="meet-final" data-stage="fitted">
+            <p id="meet-placement"></p>
+            <div id="meet-adjust" role="group" aria-label="Adjust where they meet">
+              <button type="button" data-meet-lift="1">Raise 0.5 mm</button>
+              <button type="button" data-meet-lift="-1">Lower 0.5 mm</button>
+              <button type="button" data-meet-turn="-15">Turn −15°</button>
+              <button type="button" data-meet-turn="15">Turn +15°</button>
+              <button id="meet-tilt" type="button" hidden></button>
+            </div>
+            <button id="meet-back" type="button" data-copy="backToMarking"></button>
           </div>
           <button id="meet-confirm" class="primary" type="button"></button>
         </section>

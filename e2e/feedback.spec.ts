@@ -78,8 +78,12 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
 
   // Marked where they meet (#93): the record keeps the marks, in the choices and as resolved.
   const meeting = {
-    spot: { file: 1, point: [3, 0, 3] as [number, number, number] },
-    contact: { file: 0, point: [0, 0, 0] as [number, number, number] },
+    pairs: [
+      {
+        on: { file: 1, strokes: [{ tap: [3, 0, 3] as [number, number, number] }] },
+        of: { file: 0, strokes: [{ tap: [0, 0, 0] as [number, number, number] }] },
+      },
+    ],
     liftMm: 0.5,
   };
   const marked = reviewPair(
@@ -92,7 +96,8 @@ test('records a saved placement, a right one, a skip, and ends on Escape', async
   expect(await marked).toBe('placed');
   const withMarks = read('test/marked');
   expect(withMarks.choices.placement).toEqual({ marks: meeting });
-  expect(withMarks.marks).toMatchObject({ liftMm: 0.5, spot: { normal: [0, 1, 0] } });
+  expect(withMarks.marks).toMatchObject({ liftMm: 0.5, fit: { kept: 'standing' } });
+  expect(withMarks.marks.pairs[0].on.normal).toEqual([0, 1, 0]);
   expect(withMarks.detected.method).toBe('marked');
 
   // A record whose pair was swapped at a question is replayed swapped (#93).

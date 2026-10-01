@@ -36,14 +36,17 @@ import {
   type AskOptions,
   type Answer,
   type Box,
-  type MarkedPair,
+  type Fit,
+  MAX_PAIRS,
   MAX_PARTS,
-  type Meeting,
+  type MeetAction,
   type MeetQuestion,
-  type PartJoint,
   type PartsOptions,
+  type PatchSummary,
   type Question,
   type Shown,
+  type ShownPatch,
+  type Target,
   type UpQuestion,
 } from '../lib';
 import { transcodeDetail } from '../lib/three';
@@ -54,8 +57,8 @@ import {
   COPY,
   describeAskedFile,
   describeAskPending,
-  describeMeeting,
   describeMini,
+  describePairs,
   describeProgress,
   describePairWarning,
   describePart,
@@ -86,10 +89,11 @@ interface AppState {
    */
   question: AskedQuestion | null;
   /**
-   * At a meet question (#93): the marks tapped that are not a meeting yet, in their files'
-   * coordinates, with the face normal the tap hit. Both null when none is being tapped.
+   * At a meet question (#93, patches §7): the pair the next tap goes to, the brush and the eraser,
+   * the parts pulled apart, and the part the final view's buttons move (null: the last marked).
+   * The marks themselves are the worker's.
    */
-  marking: { spot: TappedMark | null; contact: TappedMark | null };
+  meet: MeetUi;
   /**
    * From picking or dropping the files to two frames after the first question's mesh went to
    * the viewer: the time to the question (#92, design note §8). Null until measured.
@@ -156,16 +160,22 @@ interface AppState {
 }
 
 type Vec3 = [number, number, number];
+/** A meet question as the page keeps it: the pairs without their triangles, which the viewer has. */
+type AskedMeet = Omit<MeetQuestion, 'pairs'> & {
+  pairs: { on: PatchSummary | null; of: PatchSummary | null }[];
+  name: string;
+  serial: number;
+};
 /** A question as the page keeps it: without its meshes, with the name of what it is about. */
-type AskedQuestion = (UpQuestion | MeetQuestion) & { name: string; serial: number };
-/** A mark tapped on a part at a meet question (#93). */
-interface TappedMark {
-  file: number;
-  point: Vec3;
-  normal: Vec3;
+type AskedQuestion = (UpQuestion & { name: string; serial: number }) | AskedMeet;
+interface MeetUi {
+  pair: number;
+  brush: boolean;
+  erase: boolean;
+  apart: boolean;
+  part: number | null;
 }
-/** A pin the viewer draws. */
-type Pin = TappedMark & { kind: 'spot' | 'contact'; proposed: boolean };
+const meetUi = (): MeetUi => ({ pair: 0, brush: false, erase: false, apart: false, part: null });
 
 interface PendingPlacement {
   moveMm: [number, number];
@@ -213,27 +223,38 @@ declare global {
       /** At the base's question (#93): this file is the base, or null: none, the files are parts of one figure. */
       chooseBase: (file: number | null) => Promise<void>;
       /**
-       * At a meet question (#93): a tap on `file` at `point`, file coordinates. Resolves when
-       * the question that comes back is on screen, or at once while the meeting is half marked.
+       * At a meet question (#93, patches §7.5): a tap on `file` at `point`, file coordinates, on
+       * pair `pair` (left out: the one selected). Each of these resolves when the question that
+       * comes back is on screen, the one that ends the meeting at once.
        */
-      mark: (file: number, point: Vec3, normal?: Vec3) => Promise<void>;
-      /** At a meet question: what a tap at canvas point (x, y), CSS pixels, hits. Nothing is marked. */
-      pickAt: (x: number, y: number) => { file: number; point: Vec3; normal: Vec3 } | null;
+      tap: (file: number, point: Vec3, pair?: number) => Promise<void>;
+      /** Brush dabs (or eraser dabs) of one drag on `file`, file coordinates. */
+      brush: (
+        file: number,
+        points: Vec3[],
+        options?: { erase?: boolean; pair?: number },
+      ) => Promise<void>;
+      /** Selects the next pair, or one of the pairs: where the next tap goes. */
+      addPair: () => void;
+      selectPair: (k: number) => void;
+      /** Clears one pair, or everything: back to the proposal ("Start over"). */
+      clearMarks: (pair?: number) => Promise<void>;
+      undoMark: () => Promise<void>;
+      /** The pairs stop: put them together. The final view: back to the pairs. */
+      fitMeeting: () => Promise<void>;
+      backToMarks: () => Promise<void>;
+      /** The final view: raises (positive) or lowers, turns, lets tilt or keeps upright what is fitted. */
+      liftMeeting: (mm: number) => Promise<void>;
+      turnMeeting: (deg: number) => Promise<void>;
+      setTilt: (mode: 'keep' | 'free' | null) => Promise<void>;
+      /** Confirms the stop on screen: the pairs (put together), or the final view (go on). */
+      confirmMeet: () => Promise<void>;
+      /** Any action at a meet question, as the worker takes it. */
+      answerMeet: (action: MeetAction) => Promise<void>;
+      /** What a tap at canvas point (x, y), CSS pixels, would hit; nothing is marked. */
+      pickAt: (x: number, y: number) => Promise<{ file: number; point: Vec3 } | null>;
       /** At a question: where a file's point is on the canvas, CSS pixels from its corner. */
       screenOf: (file: number, point: Vec3) => [number, number] | null;
-      /** At a meet question: raises (positive) or lowers what was marked last, along the spot's normal. */
-      liftMeeting: (mm: number) => Promise<void>;
-      /** At a meet question: turns what was marked last about the spot's normal. */
-      turnMeeting: (deg: number) => Promise<void>;
-      undoMark: () => Promise<void>;
-      resetMarks: () => Promise<void>;
-      /** At a meet question: confirms what is shown. */
-      confirmMeet: () => Promise<void>;
-      /**
-       * At a meet question: answers with these joints or this meeting (left out: as they are),
-       * as marking would. Resolves when the question that comes back is on screen.
-       */
-      answerMeet: (changes: { joints?: PartJoint[]; meeting?: Meeting | null }) => Promise<void>;
       /** The Base section's buttons (#93): converts again, asking only where they meet, or how the parts go together. */
       markMeeting: () => Promise<void>;
       markParts: () => Promise<void>;
@@ -328,10 +349,20 @@ const askInputs = {
 const meetInputs = {
   question: document.querySelector<HTMLElement>('#meet-question')!,
   parts: document.querySelector<HTMLElement>('#meet-parts')!,
+  marking: document.querySelector<HTMLElement>('#meet-marking')!,
+  pairs: document.querySelector<HTMLElement>('#meet-pairs')!,
   hint: document.querySelector<HTMLElement>('#meet-hint')!,
-  adjust: document.querySelector<HTMLElement>('#meet-adjust')!,
+  add: document.querySelector<HTMLButtonElement>('#meet-add')!,
+  brush: document.querySelector<HTMLButtonElement>('#meet-brush')!,
+  erase: document.querySelector<HTMLButtonElement>('#meet-erase')!,
   undo: document.querySelector<HTMLButtonElement>('#meet-undo')!,
-  reset: document.querySelector<HTMLButtonElement>('#meet-reset')!,
+  clear: document.querySelector<HTMLButtonElement>('#meet-clear')!,
+  apart: document.querySelector<HTMLButtonElement>('#meet-apart')!,
+  final: document.querySelector<HTMLElement>('#meet-final')!,
+  placement: document.querySelector<HTMLElement>('#meet-placement')!,
+  adjust: document.querySelector<HTMLElement>('#meet-adjust')!,
+  tilt: document.querySelector<HTMLButtonElement>('#meet-tilt')!,
+  back: document.querySelector<HTMLButtonElement>('#meet-back')!,
   confirm: document.querySelector<HTMLButtonElement>('#meet-confirm')!,
 };
 const pairInputs = {
@@ -373,7 +404,7 @@ const state: AppState = {
   page: 'empty',
   busy: false,
   question: null,
-  marking: { spot: null, contact: null },
+  meet: meetUi(),
   questionMs: null,
   fileName: null,
   progress: null,
@@ -910,9 +941,8 @@ const asking = {
   swapped: false,
   /** Which questions this conversion asks: what makes a Confirm the last one. */
   asks: {} as AskOptions,
-  /** At a meet question: the joints and the meeting the worker has, as last answered (#93). */
-  joints: [] as PartJoint[],
-  meeting: null as Meeting | null,
+  /** At a meet question: the patches of its pairs, for the viewer (#93). */
+  patches: [] as { on: ShownPatch | null; of: ShownPatch | null }[],
   serial: 0,
   /** Hooks waiting for the next question on screen. */
   waiters: [] as (() => void)[],
@@ -960,7 +990,6 @@ function askUp(question: Question): Promise<Answer> {
   return new Promise((resolve) => {
     for (const { file, mesh } of question.meshes) asking.meshes[file] = mesh;
     asking.answer = resolve;
-    const asked = { ...question, meshes: [] };
     if (question.kind === 'up') {
       const key = `${question.role}:${question.file}`;
       if (key !== asking.key) {
@@ -975,14 +1004,25 @@ function askUp(question: Question): Promise<Answer> {
         question.role === 'base'
           ? nameOf(question.file)
           : question.roles.figureFiles.map(nameOf).join(' + ');
-      state.question = { ...asked, name, serial: ++asking.serial };
+      state.question = { ...question, meshes: [], name, serial: ++asking.serial };
     } else {
-      state.marking = { spot: null, contact: null };
+      const before = state.question;
+      // A new meeting starts with the first pair selected and the tools off.
+      if (before?.kind !== 'meet' || before.about !== question.about) {
+        state.meet = meetUi();
+        viewer.setBrush(false);
+      }
+      if (question.proposed) state.meet.pair = 0;
+      asking.patches = question.pairs;
       const name =
         question.about === 'base'
           ? `${question.roles.figureFiles.map(nameOf).join(' + ')} + ${nameOf(question.roles.baseFile)}`
           : question.roles.figureFiles.map(nameOf).join(' + ');
-      state.question = { ...asked, name, serial: ++asking.serial };
+      const pairs = question.pairs.map(({ on, of }) => ({
+        on: on && summaryOf(on),
+        of: of && summaryOf(of),
+      }));
+      state.question = { ...question, meshes: [], pairs, name, serial: ++asking.serial };
     }
     showTurn(null);
     showQuestion();
@@ -997,8 +1037,19 @@ function askUp(question: Question): Promise<Answer> {
       );
     }
     for (const waiter of asking.waiters.splice(0)) waiter();
+    // Dabs painted while the worker answered go now.
+    if (question.kind === 'meet' && brushing.dabs.length > 0) flushBrush();
   });
 }
+
+/** A patch's summary, without its triangles. */
+const summaryOf = ({ file, areaMm2, centre, normal, flatness }: PatchSummary): PatchSummary => ({
+  file,
+  areaMm2,
+  centre,
+  normal,
+  flatness,
+});
 
 /** Whether confirming this question ends the questions: what follows depends on what is asked. */
 function lastQuestion(question: AskedQuestion): boolean {
@@ -1022,7 +1073,7 @@ function showQuestion(): void {
   const confirmLabel = (label: string): string => (lastQuestion(question) ? COPY.confirmUp : label);
   if (question.kind === 'up') {
     drawShown(question.shown, question.box);
-    viewer.setPins([]);
+    viewer.setPatches([]);
     const file = describeAskedFile(question.role, question.name);
     askInputs.file.hidden = file === null;
     askInputs.file.textContent = file ?? '';
@@ -1054,68 +1105,167 @@ function showQuestion(): void {
           : COPY.confirmUp;
     return;
   }
-  // Where the parts meet (#93): the parts together, or the figure on its base; while one mark
-  // of a meeting with the base is set, the figure stands beside it so both can be tapped.
-  const { marking } = state;
-  const marks = {
-    spot: marking.spot !== null,
-    contact: marking.contact !== null,
-  };
-  const apart = question.about === 'base' && marks.spot !== marks.contact && question.apart;
+  // Where the parts meet (#93, patches §7): the pairs with the parts apart, then put together.
+  const pairsStop = question.stage === 'pairs';
+  const pulled = pairsStop && state.meet.apart && question.apart;
   drawShown(
-    apart ? apart.shown : question.shown,
-    apart ? apart.box : question.box,
-    apart ? ':apart' : '',
+    pulled ? pulled.shown : question.shown,
+    pulled ? pulled.box : question.box,
+    `:${question.stage}${pulled ? ':apart' : ''}`,
   );
-  viewer.setPins(pinsOf(question));
-  meetInputs.question.textContent = question.about === 'parts' ? COPY.askParts : COPY.askMeet;
-  meetInputs.hint.textContent = describeMeeting(question.placement, marks, question.about);
+  viewer.setPatches(
+    asking.patches.flatMap(({ on, of }, pair) =>
+      [on, of].flatMap((side) =>
+        side
+          ? [
+              {
+                file: side.file,
+                triangles: side.triangles,
+                pair,
+                proposed: question.proposed,
+              },
+            ]
+          : [],
+      ),
+    ),
+  );
+  meetInputs.question.textContent = pairsStop
+    ? COPY.askPairs
+    : question.about === 'parts'
+      ? COPY.askParts
+      : COPY.askMeet;
+  meetInputs.marking.hidden = !pairsStop;
+  meetInputs.final.hidden = pairsStop;
+  // The parts' lines: at the final view of the parts a line selects what Raise, Lower and Turn move.
   meetInputs.parts.hidden = question.about !== 'parts';
   if (question.about === 'parts') {
-    const proposed = new Set(question.proposed.map((pair) => pair.contact.file));
+    const touching = new Set(
+      question.proposed ? question.pairs.flatMap(({ on, of }) => [on?.file, of?.file]) : [],
+    );
     meetInputs.parts.replaceChildren(
       ...question.parts.map((part) => {
         const item = document.createElement('li');
-        const apartFile = part.source === 'files' && !proposed.has(part.file);
+        const apartFile = question.proposed && part.source === 'files' && !touching.has(part.file);
         item.textContent = describePart(part, nameOf(part.file), apartFile);
+        if (!pairsStop && part.source === 'marked') {
+          item.dataset.part = String(part.file);
+          item.toggleAttribute('data-selected', part.file === movingPart(question));
+          item.addEventListener('click', () => {
+            state.meet.part = part.file;
+            showQuestion();
+          });
+        }
         return item;
       }),
     );
   }
-  // Raise, Lower and Turn once something is marked (PM decision 2026-09-30).
-  meetInputs.adjust.hidden =
-    question.about === 'base' ? !asking.meeting : asking.joints.length === 0;
-  meetInputs.confirm.textContent = question.about === 'parts' ? COPY.confirmParts : COPY.confirmUp;
+  if (pairsStop) {
+    showPairChips(question);
+    meetInputs.hint.textContent = describePairs(question);
+    meetInputs.apart.hidden = question.about !== 'parts' || !question.apart;
+    meetInputs.apart.setAttribute('aria-pressed', String(state.meet.apart));
+    meetInputs.brush.setAttribute('aria-pressed', String(state.meet.brush));
+    meetInputs.erase.setAttribute('aria-pressed', String(state.meet.erase));
+    meetInputs.add.disabled =
+      question.proposed ||
+      question.pairs.length >= MAX_PAIRS ||
+      state.meet.pair >= question.pairs.length;
+    meetInputs.undo.disabled = question.proposed && question.marks === null;
+    meetInputs.clear.disabled = question.proposed;
+    meetInputs.confirm.textContent = COPY.confirmPairs;
+    // A pair with one side marked is not a pair yet.
+    meetInputs.confirm.disabled = question.pairs.some(
+      ({ on, of }) => (on === null) !== (of === null),
+    );
+    return;
+  }
+  const placement = question.placement;
+  meetInputs.placement.hidden = question.about !== 'base' || !placement;
+  meetInputs.placement.textContent = placement
+    ? describePlacement(placement, state.stats?.sizing.scale ?? 1)
+    : '';
+  // Raise, Lower and Turn move a marked part, or the automatic placement on a base (§15 Q7).
+  const fit = fitOf(question);
+  meetInputs.adjust.hidden = question.about === 'parts' && movingPart(question) === null;
+  meetInputs.tilt.hidden = fit === null;
+  meetInputs.tilt.textContent = fit?.kept === 'free' ? COPY.keepUpright : COPY.letTilt;
+  meetInputs.confirm.disabled = false;
+  meetInputs.confirm.textContent =
+    question.about === 'parts' ? confirmLabel(COPY.confirmParts) : COPY.confirmUp;
 }
 
-/** The pins of a meet question: the marks set, the ones being tapped, else the proposals. */
-function pinsOf(question: AskedQuestion & { kind: 'meet' }): Pin[] {
-  const pins: Pin[] = [];
-  const add = (pair: MarkedPair, proposed: boolean): void => {
-    pins.push({ ...pair.spot, kind: 'spot', proposed });
-    pins.push({ ...pair.contact, kind: 'contact', proposed });
-  };
-  const { spot, contact } = state.marking;
-  const tapping = spot !== null || contact !== null;
-  if (spot) pins.push({ ...spot, kind: 'spot', proposed: false });
-  if (contact) pins.push({ ...contact, kind: 'contact', proposed: false });
-  if (question.about === 'base') {
-    if (tapping) return pins;
-    if (question.marks[0]) add(question.marks[0], false);
-    else for (const pair of question.proposed) add(pair, true);
-    return pins;
+/** One chip per pair at the pairs stop, in the pair's colour; the selected one takes the next tap. */
+function showPairChips(question: AskedMeet): void {
+  const count = Math.min(
+    MAX_PAIRS,
+    Math.max(question.pairs.length, question.proposed ? 0 : state.meet.pair + 1, 1),
+  );
+  const side = (patch: PatchSummary | null): string => (patch ? partName(nameOf(patch.file)) : '…');
+  const chips: HTMLElement[] = [];
+  for (let k = 0; k < count; k++) {
+    const pair = question.pairs[k];
+    const item = document.createElement('li');
+    item.style.setProperty('--chip', `var(--pair-${(k % MAX_PAIRS) + 1})`);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.dataset.pair = String(k);
+    chip.setAttribute('aria-pressed', String(!question.proposed && k === state.meet.pair));
+    chip.textContent = `${k + 1}  ${side(pair?.on ?? null)} · ${side(pair?.of ?? null)}${question.proposed ? '  proposed' : ''}`;
+    chip.addEventListener('click', () => selectPair(k));
+    item.append(chip);
+    if (pair && !question.proposed) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'chip-clear';
+      clear.setAttribute('aria-label', `Clear pair ${k + 1}`);
+      clear.textContent = '×';
+      clear.addEventListener('click', () => void sendMeet({ do: 'clear', pair: k }));
+      item.append(clear);
+    }
+    chips.push(item);
   }
-  for (const pair of question.marks) add(pair, false);
-  if (!tapping) for (const pair of question.proposed) add(pair, true);
-  return pins;
+  meetInputs.pairs.replaceChildren(...chips);
+}
+
+/** The part Raise, Lower and Turn move at the final view of the parts: the one selected, else the last marked. */
+function movingPart(question: AskedMeet): number | null {
+  const marked = question.parts.filter((part) => part.source === 'marked').map((p) => p.file);
+  if (state.meet.part !== null && marked.includes(state.meet.part)) return state.meet.part;
+  return marked.at(-1) ?? null;
+}
+
+/** How the marked placement on screen was fitted: the meeting's, or the moving part's; null when nothing is marked. */
+function fitOf(question: AskedMeet): Fit | null {
+  if (question.about === 'base') return question.placement?.marks?.fit ?? null;
+  const part = movingPart(question);
+  return question.parts.find((entry) => entry.file === part)?.joint?.fit ?? null;
+}
+
+/** The pair the next tap goes to: one of the pairs, or the next, new one. */
+function selectPair(k: number): void {
+  const question = meetQuestion();
+  if (!question) return;
+  state.meet.pair = Math.max(0, Math.min(k, question.pairs.length, MAX_PAIRS - 1));
+  showQuestion();
 }
 
 /** Gives up the question's meshes: the viewer releases them and the page drops its arrays (§4.3). */
 function giveUpQuestion(): void {
   asking.meshes = [];
+  asking.patches = [];
   asking.shown = false;
   asking.framed = '';
   viewer.clear();
+}
+
+/** Whether an action at a meet question ends it: the final view confirmed, or a kit without pairs confirmed at once. */
+function endsMeeting(question: AskedMeet, action: MeetAction): boolean {
+  if (action.do !== 'confirm' && action.do !== 'fit') return false;
+  if (question.stage === 'fitted') return action.do === 'confirm';
+  // A kit in place has no final view of its parts (§15 Q5): its pairs are the picture.
+  const marked = question.marks !== null && question.pairs.some(({ on, of }) => on && of);
+  return question.about === 'parts' && !marked;
 }
 
 /** Answers the question on screen. False when none waits. */
@@ -1124,21 +1274,16 @@ function answerQuestion(answer: Answer): boolean {
   const question = state.question;
   if (!resolve || !question) return false;
   asking.answer = null;
-  if (answer.kind === 'up') {
-    if (answer.swap || answer.baseFile !== undefined) {
-      asking.swapped = true;
-      // Other roles: the worker drops the joints too (they name files by their old roles).
-      asking.joints = [];
-    } else if (!answer.confirm) asking.options = answer.orientation;
-  } else {
-    asking.joints = answer.joints;
-    asking.meeting = answer.meeting;
-  }
-  state.marking = { spot: null, contact: null };
   const restart = answer.kind === 'up' && (answer.swap || answer.baseFile !== undefined);
-  if (answer.confirm || restart) {
+  if (answer.kind === 'up' && !restart && !answer.confirm) asking.options = answer.orientation;
+  if (restart) asking.swapped = true;
+  const ends =
+    answer.kind === 'up'
+      ? answer.confirm
+      : question.kind === 'meet' && endsMeeting(question, answer.action);
+  if (ends || restart) {
     // After the last Confirm the conversion runs as it does without a question (PM decision).
-    if (answer.confirm && lastQuestion(question)) giveUpQuestion();
+    if (ends && lastQuestion(question)) giveUpQuestion();
     state.question = null;
     showTurn(null);
     render();
@@ -1174,127 +1319,72 @@ function answerAndWait(answer: Answer): Promise<void> {
   });
 }
 
-/** Answers the meet question on screen with changed joints or meeting: it comes back resolved. */
-function answerMeet(joints: PartJoint[], meeting: Meeting | null, confirm = false): Promise<void> {
-  if (!meetQuestion()) return Promise.resolve();
-  const answer: Answer = { kind: 'meet', joints, meeting, confirm };
-  if (confirm) {
+/**
+ * What the person did at a meet question (#93, patches §5.6): the worker applies it and the
+ * question comes back. Resolves when it is on screen; at once for the answer that ends the
+ * meeting, after which the conversion goes on.
+ */
+function sendMeet(action: MeetAction): Promise<void> {
+  const question = meetQuestion();
+  if (!question) return Promise.resolve();
+  const answer: Answer = { kind: 'meet', action };
+  if (endsMeeting(question, action)) {
     answerQuestion(answer);
     return Promise.resolve();
   }
   return answerAndWait(answer);
 }
 
-/** Whether a part's joints lead back to it: the tree of parts must not go round. */
-function goesRound(joints: readonly PartJoint[], part: number, onto: number): boolean {
-  for (let file: number | undefined = onto; file !== undefined;) {
-    if (file === part) return true;
-    file = joints.find((joint) => joint.part === file)?.onto;
-  }
-  return false;
+/** A ray from the camera through a canvas point, as the worker reads it: in the layout on screen. */
+function targetAt(x: number, y: number): Target | null {
+  const ray = viewer.rayAt(x, y);
+  if (!ray) return null;
+  const question = meetQuestion();
+  const apart = question?.stage === 'pairs' && state.meet.apart && question.apart !== null;
+  return { ray, ...(apart && { apart: true }) };
 }
 
-/**
- * A tap on a part at a meet question (#93 design note §6.2, one tap and no mode, PM decision):
- * on the base, or on a part in place, it is the spot; on the figure, or on a part not yet in
- * place, the contact. A tap on the part a mark is already on moves that mark. Once both are
- * set they are one meeting, and the page answers; the worker shows it placed.
- */
-function tapMark(pick: { file: number; point: Vec3; normal: Vec3 }): Promise<void> {
+/** A tap at canvas point (x, y) at the pairs stop: the surface around it, on the pair selected. */
+function tapAt(x: number, y: number): Promise<void> {
   const question = meetQuestion();
-  if (!question) return Promise.resolve();
-  const marking = { ...state.marking };
-  if (question.about === 'base') {
-    if (pick.file === question.roles.baseFile) marking.spot = pick;
-    else marking.contact = pick;
-  } else {
-    const body = question.roles.figureFiles[0];
-    const inPlace = (file: number): boolean =>
-      file === body ||
-      question.parts.some((part) => part.file === file && part.source === 'marked') ||
-      question.proposed.some((pair) => pair.contact.file === file);
-    if (marking.spot?.file === pick.file) marking.spot = pick;
-    else if (marking.contact?.file === pick.file) marking.contact = pick;
-    else if (marking.spot && pick.file !== body) marking.contact = pick;
-    else if (marking.contact) marking.spot = pick;
-    else if (inPlace(pick.file)) marking.spot = pick;
-    else marking.contact = pick;
-  }
-  state.marking = marking;
-  const { spot, contact } = marking;
-  if (!spot || !contact) {
-    showQuestion();
-    return Promise.resolve();
-  }
-  const picks = {
-    spot: { file: spot.file, point: spot.point },
-    contact: { file: contact.file, point: contact.point },
-  };
-  if (question.about === 'base') return answerMeet(asking.joints, picks);
-  if (goesRound(asking.joints, contact.file, spot.file)) {
-    // Two parts cannot each hang on the other: the contact starts again.
-    state.marking = { spot, contact: null };
-    showQuestion();
-    return Promise.resolve();
-  }
-  const joint: PartJoint = { part: contact.file, onto: spot.file, ...picks };
-  const joints = [...asking.joints.filter((other) => other.part !== joint.part), joint];
-  return answerMeet(joints, asking.meeting);
+  const at = targetAt(x, y);
+  if (!question || question.stage !== 'pairs' || !at) return Promise.resolve();
+  return sendMeet({ do: 'tap', at, pair: state.meet.pair });
 }
 
-/** Raises or turns what was marked last: the meeting with the base, or the last joint (#93). */
-function adjustMeeting(liftMm: number, turnDeg: number): Promise<void> {
+/** Brush dabs waiting to be sent: one `brush` action per frame, while no answer is on its way. */
+const brushing = { dabs: [] as Target[], frame: 0 };
+function flushBrush(): void {
+  brushing.frame = 0;
   const question = meetQuestion();
-  if (!question) return Promise.resolve();
-  const change = <T extends Meeting>(meeting: T): T => ({
-    ...meeting,
-    liftMm: (meeting.liftMm ?? 0) + liftMm,
-    turnDeg: (meeting.turnDeg ?? 0) + turnDeg,
+  if (brushing.dabs.length === 0 || !question || !asking.answer) return;
+  const at = brushing.dabs.splice(0);
+  void sendMeet({
+    do: 'brush',
+    at,
+    pair: state.meet.pair,
+    radiusMm: BRUSH_RADIUS_MM,
+    ...(state.meet.erase && { erase: true }),
   });
-  if (question.about === 'base')
-    return asking.meeting ? answerMeet(asking.joints, change(asking.meeting)) : Promise.resolve();
-  const last = asking.joints.at(-1);
-  if (!last) return Promise.resolve();
-  return answerMeet([...asking.joints.slice(0, -1), change(last)], asking.meeting);
+}
+function queueDab(x: number, y: number): void {
+  const at = targetAt(x, y);
+  if (!at) return;
+  brushing.dabs.push(at);
+  brushing.frame ||= requestAnimationFrame(flushBrush);
 }
 
-/** Drops the mark being tapped, else the last meeting marked. */
-function undoMark(): Promise<void> {
+/** Raises, lowers, turns or lets tilt what is fitted at the final view. */
+function nudge(change: {
+  liftMm?: number;
+  turnDeg?: number;
+  turn?: 'keep' | 'free' | null;
+}): Promise<void> {
   const question = meetQuestion();
   if (!question) return Promise.resolve();
-  if (state.marking.spot || state.marking.contact) {
-    state.marking = { spot: null, contact: null };
-    showQuestion();
-    return Promise.resolve();
-  }
-  if (question.about === 'base')
-    return asking.meeting ? answerMeet(asking.joints, null) : Promise.resolve();
-  return asking.joints.length > 0
-    ? answerMeet(asking.joints.slice(0, -1), asking.meeting)
-    : Promise.resolve();
+  const part = question.about === 'parts' ? movingPart(question) : null;
+  return sendMeet({ do: 'nudge', ...change, ...(part !== null && { part }) });
 }
-
-/** Drops every mark: back to what the files and the automatic placement propose. */
-function resetMarks(): Promise<void> {
-  const question = meetQuestion();
-  if (!question) return Promise.resolve();
-  state.marking = { spot: null, contact: null };
-  const changed = question.about === 'base' ? asking.meeting !== null : asking.joints.length > 0;
-  if (!changed) {
-    showQuestion();
-    return Promise.resolve();
-  }
-  return question.about === 'base'
-    ? answerMeet(asking.joints, null)
-    : answerMeet([], asking.meeting);
-}
-
-/** Confirms the meet question as it stands; a mark half set is dropped. */
-function confirmMeet(): void {
-  if (!meetQuestion()) return;
-  void answerMeet(asking.joints, asking.meeting, true);
-}
-
 /**
  * Converts with the choices made for the current source; see `choices`. `ask` names the files
  * to stop and ask about after the orient step (#92), unless the address has `?ask=off`;
@@ -1319,15 +1409,14 @@ async function convert(
     sent: { orientation: choices.orientation, baseOrientation: choices.baseOrientation },
     swapped: false,
     asks: ask ?? {},
-    joints: choices.parts.joints,
-    meeting: choices.placement.marks ?? null,
+    patches: [],
     serial: 0,
     startedAt: asks ? startedAt : null,
   });
   Object.assign(state, {
     busy: true,
     question: null,
-    marking: { spot: null, contact: null },
+    meet: meetUi(),
     questionMs: null,
     fileName,
     stats: null,
@@ -1380,11 +1469,11 @@ async function convert(
       choices.baseOrientation = result.choices.baseOrientation ?? {};
       choices.pairing = result.choices.pairing ?? {};
       choices.parts = result.choices.parts ?? { joints: [] };
-      // Marks confirmed at the meet question stay; without them, a move made by hand stays (#93).
-      const marks = result.choices.placement?.marks;
+      // What the meet question ended with stays (marks, or the automatic placement nudged);
+      // without either, a move made by hand stays (#93).
       const byHand = { ...choices.placement };
       delete byHand.marks;
-      choices.placement = marks ? { marks } : byHand;
+      choices.placement = result.choices.placement ?? byHand;
     }
     baked = null;
     detailKtx2 = null;
@@ -1458,7 +1547,9 @@ async function convert(
     // Cancelled or failed at a question: its mesh leaves the screen too.
     asking.answer = null;
     state.question = null;
-    state.marking = { spot: null, contact: null };
+    state.meet = meetUi();
+    viewer.setBrush(false);
+    brushing.dabs.length = 0;
     if (asking.shown) giveUpQuestion();
     if (askInputs.turnByHand.checked) {
       askInputs.turnByHand.checked = false;
@@ -1628,8 +1719,10 @@ async function removeBase(): Promise<void> {
     ...joint,
     part: at(joint.part),
     onto: at(joint.onto),
-    spot: { ...joint.spot, file: at(joint.spot.file) },
-    contact: { ...joint.contact, file: at(joint.contact.file) },
+    pairs: joint.pairs.map(({ on, of }) => ({
+      on: { ...on, file: at(on.file) },
+      of: { ...of, file: at(of.file) },
+    })),
   }));
   sources = figure;
   choices = {
@@ -1907,34 +2000,96 @@ askInputs.base.addEventListener('change', () =>
     baseFile: askInputs.base.value === '' ? null : Number(askInputs.base.value),
   }),
 );
-// Where the parts meet (#93): a tap marks, the buttons adjust, undo, reset and confirm.
+// Where the parts meet (#93, patches §7): the pairs stop's tools, the final view's buttons.
+meetInputs.add.addEventListener('click', () => selectPair(meetQuestion()?.pairs.length ?? 0));
+meetInputs.brush.addEventListener('click', () => {
+  state.meet.brush = !state.meet.brush;
+  if (!state.meet.brush) state.meet.erase = false;
+  viewer.setBrush(state.meet.brush);
+  showQuestion();
+});
+meetInputs.erase.addEventListener('click', () => {
+  state.meet.erase = !state.meet.erase;
+  // Erasing is a brush that takes away.
+  if (state.meet.erase) state.meet.brush = true;
+  viewer.setBrush(state.meet.brush);
+  showQuestion();
+});
+meetInputs.undo.addEventListener('click', () => void sendMeet({ do: 'undo' }));
+meetInputs.clear.addEventListener('click', () => void sendMeet({ do: 'clear' }));
+meetInputs.apart.addEventListener('click', () => {
+  state.meet.apart = !state.meet.apart;
+  showQuestion();
+});
 for (const button of meetInputs.adjust.querySelectorAll<HTMLButtonElement>('[data-meet-lift]'))
   button.addEventListener(
     'click',
-    () => void adjustMeeting(Number(button.dataset.meetLift) * LIFT_STEP_MM, 0),
+    () => void nudge({ liftMm: Number(button.dataset.meetLift) * LIFT_STEP_MM }),
   );
 for (const button of meetInputs.adjust.querySelectorAll<HTMLButtonElement>('[data-meet-turn]'))
-  button.addEventListener('click', () => void adjustMeeting(0, Number(button.dataset.meetTurn)));
-meetInputs.undo.addEventListener('click', () => void undoMark());
-meetInputs.reset.addEventListener('click', () => void resetMarks());
-meetInputs.confirm.addEventListener('click', () => confirmMeet());
+  button.addEventListener('click', () => void nudge({ turnDeg: Number(button.dataset.meetTurn) }));
+meetInputs.tilt.addEventListener('click', () => {
+  const question = meetQuestion();
+  const fit = question && fitOf(question);
+  if (fit) void nudge({ turn: fit.kept === 'free' ? 'keep' : 'free' });
+});
+meetInputs.back.addEventListener('click', () => void sendMeet({ do: 'back' }));
+meetInputs.confirm.addEventListener('click', () => void sendMeet({ do: 'confirm' }));
 /** A press is a tap when it moves no further and lasts no longer than this; else it orbits. _(proposals, #93)_ */
 const TAP_MAX_PX = 6;
 const TAP_MAX_MS = 400;
-let press: { id: number; x: number; y: number; at: number } | null = null;
+/** The brush: a dab every this many CSS pixels of a drag, this wide on the surface. _(proposals, patches §7.1)_ */
+const BRUSH_STEP_PX = 6;
+const BRUSH_RADIUS_MM = 1;
+/** Fingers and buttons on the canvas: one paints with the brush on, two orbit. */
+const pointers = new Set<number>();
+let press: {
+  id: number;
+  x: number;
+  y: number;
+  at: number;
+  last: [number, number] | null;
+} | null = null;
+const canvasPoint = (event: PointerEvent): [number, number] => {
+  const rect = canvas.getBoundingClientRect();
+  return [event.clientX - rect.left, event.clientY - rect.top];
+};
 canvas.addEventListener('pointerdown', (event) => {
-  press = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now() };
+  pointers.add(event.pointerId);
+  // A second finger orbits: the first one's drag is not a tap or a stroke any more.
+  press =
+    pointers.size === 1 && event.button === 0
+      ? {
+          id: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          at: performance.now(),
+          last: null,
+        }
+      : null;
 });
-canvas.addEventListener('pointerup', (event) => {
+canvas.addEventListener('pointermove', (event) => {
+  if (!press || press.id !== event.pointerId || !state.meet.brush) return;
+  if (meetQuestion()?.stage !== 'pairs') return;
+  if (!press.last && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= TAP_MAX_PX)
+    return;
+  const [x, y] = canvasPoint(event);
+  if (press.last && Math.hypot(x - press.last[0], y - press.last[1]) < BRUSH_STEP_PX) return;
+  press.last = [x, y];
+  queueDab(x, y);
+});
+const release = (event: PointerEvent): void => {
+  pointers.delete(event.pointerId);
   const down = press;
+  if (!down || down.id !== event.pointerId) return;
   press = null;
-  if (!down || down.id !== event.pointerId || !meetQuestion()) return;
+  if (event.type !== 'pointerup' || down.last || !meetQuestion()) return;
   const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
   if (moved > TAP_MAX_PX || performance.now() - down.at > TAP_MAX_MS) return;
-  const rect = canvas.getBoundingClientRect();
-  const pick = viewer.pick(event.clientX - rect.left, event.clientY - rect.top);
-  if (pick) void tapMark(pick);
-});
+  void tapAt(...canvasPoint(event));
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
 pairInputs.markMeeting.addEventListener('click', () => void markMeeting());
 pairInputs.markParts.addEventListener('click', () => void markParts());
 document.querySelector('#set-down')!.addEventListener('click', () => void applyTurn(true));
@@ -2000,19 +2155,33 @@ window.__mt = {
   swapAtQuestion: () => answerAndWait({ kind: 'up', orientation: {}, confirm: false, swap: true }),
   chooseBase: (file) =>
     answerAndWait({ kind: 'up', orientation: {}, confirm: false, baseFile: file }),
-  mark: (file, point, normal = [0, 1, 0]) => tapMark({ file, point, normal }),
-  pickAt: (x, y) => viewer.pick(x, y),
-  screenOf: (file, point) => viewer.screenOf(file, point),
-  liftMeeting: (mm) => adjustMeeting(mm, 0),
-  turnMeeting: (deg) => adjustMeeting(0, deg),
-  undoMark,
-  resetMarks,
-  confirmMeet: () => {
-    confirmMeet();
-    return Promise.resolve();
+  tap: (file, point, pair = state.meet.pair) => sendMeet({ do: 'tap', at: { file, point }, pair }),
+  brush: (file, points, { erase = false, pair = state.meet.pair } = {}) =>
+    sendMeet({
+      do: 'brush',
+      at: points.map((point) => ({ file, point })),
+      pair,
+      radiusMm: BRUSH_RADIUS_MM,
+      ...(erase && { erase: true }),
+    }),
+  addPair: () => selectPair(meetQuestion()?.pairs.length ?? 0),
+  selectPair,
+  clearMarks: (pair) => sendMeet({ do: 'clear', ...(pair !== undefined && { pair }) }),
+  undoMark: () => sendMeet({ do: 'undo' }),
+  fitMeeting: () => sendMeet({ do: 'fit' }),
+  backToMarks: () => sendMeet({ do: 'back' }),
+  liftMeeting: (mm) => nudge({ liftMm: mm }),
+  turnMeeting: (deg) => nudge({ turnDeg: deg }),
+  setTilt: (mode) => nudge({ turn: mode }),
+  confirmMeet: () => sendMeet({ do: 'confirm' }),
+  answerMeet: sendMeet,
+  pickAt: async (x, y) => {
+    const at = targetAt(x, y);
+    if (!at) return null;
+    await sendMeet({ do: 'pick', at });
+    return meetQuestion()?.picked ?? null;
   },
-  answerMeet: ({ joints, meeting }) =>
-    answerMeet(joints ?? asking.joints, meeting === undefined ? asking.meeting : meeting),
+  screenOf: (file, point) => viewer.screenOf(file, point),
   markMeeting,
   markParts,
   turn,

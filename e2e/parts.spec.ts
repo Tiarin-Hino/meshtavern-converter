@@ -9,9 +9,10 @@ import {
 } from '../src/regression/shapes';
 
 /**
- * A figure in several files (#93, design note docs/design/marks-where-parts-meet.md §6.2, §10
- * step 7): the parts question, a part lying apart joined by two marks, the base and figure after
- * it; parts without a base; too many files. Generated files, picked through #file.
+ * A figure in several files (#93, design notes docs/design/marks-where-parts-meet.md §6.2 and
+ * docs/design/patches-where-parts-meet.md §7, §11 step 9): the parts question, a part lying apart
+ * joined by two pairs, the base and figure after it; parts without a base, pulled apart; too many
+ * files. Generated files, picked through #file.
  */
 
 async function shoot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
@@ -28,6 +29,7 @@ const file = (name: string, soup: Float32Array) => ({
 });
 
 type Asked = NonNullable<Window['__mt']['state']['question']>;
+type MeetAsked = Extract<Asked, { kind: 'meet' }>;
 
 async function question(page: Page, after = 0): Promise<Asked> {
   await page.waitForFunction(
@@ -36,6 +38,8 @@ async function question(page: Page, after = 0): Promise<Asked> {
   );
   return page.evaluate(() => window.__mt.state.question!);
 }
+const current = (page: Page): Promise<MeetAsked> =>
+  page.evaluate(() => window.__mt.state.question!) as Promise<MeetAsked>;
 
 async function ended(page: Page): Promise<void> {
   await page.waitForFunction(
@@ -55,7 +59,7 @@ const moved = (p: readonly number[]): [number, number, number] => [
   p[2]! + WING_MOVE[2],
 ];
 
-test('joins a wing that lies apart, then asks about the base and the figure', async ({
+test('joins a wing that lies apart by two pairs, then asks about the base and the figure', async ({
   page,
 }, testInfo) => {
   test.setTimeout(240_000);
@@ -66,33 +70,51 @@ test('joins a wing that lies apart, then asks about the base and the figure', as
     file('wing.stl', movedSoup(wing, WING_MOVE)),
     file('recess-base.stl', generateRecessBase()),
   ]);
-  const parts = await question(page);
-  expect(parts).toMatchObject({ kind: 'meet', about: 'parts' });
-  if (parts.kind !== 'meet') throw new Error('expected the parts question');
+  const parts = (await question(page)) as MeetAsked;
+  expect(parts).toMatchObject({ kind: 'meet', about: 'parts', stage: 'pairs', proposed: true });
   expect(parts.shown.map((s) => s.file)).toEqual([0, 1]);
-  expect(parts.proposed).toEqual([]);
-  await expect(page.locator('#meet-question')).toHaveText(COPY.askParts);
+  // The wing lies 50 mm apart: nothing touches, nothing is proposed.
+  expect(parts.pairs).toEqual([]);
+  await expect(page.locator('#meet-question')).toHaveText(COPY.askPairs);
+  await expect(page.locator('#meet-hint')).toHaveText(
+    'Nothing touches. Tap where they touch, or confirm to keep the parts where their files put them.',
+  );
   await expect(page.locator('#meet-parts li')).toHaveText([
     'body · the body',
     'wing · lies apart: mark where it goes',
   ]);
-  await expect(page.locator('#meet-confirm')).toHaveText(COPY.confirmParts);
+  await expect(page.locator('#meet-confirm')).toHaveText(COPY.confirmPairs);
   await shoot(page, testInfo, 'parts-wing-apart');
 
-  // The spot on the body's shoulder plate, then the contact on the wing's root.
-  await page.evaluate((spot) => window.__mt.mark(0, spot, [1, 0, 0]), WINGED_FIGURE.joint);
+  // The body's shoulder plate and the wing's root; then a second pair on the same faces, the
+  // wing tapped first.
+  await page.evaluate((point) => window.__mt.tap(0, point), WINGED_FIGURE.joint);
+  await page.evaluate((point) => window.__mt.tap(1, point), moved(WINGED_FIGURE.joint));
+  await page.evaluate(() => window.__mt.addPair());
+  const second: [number, number, number] = [8.5, 1, 13];
+  await page.evaluate((point) => window.__mt.tap(1, point), moved(second));
+  await page.evaluate((point) => window.__mt.tap(0, point), second);
+  const marked = await current(page);
+  expect(marked.pairs.map(({ on, of }) => [on?.file, of?.file])).toEqual([
+    [0, 1],
+    [0, 1],
+  ]);
   await expect(page.locator('#meet-hint')).toHaveText(
-    'Now tap the contact on the part that goes there.',
+    'Tap a part in place and the part that goes there, where they touch.',
   );
-  await page.evaluate(
-    (contact) => window.__mt.mark(1, contact, [-1, 0, 0]),
-    moved(WINGED_FIGURE.joint),
-  );
-  const joined = await page.evaluate(() => window.__mt.state.question!);
-  if (joined.kind !== 'meet') throw new Error('expected the parts question');
+  await shoot(page, testInfo, 'parts-wing-pairs');
+
+  await page.evaluate(() => window.__mt.fitMeeting());
+  const joined = await current(page);
+  expect(joined.stage).toBe('fitted');
   expect(joined.parts[1]).toMatchObject({ file: 1, source: 'marked' });
-  await expect(page.locator('#meet-parts li')).toHaveText(['body · the body', 'wing · marked']);
+  await expect(page.locator('#meet-question')).toHaveText(COPY.askParts);
+  await expect(page.locator('#meet-parts li')).toHaveText([
+    'body · the body',
+    'wing · set where you marked · kept upright',
+  ]);
   await expect(page.locator('#meet-adjust')).toBeVisible();
+  await expect(page.locator('#meet-confirm')).toHaveText(COPY.confirmParts);
   await shoot(page, testInfo, 'parts-wing-joined');
 
   await page.evaluate(() => window.__mt.confirmMeet());
@@ -106,7 +128,8 @@ test('joins a wing that lies apart, then asks about the base and the figure', as
   await expect(page.locator('#ask-file')).toHaveText('Figure: body.stl + wing.stl');
   await page.evaluate(() => window.__mt.confirmUp());
   const meeting = await question(page, figure.serial);
-  expect(meeting).toMatchObject({ kind: 'meet', about: 'base' });
+  expect(meeting).toMatchObject({ kind: 'meet', about: 'base', stage: 'pairs' });
+  await page.evaluate(() => window.__mt.confirmMeet());
   await page.evaluate(() => window.__mt.confirmMeet());
   await ended(page);
 
@@ -114,6 +137,7 @@ test('joins a wing that lies apart, then asks about the base and the figure', as
   const stats = await page.evaluate(() => window.__mt.state.stats!);
   expect(stats.asked.map((a) => a.role)).toEqual(['parts', 'base', 'figure', 'meet']);
   expect(stats.pair!.parts.map((p) => p.source)).toEqual(['body', 'marked']);
+  expect(stats.choices.parts!.joints[0]!.pairs).toHaveLength(2);
   await page.locator('#adjust').evaluate((details: HTMLDetailsElement) => (details.open = true));
   await expect(page.locator('#pair-parts')).toHaveText('Parts: wing marked');
   await expect(page.locator('#pair-files')).toHaveText(
@@ -122,9 +146,9 @@ test('joins a wing that lies apart, then asks about the base and the figure', as
   await expect(page.locator('#mark-parts')).toBeVisible();
 });
 
-test('makes parts of one figure when there is no base, and refuses a seventh file', async ({
+test('makes parts of one figure when there is no base, pulls them apart, refuses a seventh file', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(240_000);
   await open(page);
   const { body, wing } = generateWingedFigure();
@@ -132,15 +156,21 @@ test('makes parts of one figure when there is no base, and refuses a seventh fil
   const base = await question(page);
   expect(base).toMatchObject({ kind: 'up', role: 'base' });
   await page.evaluate(() => window.__mt.chooseBase(null));
-  const parts = await question(page, base.serial);
+  const parts = (await question(page, base.serial)) as MeetAsked;
   expect(parts).toMatchObject({
     kind: 'meet',
     about: 'parts',
+    proposed: true,
     roles: { baseFile: null, figureFiles: [0, 1] },
   });
-  // The wing is where its file puts it: pinned where it touches the body.
-  if (parts.kind !== 'meet') throw new Error('expected the parts question');
-  expect(parts.proposed).toHaveLength(1);
+  // The wing is where its file puts it: the pair where it touches the body is proposed.
+  expect(parts.pairs).toHaveLength(1);
+  expect(parts.apart!.shown.map((s) => s.file)).toEqual([0, 1]);
+  await expect(page.locator('#meet-apart')).toBeVisible();
+  await page.locator('#meet-apart').click();
+  await expect(page.locator('#meet-apart')).toHaveAttribute('aria-pressed', 'true');
+  await shoot(page, testInfo, 'parts-pulled-apart');
+  // A kit in place has no final view: one Confirm.
   await page.evaluate(() => window.__mt.confirmMeet());
   const mini = await question(page, parts.serial);
   expect(mini).toMatchObject({ kind: 'up', role: 'mini' });
@@ -169,19 +199,18 @@ test('drops the joints when another base is chosen after them', async ({ page })
     file('wing.stl', movedSoup(wing, WING_MOVE)),
     file('recess-base.stl', generateRecessBase()),
   ]);
-  const parts = await question(page);
-  await page.evaluate((spot) => window.__mt.mark(0, spot, [1, 0, 0]), WINGED_FIGURE.joint);
-  await page.evaluate(
-    (contact) => window.__mt.mark(1, contact, [-1, 0, 0]),
-    moved(WINGED_FIGURE.joint),
-  );
+  await question(page);
+  await page.evaluate((point) => window.__mt.tap(0, point), WINGED_FIGURE.joint);
+  await page.evaluate((point) => window.__mt.tap(1, point), moved(WINGED_FIGURE.joint));
+  await page.evaluate(() => window.__mt.fitMeeting());
+  const fitted = await current(page);
   await page.evaluate(() => window.__mt.confirmMeet());
-  const base = await question(page, parts.serial);
+  const base = await question(page, fitted.serial);
   expect(base).toMatchObject({ kind: 'up', role: 'base', file: 2 });
   // The wing named as the base: the joint that placed it names a file that is no part now.
   await page.evaluate(() => window.__mt.chooseBase(1));
   const again = await question(page, base.serial);
-  expect(again).toMatchObject({ kind: 'meet', about: 'parts', marks: [] });
+  expect(again).toMatchObject({ kind: 'meet', about: 'parts', proposed: true, marks: null });
   await page.evaluate(() => window.__mt.confirmMeet());
   const next = await question(page, again.serial);
   expect(next).toMatchObject({ kind: 'up', role: 'base', file: 1 });

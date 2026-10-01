@@ -23,12 +23,8 @@ import {
   ownCopy,
 } from '../lib/three';
 
-/** A pin's ball is at least this big, file mm... _(proposal, #93)_ */
-const PIN_RADIUS_MM = 1.5;
-/** ...and this share of the largest side of what is shown, so it shows on a large mini. _(proposal)_ */
-const PIN_SIZE_SHARE = 0.015;
-/** Spots and contacts, as in style.css (`--pin-spot`, `--pin-contact`). */
-const PIN_COLOURS = { spot: 0xf0b35e, contact: 0x7ee0c3 };
+/** The pairs' colours, as in style.css (`--pair-1` … `--pair-4`). _(proposal, #93)_ */
+const PAIR_COLOURS = [0xf0b35e, 0x7ee0c3, 0xd78ae6, 0x8fb8f5] as const;
 type Vec3 = [number, number, number];
 
 /** Squares the grid shows along each side. */
@@ -116,8 +112,8 @@ export class Viewer {
    * does on a converted mini. Null when no question is shown.
    */
   private question: { holder: THREE.Group; meshes: Map<number, THREE.Mesh> } | null = null;
-  /** The pins at a question (#93), each a child of its file's mesh. */
-  private pins: THREE.Object3D[] = [];
+  /** The patches at a question (#93), each a child of its file's mesh. */
+  private patches: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
   /** The sculpt as the file has it: flat-shaded in the primer's grey, no look yet (PM decision, #92). */
   private readonly questionMaterial = new THREE.MeshStandardMaterial({
@@ -326,26 +322,23 @@ export class Viewer {
   }
 
   /**
-   * What a tap at canvas point (x, y) in CSS pixels hits at a question (#93): the nearest
-   * surface of the meshes shown, as the file and the point in its coordinates (the mesh's
-   * local frame is the file's), with the face's normal there. Null when it hits nothing. Three.js
-   * tests every triangle: `PICK_BUDGET_MS` in the design note.
+   * The camera's ray through canvas point (x, y), CSS pixels, at a question (#93, patches §7.3):
+   * in the coordinates the question's `shown` transforms are given in (the holder's), so the
+   * worker can carry it into each file. Null when no question is shown.
    */
-  pick(x: number, y: number): { file: number; point: Vec3; normal: Vec3 } | null {
+  rayAt(x: number, y: number): { origin: Vec3; direction: Vec3 } | null {
     if (!this.question) return null;
     const rect = this.canvas.getBoundingClientRect();
     const pointer = new THREE.Vector2((x / rect.width) * 2 - 1, 0 - ((y / rect.height) * 2 - 1));
     this.raycaster.setFromCamera(pointer, this.camera);
-    const hits = this.raycaster.intersectObjects([...this.question.meshes.values()], false);
-    const hit = hits[0];
-    if (!hit) return null;
-    const mesh = hit.object as THREE.Mesh;
-    const local = mesh.worldToLocal(hit.point.clone());
-    const normal = hit.face?.normal ?? new THREE.Vector3(0, 1, 0);
+    const { holder } = this.question;
+    this.pivot.updateMatrixWorld(true);
+    const toLocal = holder.matrixWorld.clone().invert();
+    const origin = this.raycaster.ray.origin.clone().applyMatrix4(toLocal);
+    const direction = this.raycaster.ray.direction.clone().transformDirection(toLocal);
     return {
-      file: mesh.userData.file as number,
-      point: [local.x, local.y, local.z],
-      normal: [normal.x, normal.y, normal.z],
+      origin: [origin.x, origin.y, origin.z],
+      direction: [direction.x, direction.y, direction.z],
     };
   }
 
@@ -361,67 +354,89 @@ export class Viewer {
   }
 
   /**
-   * Pins at a question (#93): a ball at each point and a stick along its normal, children of
-   * their file's mesh so they move with the part, drawn over the surfaces so a spot inside a
-   * hole stays visible. Spots and contacts in two colours, proposals paler. The radius follows
-   * the mini's size, at least `PIN_RADIUS_MM`.
+   * The patches at a question (#93, patches §7.3): per patch one mesh, a child of its file's mesh
+   * sharing its positions, indexed by the patch's triangles. Drawn once solid just in front of
+   * the surface and once faint through everything, so a patch under a foot or inside a joint
+   * still shows. Both sides of a pair in its colour (`PAIR_COLOURS`); a proposal paler.
    */
-  setPins(
-    pins: readonly {
-      file: number;
-      point: Vec3;
-      normal: Vec3;
-      kind: 'spot' | 'contact';
-      proposed: boolean;
-    }[],
+  setPatches(
+    patches: readonly { file: number; triangles: Uint32Array; pair: number; proposed: boolean }[],
   ): void {
-    this.clearPins();
+    this.clearPatches();
     if (!this.question) return;
-    const radius = Math.max(
-      PIN_RADIUS_MM,
-      PIN_SIZE_SHARE * Math.max(this.size.x, this.size.y, this.size.z),
-    );
-    for (const pin of pins) {
-      const mesh = this.question.meshes.get(pin.file);
-      if (!mesh) continue;
-      const material = new THREE.MeshBasicMaterial({
-        color: pin.kind === 'spot' ? PIN_COLOURS.spot : PIN_COLOURS.contact,
-        transparent: true,
-        opacity: pin.proposed ? 0.55 : 1,
-        depthTest: false,
+    for (const patch of patches) {
+      const mesh = this.question.meshes.get(patch.file);
+      if (!mesh || patch.triangles.length === 0) continue;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', mesh.geometry.getAttribute('position'));
+      const indices = new Uint32Array(patch.triangles.length * 3);
+      const source = mesh.geometry.getIndex()!.array;
+      patch.triangles.forEach((t, k) => {
+        indices[k * 3] = source[t * 3]!;
+        indices[k * 3 + 1] = source[t * 3 + 1]!;
+        indices[k * 3 + 2] = source[t * 3 + 2]!;
       });
-      const group = new THREE.Group();
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), material);
-      const length = radius * 3;
-      const stick = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius / 4, radius / 4, length, 8),
-        material,
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      const color = PAIR_COLOURS[patch.pair % PAIR_COLOURS.length]!;
+      const solid = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: patch.proposed,
+          opacity: patch.proposed ? 0.6 : 1,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -4,
+        }),
       );
-      stick.position.y = length / 2;
-      group.add(ball, stick);
-      group.position.set(...pin.point);
-      group.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(...pin.normal).normalize(),
+      const through = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: patch.proposed ? 0.15 : 0.3,
+          side: THREE.DoubleSide,
+          depthTest: false,
+          depthWrite: false,
+        }),
       );
-      group.renderOrder = 10;
-      ball.renderOrder = 10;
-      stick.renderOrder = 10;
-      mesh.add(group);
-      this.pins.push(group);
+      through.renderOrder = 10;
+      mesh.add(solid, through);
+      this.patches.push(solid, through);
     }
   }
 
-  private clearPins(): void {
-    for (const pin of this.pins) {
-      pin.parent?.remove(pin);
-      pin.traverse((object) => {
-        const mesh = object as THREE.Mesh;
-        mesh.geometry?.dispose();
-        (mesh.material as THREE.Material | undefined)?.dispose();
-      });
+  private clearPatches(): void {
+    const geometries = new Set<THREE.BufferGeometry>();
+    for (const patch of this.patches) {
+      patch.parent?.remove(patch);
+      geometries.add(patch.geometry);
+      (patch.material as THREE.Material).dispose();
     }
-    this.pins = [];
+    // The positions are the file mesh's: only the index goes with the geometry.
+    for (const geometry of geometries) {
+      geometry.deleteAttribute('position');
+      geometry.dispose();
+    }
+    this.patches = [];
+  }
+
+  /**
+   * The brush at a question (#93, patches §7.4): while on, one finger and the left button are
+   * the page's to paint with; two fingers and the right button orbit.
+   */
+  setBrush(on: boolean): void {
+    const none = -1 as unknown as THREE.MOUSE;
+    this.controls.mouseButtons = {
+      LEFT: on ? none : THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: on ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN,
+    };
+    this.controls.touches = {
+      ONE: on ? (-1 as unknown as THREE.TOUCH) : THREE.TOUCH.ROTATE,
+      TWO: on ? THREE.TOUCH.DOLLY_ROTATE : THREE.TOUCH.DOLLY_PAN,
+    };
   }
 
   /** Adds the single mini to the scene, with the turn being tried out and the gizmo if shown. */
@@ -696,7 +711,7 @@ export class Viewer {
   clear(): void {
     this.gizmo?.detach();
     this.moveGizmo?.detach();
-    this.clearPins();
+    this.clearPatches();
     if (this.question) {
       this.pivot.remove(this.question.holder);
       this.scene.remove(this.pivot);

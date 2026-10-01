@@ -306,7 +306,9 @@ export function describeParts(
  * or why the last tap did nothing.
  */
 export function describePairs(
-  question: Pick<MeetQuestion, 'about' | 'proposed' | 'pairs' | 'note'>,
+  question: Pick<MeetQuestion, 'about' | 'proposed' | 'note'> & {
+    pairs: readonly { on: object | null; of: object | null }[];
+  },
 ): string {
   const parts = question.about === 'parts';
   switch (question.note) {
