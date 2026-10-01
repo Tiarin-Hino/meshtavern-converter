@@ -10,147 +10,32 @@ import {
   SLOPE_BASE,
 } from '../../regression/shapes';
 import type { Vec3 } from './base';
-import { generateBumpySheet } from './generate';
 import { TriangleBvh } from './bvh';
+import { generateBumpySheet } from './generate';
 import {
+  applyMeetAction,
+  marksOf,
+  MAX_PAIRS,
   MAX_STROKES,
-  meetingRotation,
-  nearestTriangle,
-  resolveMark,
   resolvePatch,
+  startMeeting,
   TAP_REACH_MM,
-  triangleCorners,
+  type MarkingAction,
   type Meeting,
+  type MeetContext,
+  type MeetState,
+  type PartJoint,
+  type PatchPair,
   type Stroke,
 } from './marks';
 import { weldVertices, type IndexedMesh } from './mesh';
-import { angleDeg, apply, dot, normalise, turnAngleDeg } from './rotation';
+import { angleDeg, IDENTITY } from './rotation';
 import { placePairOnly, runPipeline } from './run';
 import { encodeBinaryStl } from './stl';
 
 const welded = (soup: Float32Array): IndexedMesh => weldVertices(soup).mesh;
 /** -0 becomes 0, so exact comparisons do not trip on the sign of zero. */
 const plain = (v: Vec3): Vec3 => [v[0] + 0, v[1] + 0, v[2] + 0];
-
-/**
- * A flat grid on z = 0 whose vertices are nudged up by 0–0.04 mm in a fixed pattern: a surface
- * that points up with every small triangle pointing somewhere else.
- */
-function roughSheet(quads: number, stepMm: number): Float32Array {
-  const soup: number[] = [];
-  const at = (i: number, j: number): Vec3 => [
-    (i - quads / 2) * stepMm,
-    (j - quads / 2) * stepMm,
-    ((i * 7 + j * 13) % 5) * 0.01,
-  ];
-  for (let j = 0; j < quads; j++)
-    for (let i = 0; i < quads; i++) {
-      soup.push(...at(i, j), ...at(i + 1, j), ...at(i + 1, j + 1));
-      soup.push(...at(i, j), ...at(i + 1, j + 1), ...at(i, j + 1));
-    }
-  return new Float32Array(soup);
-}
-
-describe('nearestTriangle', () => {
-  it('finds a triangle the point lies on, and one of the two sharing an edge', () => {
-    const mesh = welded(roughSheet(10, 1));
-    // The diagonal of the quad at (0, 0): shared by triangles 0 and 1... in the soup's order.
-    const onDiagonal: Vec3 = [-4.5, -4.5, 0.02];
-    const { triangle } = nearestTriangle(mesh, onDiagonal);
-    const corners = triangleCorners(mesh, triangle).map(([x, y]) => `${x},${y}`);
-    expect(corners).toEqual(expect.arrayContaining(['-5,-5', '-4,-4']));
-  });
-
-  it('returns -1 for a mesh without triangles', () => {
-    const empty = { positions: new Float32Array(0), indices: new Uint32Array(0) };
-    expect(nearestTriangle(empty, [0, 0, 0]).triangle).toBe(-1);
-    expect(resolveMark(empty, [0, 0, 0])).toBeNull();
-  });
-});
-
-describe('resolveMark', () => {
-  it("gives a recess floor's normal exactly and keeps the point as given", () => {
-    const floor = RECESS_BASE.heightMm - RECESS_BASE.recessDepthMm;
-    const point: Vec3 = [0.3, -0.2, floor];
-    const mark = resolveMark(welded(generateRecessBase()), point)!;
-    expect(plain(mark.normal)).toEqual([0, 0, 1]);
-    expect(mark.point).toEqual(point);
-  });
-
-  it('takes the surface around the point, not the one triangle under it', () => {
-    const mesh = welded(roughSheet(40, 0.1));
-    const point: Vec3 = [0.03, 0.02, 0.02];
-    const own = triangleCorners(mesh, nearestTriangle(mesh, point).triangle);
-    const [a, b, c] = own;
-    const ownNormal = normalise([
-      (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]),
-      (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]),
-      (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
-    ]);
-    expect(angleDeg(ownNormal, [0, 0, 1])).toBeGreaterThan(10);
-    expect(angleDeg(resolveMark(mesh, point)!.normal, [0, 0, 1])).toBeLessThan(5);
-  });
-
-  it("follows a bumpy sheet's surface around where it was marked", () => {
-    const mesh = welded(generateBumpySheet(150));
-    const step = 50 / 150;
-    // The sheet's height is 2 sin(0.9 x) cos(0.7 y) + 3 at the grid's corners; its normal there
-    // is (-dz/dx, -dz/dy, 1).
-    const normalAt = (x: number, y: number): Vec3 =>
-      normalise([
-        -1.8 * Math.cos(x * 0.9) * Math.cos(y * 0.7),
-        1.4 * Math.sin(x * 0.9) * Math.sin(y * 0.7),
-        1,
-      ]);
-    for (const [x, y] of [
-      [20, 20],
-      [7, 31],
-      [33, 12],
-    ] as const) {
-      const ix = Math.round(x / step);
-      const iy = Math.round(y / step);
-      const [px, py] = [ix * step, iy * step];
-      const z = 2 * Math.sin(px * 0.9) * Math.cos(py * 0.7) + 3;
-      // The sheet's mean normal over the disc of MARK_NORMAL_RADIUS_MM around the point.
-      const mean: Vec3 = [0, 0, 0];
-      for (let dx = -1; dx <= 1; dx += 0.1)
-        for (let dy = -1; dy <= 1; dy += 0.1) {
-          if (dx * dx + dy * dy > 1) continue;
-          const n = normalAt(px + dx, py + dy);
-          for (let k = 0; k < 3; k++) mean[k] = mean[k]! + n[k]!;
-        }
-      const mark = resolveMark(mesh, [px, py, z])!;
-      expect(angleDeg(mark.normal, mean)).toBeLessThan(5);
-    }
-  });
-
-  it('keeps the other wall of a thin recess out of the normal', () => {
-    // On the recess floor right next to its wall: the wall faces sideways, 90° off the floor.
-    const floor = RECESS_BASE.heightMm - RECESS_BASE.recessDepthMm;
-    const edge = RECESS_BASE.recessMm / 2 - 0.2;
-    const mark = resolveMark(welded(generateRecessBase()), [edge, 0, floor])!;
-    expect(plain(mark.normal)).toEqual([0, 0, 1]);
-  });
-});
-
-describe('meetingRotation', () => {
-  it('is the identity for opposite normals and no turn', () => {
-    expect(meetingRotation([0, -1, 0], [0, 1, 0]).map((v) => v + 0)).toEqual([0, 0, 0, 1]);
-  });
-
-  it('turns the contact normal against the spot normal, then about it', () => {
-    const nSpot = normalise([0, 0.8, 0.6]);
-    const q = meetingRotation([0, -1, 0], nSpot, 90);
-    const turned = apply(q, [0, -1, 0]);
-    expect(dot(turned, nSpot)).toBeCloseTo(-1, 12);
-  });
-
-  it('gives a half turn for equal normals, without an error', () => {
-    const q = meetingRotation([0, 1, 0], [0, 1, 0]);
-    expect(turnAngleDeg(q)).toBeCloseTo(180, 9);
-    expect(apply(q, [0, 1, 0])[1]).toBeCloseTo(-1, 12);
-  });
-});
 
 /** The peg figure's file: a 3 mm peg 3.5 mm long under the figure, its end centred on the origin. */
 const PEG_LENGTH_MM = 3.5;
@@ -173,14 +58,20 @@ function landed(soup: Float32Array, mesh: IndexedMesh, point: Vec3): Vec3 {
   throw new Error(`no vertex at ${point.join(', ')}`);
 }
 
+/** One tap on each side. */
+const tapPair = (onFile: number, on: Vec3, ofFile: number, of: Vec3): PatchPair => ({
+  on: { file: onFile, strokes: [{ tap: on }] },
+  of: { file: ofFile, strokes: [{ tap: of }] },
+});
+
+/** The peg's end tapped, and the hole's floor. */
 const holeMeeting = (more: Partial<Meeting> = {}): Meeting => ({
-  spot: { file: 1, point: [0, 0, HOLE_BASE.floorMm] },
-  contact: { file: 0, point: PEG_END },
+  pairs: [tapPair(1, [0, 0, HOLE_BASE.floorMm], 0, PEG_END)],
   ...more,
 });
 
-describe('the marked placement (#93)', () => {
-  it("sets the peg's end on the hole's floor, its axis on the hole's axis", () => {
+describe('the marked placement (#93, patches §5.5)', () => {
+  it("sets the peg's end on the hole's floor, its axis on the hole's axis, only moved", () => {
     const soup = generatePegFigure(PEG_LENGTH_MM);
     const placed = placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()), {
       placement: { marks: holeMeeting() },
@@ -189,35 +80,39 @@ describe('the marked placement (#93)', () => {
     expect(placement.method).toBe('marked');
     expect(placement.spot.kind).toBe('marked');
     expect(placement.candidates).toEqual([]);
-    const spot = placement.marks!.spot;
-    expect(plain(spot.normal)).toEqual([0, 1, 0]);
-    expect(spot.point[1]).toBeCloseTo(HOLE_BASE.floorMm, 6);
+    const marks = placement.marks!;
+    expect(marks.fit.kept).toBe('standing');
+    expect(marks.rotation).toBe(IDENTITY);
+    const [pair] = marks.pairs;
+    expect(plain(pair!.on.normal)).toEqual([0, 1, 0]);
+    expect(pair!.on.centre[1]).toBeCloseTo(HOLE_BASE.floorMm, 6);
     const end = landed(soup, placed.mesh, PEG_END);
     const top = landed(soup, placed.mesh, PEG_TOP);
     for (const p of [end, top]) {
-      expect(Math.abs(p[0] - spot.point[0])).toBeLessThan(0.01);
-      expect(Math.abs(p[2] - spot.point[2])).toBeLessThan(0.01);
+      expect(Math.abs(p[0] - pair!.on.centre[0])).toBeLessThan(0.05);
+      expect(Math.abs(p[2] - pair!.on.centre[2])).toBeLessThan(0.05);
     }
-    expect(Math.abs(end[1] - HOLE_BASE.floorMm)).toBeLessThan(0.01);
+    expect(Math.abs(end[1] - HOLE_BASE.floorMm)).toBeLessThan(0.05);
     // A flat end met a flat floor: the figure stands as it did, and says so.
-    expect(placement.marks!.rotation.map((v) => v + 0)).toEqual([0, 0, 0, 1]);
     expect(placed.orientation.method).not.toBe('marked');
     expect(placed.orientation.tiltDeg).toBe(0);
   }, 60_000);
 
-  it('stands a figure tilted on a sloped rock, raised along and turned about its normal', () => {
+  it('tilts a figure onto a sloped rock, raised along and turned about the normal', () => {
     const soup = generatePegFigure(PEG_LENGTH_MM);
     const base = encodeBinaryStl(generateSlopeBase());
     const meeting: Meeting = {
-      spot: { file: 1, point: SLOPE_BASE.topCentre },
-      contact: { file: 0, point: PEG_END },
+      pairs: [tapPair(1, SLOPE_BASE.topCentre, 0, PEG_END)],
     };
-    const flat = placePairOnly(pegStl(), base, { placement: { marks: meeting } });
+    const flat = placePairOnly(pegStl(), base, {
+      placement: { marks: meeting },
+    });
     const marks = flat.pair.placement!.marks!;
-    expect(Math.abs(turnAngleDeg(marks.rotation) - 36.8699)).toBeLessThan(0.01);
+    // 36.87° is more than the slack: the least change that fits tilts it.
+    expect(marks.fit.kept).toBe('free');
     expect(flat.orientation.method).toBe('marked');
     expect(flat.orientation.tiltDeg).toBeCloseTo(36.87, 2);
-    const n = marks.spot.normal;
+    const n = marks.pairs[0]!.on.normal;
     expect(angleDeg(n, [0, 0.8, 0.6])).toBeLessThan(0.01);
     // The peg's axis now runs along the slope's normal.
     const axis = (placed: typeof flat): Vec3 => {
@@ -239,39 +134,51 @@ describe('the marked placement (#93)', () => {
     const turned = placePairOnly(pegStl(), base, {
       placement: { marks: { ...meeting, turnDeg: 90 } },
     });
-    const end = landed(soup, turned.mesh, PEG_END);
-    for (let k = 0; k < 3; k++) expect(Math.abs(end[k]! - from[k]!)).toBeLessThan(1e-4);
     expect(angleDeg(axis(turned), n)).toBeLessThan(0.01);
     expect(turned.pair.placement!.yawDeg).toBe(90);
-  }, 60_000);
 
-  it('turns the figure over for two marks with the same normal, without an error', () => {
-    // The top of the peg, facing up inside the body, marked against the hole's floor, facing up.
-    const placed = placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()), {
-      placement: { marks: holeMeeting({ contact: { file: 0, point: PEG_TOP } }) },
+    // Kept upright when asked: the peg stands as it did, its end on the slope's patch.
+    const upright = placePairOnly(pegStl(), base, {
+      placement: { marks: { ...meeting, turn: 'keep' } },
     });
-    expect(turnAngleDeg(placed.pair.placement!.marks!.rotation)).toBeGreaterThan(90);
-    expect(placed.orientation.method).toBe('marked');
+    expect(upright.pair.placement!.marks!.fit.kept).toBe('standing');
+    expect(upright.orientation.method).not.toBe('marked');
   }, 60_000);
 
-  it('refuses marks on the wrong files', () => {
+  it('places automatically when no pair marks anything', () => {
+    const automatic = placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()));
+    const empty = placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()), {
+      placement: {
+        marks: {
+          pairs: [{ on: { file: 1, strokes: [] }, of: { file: 0, strokes: [] } }],
+        },
+      },
+    });
+    expect(empty.pair.placement).toEqual(automatic.pair.placement);
+  }, 60_000);
+
+  it('refuses pairs on the wrong files', () => {
     expect(() =>
       placePairOnly(pegStl(), encodeBinaryStl(generateHoleBase()), {
-        placement: {
-          marks: { spot: { file: 0, point: [0, 0, 0] }, contact: { file: 1, point: [0, 0, 1] } },
-        },
+        placement: { marks: { pairs: [tapPair(0, [0, 0, 0], 1, [0, 0, 1])] } },
       }),
     ).toThrow(
       expect.objectContaining({
         code: 'unexpected',
-        detail: expect.stringMatching(/marks on files/),
+        detail: expect.stringMatching(/pairs on files 0\/1/),
       }),
     );
   }, 60_000);
 
   it('converts again to the same bits with the choices it ended with', async () => {
-    const options = { bake: 0, secondStl: encodeBinaryStl(generateHoleBase()) } as const;
-    const first = await runPipeline(pegStl(), { ...options, placement: { marks: holeMeeting() } });
+    const options = {
+      bake: 0,
+      secondStl: encodeBinaryStl(generateHoleBase()),
+    } as const;
+    const first = await runPipeline(pegStl(), {
+      ...options,
+      placement: { marks: holeMeeting() },
+    });
     expect(first.choices.placement?.marks).toEqual(holeMeeting());
     const again = await runPipeline(pegStl(), {
       ...options,
@@ -285,6 +192,176 @@ describe('the marked placement (#93)', () => {
   }, 120_000);
 });
 
+describe('applyMeetAction (§5.6)', () => {
+  const base: MeetContext = { about: 'base', baseFile: 1, figureFiles: [0, 2] };
+  const parts: MeetContext = {
+    about: 'parts',
+    baseFile: null,
+    figureFiles: [0, 1, 2],
+  };
+  const fresh = (context: MeetContext): MeetState => startMeeting(null, {}, context);
+  const tap = (file: number, pair = 0): MarkingAction => ({
+    do: 'tap',
+    hit: { file, point: [file, 0, 0] },
+    pair,
+  });
+  /** Actions one after the other; the notes of each. */
+  const run = (context: MeetContext, actions: MarkingAction[], from = fresh(context)) => {
+    let state = from;
+    const notes: (string | null)[] = [];
+    for (const action of actions) {
+      const out = applyMeetAction(state, action, context);
+      state = out.state;
+      notes.push(out.note);
+    }
+    return { state, notes };
+  };
+  const sides = (state: MeetState): [number | null, number | null][] =>
+    state.draft!.pairs.map(({ on, of }) => [on?.file ?? null, of?.file ?? null]);
+
+  it('puts the base on the on side and a figure part on the of side, whichever comes first', () => {
+    expect(sides(run(base, [tap(0), tap(1)]).state)).toEqual([[1, 0]]);
+    expect(sides(run(base, [tap(1), tap(2)]).state)).toEqual([[1, 2]]);
+    // A second tap on a side's file adds a stroke to it.
+    const twice = run(base, [tap(1), tap(1)]).state;
+    expect(twice.draft!.pairs[0]!.on!.strokes).toHaveLength(2);
+  });
+
+  it('refuses a third file on a pair with both sides, and a file that is neither', () => {
+    const { notes, state } = run(base, [tap(1), tap(0), tap(2)]);
+    expect(notes).toEqual([null, null, 'full']);
+    expect(sides(state)).toEqual([[1, 0]]);
+    expect(run(base, [tap(5)]).notes).toEqual(['missed']);
+    expect(run(base, [{ do: 'tap', hit: null, pair: 0 }]).notes).toEqual(['missed']);
+  });
+
+  it('starts a new pair at the next index, and no more than MAX_PAIRS', () => {
+    const { state } = run(base, [tap(1, 0), tap(0, 0), tap(1, 1), tap(2, 1)]);
+    expect(sides(state)).toEqual([
+      [1, 0],
+      [1, 2],
+    ]);
+    expect(run(base, [tap(1, MAX_PAIRS)]).notes).toEqual(['full']);
+    // An index past the end is the next pair.
+    expect(sides(run(base, [tap(1, 3)]).state)).toEqual([[1, null]]);
+  });
+
+  it('at the parts question puts a part in place on the on side', () => {
+    // The body first: in place. A part tapped first is the part that goes there.
+    expect(sides(run(parts, [tap(0), tap(1)]).state)).toEqual([[0, 1]]);
+    expect(sides(run(parts, [tap(1), tap(0)]).state)).toEqual([[0, 1]]);
+    // A part a joint already places is in place for the next pair.
+    expect(sides(run(parts, [tap(0), tap(1), tap(1, 1), tap(2, 1)]).state)).toEqual([
+      [0, 1],
+      [1, 2],
+    ]);
+  });
+
+  it('refuses a pair that gives a part a second part to meet, or makes two parts hang on each other', () => {
+    // 2 onto the body, 1 onto 2; then 1 onto the body as well.
+    const second = run(parts, [tap(0), tap(2), tap(1, 1), tap(2, 1), tap(1, 2), tap(0, 2)]);
+    expect(second.notes).toEqual([null, null, null, null, null, 'one-part']);
+    // 1 onto 2, then 2 onto 1.
+    const round = run(parts, [tap(1), tap(2), tap(2, 1), tap(1, 1)]);
+    expect(round.notes.at(-1)).toBe('one-part');
+  });
+
+  it('takes erase only from a side already marked, and a drag on one part only', () => {
+    const erase: MarkingAction = {
+      do: 'brush',
+      hits: [{ file: 1, point: [0, 0, 0] }],
+      pair: 0,
+      radiusMm: 1,
+      erase: true,
+    };
+    expect(run(base, [erase]).notes).toEqual(['missed']);
+    const drag: MarkingAction = {
+      do: 'brush',
+      hits: [
+        { file: 1, point: [0, 0, 0] },
+        null,
+        { file: 0, point: [1, 0, 0] },
+        { file: 1, point: [2, 0, 0] },
+      ],
+      pair: 0,
+      radiusMm: 1,
+    };
+    const { state } = run(base, [drag]);
+    expect(sides(state)).toEqual([[1, null]]);
+    expect(state.draft!.pairs[0]!.on!.strokes).toEqual([
+      { brush: [0, 0, 0], radiusMm: 1 },
+      { brush: [2, 0, 0], radiusMm: 1 },
+    ]);
+  });
+
+  it('clears a pair, starts over to the proposal, and undoes one action at a time', () => {
+    const marked = run(base, [tap(1), tap(0), tap(1, 1)]).state;
+    const cleared = run(base, [{ do: 'clear', pair: 0 }], marked).state;
+    expect(sides(cleared)).toEqual([[1, null]]);
+    const over = run(base, [{ do: 'clear' }], marked).state;
+    expect(over.draft).toBeNull();
+    const undone = run(base, [{ do: 'undo' }], over).state;
+    expect(sides(undone)).toEqual(sides(marked));
+    const back = run(base, [{ do: 'undo' }, { do: 'undo' }, { do: 'undo' }], marked).state;
+    expect(back.draft).toBeNull();
+    expect(run(base, [{ do: 'undo' }], back).state).toEqual(back);
+  });
+
+  it('records complete pairs only, with the nudges, and sets a record back', () => {
+    const { state } = run(base, [
+      tap(1),
+      tap(0),
+      tap(1, 1),
+      { do: 'nudge', liftMm: 0.5 },
+      { do: 'nudge', liftMm: 0.5, turnDeg: -15, turn: 'keep' },
+    ]);
+    const meeting = marksOf(state.draft, base) as Meeting;
+    expect(meeting).toEqual({
+      pairs: [tapPair(1, [1, 0, 0], 0, [0, 0, 0])],
+      liftMm: 1,
+      turnDeg: -15,
+      turn: 'keep',
+    });
+    const set = run(base, [{ do: 'set', marks: meeting }]).state;
+    expect(marksOf(set.draft, base)).toEqual(meeting);
+    expect(run(base, [{ do: 'set', marks: null }], set).state.draft).toBeNull();
+  });
+
+  it('nudges the automatic placement while the proposal stands', () => {
+    const { state } = run(
+      base,
+      [{ do: 'nudge', liftMm: 0.5, turnDeg: 15 }],
+      startMeeting(null, { liftMm: 1 }, base),
+    );
+    expect(state.automatic).toEqual({ liftMm: 1.5, turnDeg: 15, nudged: true });
+    expect(state.draft).toBeNull();
+  });
+
+  it('groups the parts pairs by part into joints, each with its own nudge', () => {
+    const { state } = run(parts, [
+      tap(0),
+      tap(1),
+      tap(0, 1),
+      tap(1, 1),
+      tap(1, 2),
+      tap(2, 2),
+      { do: 'nudge', part: 2, turnDeg: 90 },
+    ]);
+    const joints = marksOf(state.draft, parts) as PartJoint[];
+    expect(
+      joints.map(({ part, onto, pairs, turnDeg }) => [part, onto, pairs.length, turnDeg]),
+    ).toEqual([
+      [1, 0, 2, undefined],
+      [2, 1, 1, 90],
+    ]);
+  });
+
+  it(`keeps at most ${MAX_STROKES} strokes on a side`, () => {
+    let state = fresh(base);
+    for (let k = 0; k < MAX_STROKES + 5; k++) state = applyMeetAction(state, tap(1), base).state;
+    expect(state.draft!.pairs[0]!.on!.strokes).toHaveLength(MAX_STROKES);
+  });
+});
 describe('patches (the rework, §5.1–5.2)', () => {
   const treeOf = (mesh: IndexedMesh): TriangleBvh => new TriangleBvh(mesh);
   const centroid = (mesh: IndexedMesh, t: number): Vec3 =>

@@ -1,159 +1,46 @@
 /**
- * Marks where two parts meet (issue #93, design note docs/design/marks-where-parts-meet.md §3.1):
- * a point a person tapped on the full-detail mesh of one file, resolved to the surface there and
- * its normal. Two marks, a spot on the part in place and a contact on the part that goes there,
- * fix five of six degrees of freedom; the sixth is the turn about the spot's normal.
+ * Marks where two parts meet (issue #93, design note docs/design/patches-where-parts-meet.md
+ * §3.1, §5.1–5.2, §5.6): a mark is a patch, an area of a part's surface made by taps and brush
+ * dabs recorded as points in its file's coordinates. Two patches that touch are a pair; where two
+ * parts meet is one or more pairs. The worker resolves the strokes on the full-detail mesh with
+ * the file's search tree, and owns the marks while a question is open (`applyMeetAction`).
  *
- * Deterministic: only + - * / and sqrt on the geometry, so a mark resolves to the same bits on
- * every machine. The turn about the normal uses trigonometry, like every turn a person asks for.
+ * Deterministic: only + - * / and sqrt on the geometry, so a patch resolves to the same triangles
+ * on every machine.
  */
 import type { Vec3 } from './base';
 import type { TriangleBvh } from './bvh';
 import type { IndexedMesh } from './mesh';
 import { quarterTurnAxis, TO_Y_UP } from './orient';
-import { apply, dot, fromAxisAngle, fromTo, multiply, normalise, type Rotation } from './rotation';
+import { apply, dot, normalise, type Rotation } from './rotation';
 
-/** A point a person tapped on the full-detail mesh of one file, in that file's coordinates. */
-export interface MarkPick {
-  /** Which of the files given: 0 the first. */
-  file: number;
-  point: Vec3;
-}
-
-/** A mark as resolved: the surface point and the normal around it, in the frame stated where it is used. */
-export interface Mark {
-  point: Vec3;
-  normal: Vec3;
-}
-
-/** Where two parts meet: a spot on the part already in place, a contact on the part that goes there. */
+/** Where two parts meet: their pairs, and what the person adjusted at the final view. */
 export interface Meeting {
-  spot: MarkPick;
-  contact: MarkPick;
-  /** Along the spot's normal, positive away from its surface; 0 puts the two points together. */
+  pairs: PatchPair[];
+  /** Along the mean normal of the `on` patches, positive away from the surface. */
   liftMm?: number;
-  /** About the spot's normal, degrees, counter-clockwise seen from the spot's outside. */
+  /** About that normal through the centre of the `on` patches, degrees. */
   turnDeg?: number;
+  /** `keep`: the part is never turned. `free`: it is turned to fit. Left out: the least change that fits (§5.4). */
+  turn?: 'keep' | 'free';
 }
 
-/** A part placed against another by a meeting: the tree of a figure's parts. */
+/** A part placed against another: every pair's `on.file` is `onto`, every `of.file` is `part`. */
 export interface PartJoint extends Meeting {
   /** The part placed: a figure part that is not the body. */
   part: number;
-  /** The part it is placed against: the body or a part already placed; `spot.file === onto`, `contact.file === part`. */
+  /** The part it is placed against: the body or a part already placed. */
   onto: number;
 }
 
 /**
- * The normal of a mark is the area-weighted mean of the triangles whose centroid lies within
- * this distance of the point, file units... _(proposal)_
+ * A tap's surface normal takes the triangles near the point whose normal is within this angle
+ * of the nearest triangle's: the other wall of a thin recess and the rim of a hole stay out.
+ * _(proposal)_
  */
-export const MARK_NORMAL_RADIUS_MM = 1;
-/**
- * ...and whose normal is within this angle of the nearest triangle's: the other wall of a thin
- * recess and the rim of a hole stay out. _(proposal)_
- */
-export const MARK_NORMAL_CONE_DEG = 60;
-/**
- * One answer at a meet question, resolved in the worker, on the largest corpus pair
- * (development PC, Node): a pass over the marked file's triangles and the figure's vertices.
- * `scripts/measure-place.mjs` measures it. _(proposal)_
- */
-export const MARK_RESOLVE_BUDGET_MS = 300;
+export const TAP_NORMAL_CONE_DEG = 60;
 
-const CONE_COS = Math.cos((MARK_NORMAL_CONE_DEG * Math.PI) / 180);
-
-/**
- * The squared distance from p to triangle a b c: to its closest point (Ericson, Real-Time
- * Collision Detection §5.1.5), in scalars so the pass over millions of triangles allocates nothing.
- */
-function triangleDistance2(
-  px: number,
-  py: number,
-  pz: number,
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-  cx: number,
-  cy: number,
-  cz: number,
-): number {
-  const abx = bx - ax;
-  const aby = by - ay;
-  const abz = bz - az;
-  const acx = cx - ax;
-  const acy = cy - ay;
-  const acz = cz - az;
-  const apx = px - ax;
-  const apy = py - ay;
-  const apz = pz - az;
-  const d1 = abx * apx + aby * apy + abz * apz;
-  const d2 = acx * apx + acy * apy + acz * apz;
-  let qx: number;
-  let qy: number;
-  let qz: number;
-  const bpx = px - bx;
-  const bpy = py - by;
-  const bpz = pz - bz;
-  const d3 = abx * bpx + aby * bpy + abz * bpz;
-  const d4 = acx * bpx + acy * bpy + acz * bpz;
-  const cpx = px - cx;
-  const cpy = py - cy;
-  const cpz = pz - cz;
-  const d5 = abx * cpx + aby * cpy + abz * cpz;
-  const d6 = acx * cpx + acy * cpy + acz * cpz;
-  const vc = d1 * d4 - d3 * d2;
-  const vb = d5 * d2 - d1 * d6;
-  const va = d3 * d6 - d5 * d4;
-  if (d1 <= 0 && d2 <= 0) {
-    qx = ax;
-    qy = ay;
-    qz = az;
-  } else if (d3 >= 0 && d4 <= d3) {
-    qx = bx;
-    qy = by;
-    qz = bz;
-  } else if (vc <= 0 && d1 >= 0 && d3 <= 0) {
-    const v = d1 / (d1 - d3);
-    qx = ax + v * abx;
-    qy = ay + v * aby;
-    qz = az + v * abz;
-  } else if (d6 >= 0 && d5 <= d6) {
-    qx = cx;
-    qy = cy;
-    qz = cz;
-  } else if (vb <= 0 && d2 >= 0 && d6 <= 0) {
-    const w = d2 / (d2 - d6);
-    qx = ax + w * acx;
-    qy = ay + w * acy;
-    qz = az + w * acz;
-  } else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
-    const w = (d4 - d3) / (d4 - d3 + (d5 - d6));
-    qx = bx + w * (cx - bx);
-    qy = by + w * (cy - by);
-    qz = bz + w * (cz - bz);
-  } else {
-    const denom = 1 / (va + vb + vc);
-    const v = vb * denom;
-    const w = vc * denom;
-    qx = ax + abx * v + acx * w;
-    qy = ay + aby * v + acy * w;
-    qz = az + abz * v + acz * w;
-  }
-  const ex = qx - px;
-  const ey = qy - py;
-  const ez = qz - pz;
-  return ex * ex + ey * ey + ez * ez;
-}
-
-const corner = (positions: Float32Array, index: number): Vec3 => [
-  positions[index * 3]!,
-  positions[index * 3 + 1]!,
-  positions[index * 3 + 2]!,
-];
+const CONE_COS = Math.cos((TAP_NORMAL_CONE_DEG * Math.PI) / 180);
 
 /** A triangle's normal times twice its area, from its winding. */
 function areaNormal(positions: Float32Array, indices: Uint32Array, t: number): Vec3 {
@@ -170,137 +57,13 @@ function areaNormal(positions: Float32Array, indices: Uint32Array, t: number): V
 }
 
 /**
- * The triangle nearest to a point, by the distance to its closest point, and triangles whose
- * centroid lies within `radius`: brute force, without a search tree. A pass over the vertices
- * first gives the distance to the nearest vertex, which no nearest triangle can exceed; the pass
- * over the triangles then skips every triangle whose bounding box is further than that, or
- * than the best so far, without the exact test. Ties go to the lower index, so a point on a
- * shared edge gets the first of its two triangles. -1 for a mesh without triangles.
- */
-export function nearestTriangle(
-  { positions, indices }: IndexedMesh,
-  point: Vec3,
-  radius = 0,
-): { triangle: number; distance: number; near: number[] } {
-  const [px, py, pz] = point;
-  let best = -1;
-  let bestD2 = Infinity;
-  const near: number[] = [];
-  const r2 = radius * radius;
-  const count = indices.length / 3;
-  // No triangle is nearer than its nearest corner: the nearest vertex bounds the search.
-  let limit = Infinity;
-  for (let v = 0; v < positions.length; v += 3) {
-    const dx = positions[v]! - px;
-    const dy = positions[v + 1]! - py;
-    const dz = positions[v + 2]! - pz;
-    const d2 = dx * dx + dy * dy + dz * dz;
-    if (d2 < limit) limit = d2;
-  }
-  for (let t = 0; t < count; t++) {
-    const a = indices[t * 3]! * 3;
-    const b = indices[t * 3 + 1]! * 3;
-    const c = indices[t * 3 + 2]! * 3;
-    const ax = positions[a]!;
-    const bx = positions[b]!;
-    const cx = positions[c]!;
-    // The distance to the triangle's box is a lower bound of the distance to the triangle, and
-    // of the distance to its centroid.
-    const minX = ax < bx ? (ax < cx ? ax : cx) : bx < cx ? bx : cx;
-    const maxX = ax > bx ? (ax > cx ? ax : cx) : bx > cx ? bx : cx;
-    const dx = minX > px ? minX - px : px > maxX ? px - maxX : 0;
-    const dx2 = dx * dx;
-    if (dx2 > limit && dx2 > r2) continue;
-    const ay = positions[a + 1]!;
-    const by = positions[b + 1]!;
-    const cy = positions[c + 1]!;
-    const minY = ay < by ? (ay < cy ? ay : cy) : by < cy ? by : cy;
-    const maxY = ay > by ? (ay > cy ? ay : cy) : by > cy ? by : cy;
-    const dy = minY > py ? minY - py : py > maxY ? py - maxY : 0;
-    const az = positions[a + 2]!;
-    const bz = positions[b + 2]!;
-    const cz = positions[c + 2]!;
-    const minZ = az < bz ? (az < cz ? az : cz) : bz < cz ? bz : cz;
-    const maxZ = az > bz ? (az > cz ? az : cz) : bz > cz ? bz : cz;
-    const dz = minZ > pz ? minZ - pz : pz > maxZ ? pz - maxZ : 0;
-    const box2 = dx2 + dy * dy + dz * dz;
-    if (radius > 0 && box2 <= r2) {
-      const gx = (ax + bx + cx) / 3 - px;
-      const gy = (ay + by + cy) / 3 - py;
-      const gz = (az + bz + cz) / 3 - pz;
-      if (gx * gx + gy * gy + gz * gz <= r2) near.push(t);
-    }
-    if (box2 > limit || box2 >= bestD2) continue;
-    const d2 = triangleDistance2(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz);
-    if (d2 < bestD2) {
-      bestD2 = d2;
-      best = t;
-    }
-  }
-  return { triangle: best, distance: Math.sqrt(bestD2), near };
-}
-
-/**
- * A mark on a mesh (design note §3.1): the point kept as picked, never snapped, and the normal
- * of the surface around it: the area-weighted mean of the normals of the triangles whose
- * centroid lies within `MARK_NORMAL_RADIUS_MM` of the point and whose normal is within
- * `MARK_NORMAL_CONE_DEG` of the nearest triangle's, the nearest triangle always among them.
- * Null for a mesh without triangles.
- */
-export function resolveMark(mesh: IndexedMesh, point: Vec3): Mark | null {
-  const { triangle, near } = nearestTriangle(mesh, point, MARK_NORMAL_RADIUS_MM);
-  if (triangle < 0) return null;
-  const { positions, indices } = mesh;
-  const own = normalise(areaNormal(positions, indices, triangle));
-  let sx = 0;
-  let sy = 0;
-  let sz = 0;
-  const add = (t: number): void => {
-    const n = areaNormal(positions, indices, t);
-    sx += n[0];
-    sy += n[1];
-    sz += n[2];
-  };
-  add(triangle);
-  for (const t of near) {
-    if (t === triangle) continue;
-    const n = areaNormal(positions, indices, t);
-    const length = Math.sqrt(dot(n, n));
-    if (length > 0 && dot(n, own) >= CONE_COS * length) add(t);
-  }
-  const normal = normalise([sx, sy, sz]);
-  return { point: [point[0], point[1], point[2]], normal: dot(normal, normal) > 0 ? normal : own };
-}
-
-/** The vertices of a triangle, for tests and the page's pins. */
-export const triangleCorners = (mesh: IndexedMesh, t: number): [Vec3, Vec3, Vec3] => [
-  corner(mesh.positions, mesh.indices[t * 3]!),
-  corner(mesh.positions, mesh.indices[t * 3 + 1]!),
-  corner(mesh.positions, mesh.indices[t * 3 + 2]!),
-];
-
-/**
  * A direction or a point turned by a rotation; a quarter turn swaps and negates exactly, as
- * `orientAndPlace` turns the mesh, so a mark on an axis-aligned face keeps an exact normal.
+ * `orientAndPlace` turns the mesh, so a patch on an axis-aligned face keeps an exact normal.
  */
 export function turnVector(rotation: Rotation, v: Vec3): Vec3 {
   const axis = quarterTurnAxis(rotation);
   return axis ? TO_Y_UP[axis](v[0], v[1], v[2]) : apply(rotation, v);
 }
-
-/**
- * The rotation that sets a contact against a spot (design note §4.2, §4.3): the smallest turn
- * taking the contact's normal to the opposite of the spot's, then `turnDeg` about the spot's
- * normal. Exactly the identity when the normals are exactly opposite and there is no turn.
- */
-export function meetingRotation(nContact: Vec3, nSpot: Vec3, turnDeg = 0): Rotation {
-  const aligned = fromTo(nContact, [0 - nSpot[0], 0 - nSpot[1], 0 - nSpot[2]]);
-  if (turnDeg === 0) return aligned;
-  return multiply(fromAxisAngle(nSpot, turnDeg), aligned);
-}
-
-// Patches (the rework, design note docs/design/patches-where-parts-meet.md §3.1, §5.1–5.2): a
-// mark is an area of a part's surface, made by taps and brush dabs recorded as points.
 
 /** One thing a person did on a part's surface, in that file's coordinates. */
 export type Stroke =
@@ -361,7 +124,7 @@ const unitNormal = (positions: Float32Array, indices: Uint32Array, t: number): V
 
 /**
  * The surface's normal at a point (§5.2 step 2): the area-weighted mean of the triangles whose
- * centroid lies within `TAP_NORMAL_RADIUS_MM` and whose normal is within `MARK_NORMAL_CONE_DEG`
+ * centroid lies within `TAP_NORMAL_RADIUS_MM` and whose normal is within `TAP_NORMAL_CONE_DEG`
  * of the nearest triangle's, the nearest always among them. Null for a mesh without triangles.
  */
 function surfaceAt(
@@ -522,3 +285,366 @@ export const summaryOf = ({
   normal,
   flatness,
 }: PatchSummary): PatchSummary => ({ file, areaMm2, centre, normal, flatness });
+/** A pair while it is marked: a side not marked yet is null. */
+export interface DraftPair {
+  on: PatchPick | null;
+  of: PatchPick | null;
+}
+
+/** What the person adjusted of one part at the final view: the figure's body at the base question. */
+export interface Nudge {
+  part: number;
+  liftMm: number;
+  turnDeg: number;
+  turn?: 'keep' | 'free';
+}
+
+/** The person's marks at a meet question. */
+export interface MeetDraft {
+  pairs: DraftPair[];
+  nudges: Nudge[];
+}
+
+/** A meet question's state, owned by the worker (§5.6). */
+export interface MeetState {
+  stage: 'pairs' | 'fitted';
+  /** The person's marks; null while the proposal stands. */
+  draft: MeetDraft | null;
+  /** The base question: the automatic placement's lift and turn (#70), nudged at the final view. */
+  automatic: { liftMm: number; turnDeg: number; nudged: boolean };
+  /** Earlier drafts, the last first out: one per marking action. */
+  history: (MeetDraft | null)[];
+}
+
+/** Who is who at a meet question. */
+export interface MeetContext {
+  about: 'parts' | 'base';
+  baseFile: number | null;
+  /** The figure's parts, the body first. */
+  figureFiles: readonly number[];
+}
+
+/** A point on a file a finger hit. */
+export interface Hit {
+  file: number;
+  point: Vec3;
+}
+
+/** What a finger did at the pairs stop, its targets resolved to files (null where it missed) (§5.6). */
+export type MarkingAction =
+  | { do: 'tap'; hit: Hit | null; pair: number }
+  | {
+      do: 'brush';
+      hits: (Hit | null)[];
+      pair: number;
+      radiusMm: number;
+      erase?: boolean;
+    }
+  | { do: 'clear'; pair?: number }
+  | { do: 'undo' }
+  | { do: 'set'; marks: Meeting | PartJoint[] | null }
+  | {
+      do: 'nudge';
+      part?: number;
+      liftMm?: number;
+      turnDeg?: number;
+      turn?: 'keep' | 'free' | null;
+    };
+
+/** Why an action did not do what it asked. */
+export type MeetNote = 'missed' | 'full' | 'one-part';
+
+/** At most this many earlier drafts are kept for Undo. */
+export const UNDO_DEPTH = 50;
+
+/** A meet question's state before anything was done: the marks the conversion came with, at the pairs stop. */
+export function startMeeting(
+  marks: Meeting | PartJoint[] | null,
+  automatic: { liftMm?: number; turnDeg?: number },
+  context: MeetContext,
+): MeetState {
+  return {
+    stage: 'pairs',
+    draft: draftOf(marks, context),
+    automatic: {
+      liftMm: automatic.liftMm ?? 0,
+      turnDeg: automatic.turnDeg ?? 0,
+      nudged: false,
+    },
+    history: [],
+  };
+}
+
+/** Whether both sides of a pair are marked. */
+export const complete = (pair: DraftPair): pair is PatchPair =>
+  pair.on !== null && pair.of !== null;
+
+const copyPick = (pick: PatchPick | null): PatchPick | null =>
+  pick && { file: pick.file, strokes: pick.strokes.slice() };
+
+function copyDraft(draft: MeetDraft): MeetDraft {
+  return {
+    pairs: draft.pairs.map((pair) => ({
+      on: copyPick(pair.on),
+      of: copyPick(pair.of),
+    })),
+    nudges: draft.nudges.map((nudge) => ({ ...nudge })),
+  };
+}
+
+/** A recorded meeting or joints as a draft: null (the proposal) for none. */
+export function draftOf(
+  marks: Meeting | PartJoint[] | null,
+  context: MeetContext,
+): MeetDraft | null {
+  if (marks === null) return null;
+  const nudgeOf = (part: number, meeting: Meeting): Nudge[] =>
+    meeting.liftMm || meeting.turnDeg || meeting.turn
+      ? [
+          {
+            part,
+            liftMm: meeting.liftMm ?? 0,
+            turnDeg: meeting.turnDeg ?? 0,
+            ...(meeting.turn && { turn: meeting.turn }),
+          },
+        ]
+      : [];
+  if (Array.isArray(marks)) {
+    if (marks.length === 0) return null;
+    return copyDraft({
+      pairs: marks.flatMap((joint) => joint.pairs.slice(0, MAX_PAIRS)),
+      nudges: marks.flatMap((joint) => nudgeOf(joint.part, joint)),
+    });
+  }
+  if (marks.pairs.length === 0) return null;
+  return copyDraft({
+    pairs: marks.pairs.slice(0, MAX_PAIRS),
+    nudges: nudgeOf(context.figureFiles[0]!, marks),
+  });
+}
+
+/** A meeting's lift, turn and turn mode from a nudge, only what is set. */
+function nudgeFields(nudge: Nudge | undefined): Pick<Meeting, 'liftMm' | 'turnDeg' | 'turn'> {
+  if (!nudge) return {};
+  return {
+    ...(nudge.liftMm !== 0 && { liftMm: nudge.liftMm }),
+    ...(nudge.turnDeg !== 0 && { turnDeg: nudge.turnDeg }),
+    ...(nudge.turn && { turn: nudge.turn }),
+  };
+}
+
+/**
+ * The marks of a draft as recorded (§3.1): the base question's meeting, or the parts' joints (a
+ * part's pairs grouped, in the order its first pair was marked). Pairs with a side not marked are
+ * left out. Null while the proposal stands; for the base, also when no pair is complete.
+ */
+export function marksOf(
+  draft: MeetDraft | null,
+  context: MeetContext,
+): Meeting | PartJoint[] | null {
+  if (!draft) return null;
+  const pairs = draft.pairs.filter(complete);
+  if (context.about === 'base') {
+    if (pairs.length === 0) return null;
+    const body = context.figureFiles[0]!;
+    return {
+      pairs,
+      ...nudgeFields(draft.nudges.find((nudge) => nudge.part === body)),
+    };
+  }
+  const joints: PartJoint[] = [];
+  for (const pair of pairs) {
+    const part = pair.of.file;
+    const joint = joints.find((entry) => entry.part === part);
+    if (joint) joint.pairs.push(pair);
+    else
+      joints.push({
+        part,
+        onto: pair.on.file,
+        pairs: [pair],
+        ...nudgeFields(draft.nudges.find((nudge) => nudge.part === part)),
+      });
+  }
+  return joints;
+}
+
+/** Where each part is placed against, from the complete pairs other than `except`. */
+function ontoOf(draft: MeetDraft, except: number): Map<number, number> {
+  const onto = new Map<number, number>();
+  draft.pairs.forEach((pair, k) => {
+    if (k !== except && complete(pair)) onto.set(pair.of.file, pair.on.file);
+  });
+  return onto;
+}
+
+/**
+ * Puts a stroke on the side of pair `k` that `file` belongs to (§5.6, without a mode): the side
+ * already on that file; else a free side (the base and a part in place are `on`, a figure part
+ * and a part not yet placed are `of`). Refused when both sides are on other files (`full`), or
+ * when it would give a part a second part to meet or make two parts hang on each other
+ * (`one-part`). Changes `draft` only when it returns null.
+ */
+function addStroke(
+  draft: MeetDraft,
+  k: number,
+  file: number,
+  stroke: Stroke,
+  context: MeetContext,
+): MeetNote | null {
+  if (k >= MAX_PAIRS) return 'full';
+  const index = Math.min(k, draft.pairs.length);
+  const existing = draft.pairs[index];
+  const pair: DraftPair = existing
+    ? { on: copyPick(existing.on), of: copyPick(existing.of) }
+    : { on: null, of: null };
+  const keep = (): null => {
+    draft.pairs[index] = pair;
+    return null;
+  };
+  const add = (pick: PatchPick): null => {
+    if (pick.strokes.length < MAX_STROKES) pick.strokes.push(stroke);
+    return keep();
+  };
+  if (pair.on?.file === file) return add(pair.on);
+  if (pair.of?.file === file) return add(pair.of);
+  // An eraser only takes away from a side already marked.
+  if ('erase' in stroke) return 'missed';
+  const body = context.figureFiles[0]!;
+  const side: PatchPick = { file, strokes: [stroke] };
+  if (context.about === 'base') {
+    if (file === context.baseFile) {
+      if (pair.on) return 'full';
+      pair.on = side;
+    } else if (context.figureFiles.includes(file)) {
+      if (pair.of) return 'full';
+      pair.of = side;
+    } else return 'missed';
+    return keep();
+  }
+  if (!context.figureFiles.includes(file)) return 'missed';
+  if (pair.on && pair.of) return 'full';
+  const placed = ontoOf(draft, index);
+  if (pair.on) pair.of = side;
+  else if (pair.of) pair.on = side;
+  else if (file === body || placed.has(file)) pair.on = side;
+  else pair.of = side;
+  if (complete(pair)) {
+    // The body never moves: it is the side in place.
+    if (pair.of.file === body) [pair.on, pair.of] = [pair.of, pair.on];
+    const part = pair.of!.file;
+    const onto = pair.on!.file;
+    const already = placed.get(part);
+    let goesRound = false;
+    for (let at: number | undefined = onto; at !== undefined; at = placed.get(at)) {
+      if (at === part) {
+        goesRound = true;
+        break;
+      }
+    }
+    if ((already !== undefined && already !== onto) || goesRound) return 'one-part';
+  }
+  return keep();
+}
+
+/**
+ * One marking action applied to a meet question's state (§5.6): pure, the state given is not
+ * changed. A tap or a dab on the proposal starts the person's own marks from nothing; `clear`
+ * without a pair brings the proposal back; `undo` takes back one action. Returns the new state
+ * and why the action did not do what it asked, if it did not.
+ */
+export function applyMeetAction(
+  state: MeetState,
+  action: MarkingAction,
+  context: MeetContext,
+): { state: MeetState; note: MeetNote | null } {
+  const remember = (draft: MeetDraft | null): MeetState => ({
+    ...state,
+    draft,
+    history: [state.draft, ...state.history].slice(0, UNDO_DEPTH),
+  });
+  const fresh = (): MeetDraft => (state.draft ? copyDraft(state.draft) : { pairs: [], nudges: [] });
+  switch (action.do) {
+    case 'tap': {
+      if (!action.hit) return { state, note: 'missed' };
+      const draft = fresh();
+      const note = addStroke(
+        draft,
+        action.pair,
+        action.hit.file,
+        { tap: action.hit.point },
+        context,
+      );
+      return note ? { state, note } : { state: remember(draft), note: null };
+    }
+    case 'brush': {
+      const hits = action.hits.filter((hit): hit is Hit => hit !== null);
+      if (hits.length === 0) return { state, note: 'missed' };
+      // One drag paints one part: the one it started on.
+      const file = hits[0]!.file;
+      const draft = fresh();
+      let note: MeetNote | null = null;
+      let changed = false;
+      for (const hit of hits) {
+        if (hit.file !== file) continue;
+        const stroke: Stroke = action.erase
+          ? { erase: hit.point, radiusMm: action.radiusMm }
+          : { brush: hit.point, radiusMm: action.radiusMm };
+        const refused = addStroke(draft, action.pair, file, stroke, context);
+        if (!refused) changed = true;
+        // A dab beside the patch is not worth a word while others land.
+        else if (refused !== 'missed' || !note) note = refused;
+      }
+      return changed ? { state: remember(draft), note } : { state, note: note ?? 'missed' };
+    }
+    case 'clear': {
+      if (action.pair === undefined) {
+        if (!state.draft) return { state, note: null };
+        return { state: remember(null), note: null };
+      }
+      if (!state.draft?.pairs[action.pair]) return { state, note: null };
+      const draft = copyDraft(state.draft);
+      draft.pairs.splice(action.pair, 1);
+      return { state: remember(draft), note: null };
+    }
+    case 'undo': {
+      if (state.history.length === 0) return { state, note: null };
+      const [draft, ...history] = state.history;
+      return { state: { ...state, draft: draft ?? null, history }, note: null };
+    }
+    case 'set':
+      return { state: remember(draftOf(action.marks, context)), note: null };
+    case 'nudge': {
+      if (!state.draft || !state.draft.pairs.some(complete)) {
+        // The automatic placement: #70's lift and turn about the vertical (base only).
+        if (context.about !== 'base') return { state, note: null };
+        const { automatic } = state;
+        return {
+          state: {
+            ...state,
+            automatic: {
+              liftMm: automatic.liftMm + (action.liftMm ?? 0),
+              turnDeg: automatic.turnDeg + (action.turnDeg ?? 0),
+              nudged: true,
+            },
+          },
+          note: null,
+        };
+      }
+      const part =
+        context.about === 'base'
+          ? context.figureFiles[0]!
+          : (action.part ?? state.draft.pairs.filter(complete).at(-1)!.of.file);
+      const draft = copyDraft(state.draft);
+      let nudge = draft.nudges.find((entry) => entry.part === part);
+      if (!nudge) {
+        nudge = { part, liftMm: 0, turnDeg: 0 };
+        draft.nudges.push(nudge);
+      }
+      nudge.liftMm += action.liftMm ?? 0;
+      nudge.turnDeg += action.turnDeg ?? 0;
+      if (action.turn === null) delete nudge.turn;
+      else if (action.turn) nudge.turn = action.turn;
+      return { state: { ...state, draft }, note: null };
+    }
+  }
+}

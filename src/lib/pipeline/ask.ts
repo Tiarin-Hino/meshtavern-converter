@@ -1,12 +1,12 @@
 /**
  * The questions a conversion asks on the full-detail meshes before anything is reduced: which way
  * is up (issue #92, design note docs/design/up-before-reduce.md §3), and where the parts meet
- * (issue #93, docs/design/marks-where-parts-meet.md §3.5). The pipeline asks through a callback
- * (`AskUp`), so it stays free of workers and DOM.
+ * (issue #93, docs/design/marks-where-parts-meet.md §3.5, docs/design/patches-where-parts-meet.md
+ * §3.3). The pipeline asks through a callback (`AskUp`), so it stays free of workers and DOM.
  */
 import type { PartResult } from './assemble';
 import type { Vec3 } from './base';
-import type { Mark, Meeting, PartJoint } from './marks';
+import type { Hit, Meeting, MeetNote, PartJoint, PatchSummary } from './marks';
 import type { IndexedMesh } from './mesh';
 import { quarterTurnAxis, TO_Y_UP, type Orientation, type OrientationOptions } from './orient';
 import type { FileOrientation, PairWarning } from './pair';
@@ -79,32 +79,38 @@ export interface UpQuestion extends QuestionBase {
   warnings: PairWarning[];
 }
 
-/** Two marks where two parts meet, in the coordinates of the files they are on: what the page draws pins from. */
-export interface MarkedPair {
-  spot: Mark & { file: number };
-  contact: Mark & { file: number };
+/** A patch for the page to draw: the summary in its file's coordinates, and its triangles (transferred). */
+export interface ShownPatch extends PatchSummary {
+  /** Triangle indices into its file's welded mesh, ascending. */
+  triangles: Uint32Array;
 }
 
-/** Where the parts meet (#93): the figure's parts together, or the figure on its base. */
+/**
+ * Where the parts meet (#93, patches design note §3.3): the figure's parts together, or the
+ * figure on its base. Two stops: the pairs, with the parts apart, then the parts put together.
+ */
 export interface MeetQuestion extends QuestionBase {
   kind: 'meet';
   /** `parts`: how the figure's parts go together. `base`: the figure on its base. */
   about: 'parts' | 'base';
+  /** `pairs`: the parts apart, with the pairs to confirm. `fitted`: put together, to confirm. */
+  stage: 'pairs' | 'fitted';
+  /** What to draw as pairs, in order: the person's, or the proposal while they have marked nothing. */
+  pairs: { on: ShownPatch | null; of: ShownPatch | null }[];
+  /** True while `pairs` is the converter's proposal. */
+  proposed: boolean;
+  /** The marks as they are: what a `set` action would send back. Null while the proposal stands. */
+  marks: Meeting | PartJoint[] | null;
   /** The figure's parts as they are put together now, the body first. */
   parts: PartResult[];
-  /** `base` only: the placement shown, automatic or marked. */
+  /** `base`, `fitted`: the placement shown. */
   placement: Placement | null;
-  /** The meetings marked so far, resolved: one per joint (`parts`), or the one meeting (`base`). */
-  marks: MarkedPair[];
-  /**
-   * What the converter proposes where nothing is marked, as pins (PM decision 2026-09-30): where a
-   * part the file puts in place touches the part next to it (`parts`; a part further than
-   * `IN_PLACE_GAP_MM` from every other lies apart and has none), or where the automatic placement
-   * set the figure (`base`).
-   */
-  proposed: MarkedPair[];
-  /** `base` only: the figure standing beside its base, for marking both; null for `parts`. */
+  /** `parts`, `pairs`: the parts pulled apart, so a joint's faces can be seen and tapped; null otherwise. */
   apart: { shown: Shown[]; box: Box } | null;
+  /** What a `pick` action hit; null when it missed. Only after a `pick`. */
+  picked?: Hit | null;
+  /** What the last action could not do. */
+  note?: MeetNote;
 }
 
 export type Question = UpQuestion | MeetQuestion;
@@ -124,16 +130,47 @@ export interface UpAnswer {
   baseFile?: number | null;
 }
 
+/** Where a finger is: a ray in the coordinates `shown` (or `apart.shown`) is drawn in, or a point on a file. */
+export type Target = { ray: { origin: Vec3; direction: Vec3 }; apart?: boolean } | Hit;
+
+/** What the person did at a meet question (patches §3.3). */
+export type MeetAction =
+  /** Marks the surface around the target on pair `pair` (a new pair when it is the next index). */
+  | { do: 'tap'; at: Target; pair: number }
+  /** Brush dabs of one drag, or eraser dabs. */
+  | {
+      do: 'brush';
+      at: Target[];
+      pair: number;
+      radiusMm: number;
+      erase?: boolean;
+    }
+  /** One pair, or everything: back to the proposal. */
+  | { do: 'clear'; pair?: number }
+  | { do: 'undo' }
+  /** The whole state at once: records, scripts, tests. */
+  | { do: 'set'; marks: Meeting | PartJoint[] | null }
+  /** `pairs`: these are the pairs, put them together. */
+  | { do: 'fit' }
+  /** `fitted`: back to the pairs. */
+  | { do: 'back' }
+  /** `fitted`: raise, lower or turn (added to what was nudged), or let the fit turn or keep the part. */
+  | {
+      do: 'nudge';
+      part?: number;
+      liftMm?: number;
+      turnDeg?: number;
+      turn?: 'keep' | 'free' | null;
+    }
+  /** What is there? Changes nothing. */
+  | { do: 'pick'; at: Target }
+  /** `fitted`: go on. At `pairs` it is `fit`. */
+  | { do: 'confirm' };
+
 export interface MeetAnswer {
   kind: 'meet';
-  /** `parts`: the joints; a part left out stays where its file puts it. */
-  joints: PartJoint[];
-  /** `base`: the meeting of figure and base, or null for the automatic placement. */
-  meeting: Meeting | null;
-  /** True: this is right, go on. False: show me (the question comes again with it resolved). */
-  confirm: boolean;
+  action: MeetAction;
 }
-
 export type Answer = UpAnswer | MeetAnswer;
 
 /** Asked between the steps (#92, #93). Rejecting ends the conversion with that error. The name stays: it asks every question. */
@@ -161,7 +198,7 @@ export interface AskedUp {
 }
 
 /**
- * The figure is laid this far beside its base while both are marked (#93), so neither hides the
+ * The figure is laid this far beside its base at the pairs stop (#93), so neither hides the
  * other. _(proposal)_
  */
 export const APART_GAP_MM = 10;

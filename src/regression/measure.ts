@@ -77,7 +77,8 @@ export const REGRESSION_CASES: readonly RegressionCase[] = [
     pair: { base: generateRecessBase, spot: 'recess' },
     moreParts: () => [generatePuddleFigureParts(12)[1]],
   },
-  // The figure's 3 mm peg marked into the blind hole of a plate: its end on the hole's floor (#93).
+  // The figure's 3 mm peg marked into the blind hole of a plate (#93): a tap on its end and a
+  // tap on the hole's floor, one pair of patches.
   {
     name: 'peg-marked-in-hole',
     soup: () => generatePegFigure(3.5),
@@ -88,8 +89,12 @@ export const REGRESSION_CASES: readonly RegressionCase[] = [
       spot: 'marked',
       placement: {
         marks: {
-          spot: { file: 1, point: [0, 0, HOLE_BASE.floorMm] },
-          contact: { file: 0, point: [0, 0, 0] },
+          pairs: [
+            {
+              on: { file: 1, strokes: [{ tap: [0, 0, HOLE_BASE.floorMm] }] },
+              of: { file: 0, strokes: [{ tap: [0, 0, 0] }] },
+            },
+          ],
         },
       },
     },

@@ -502,29 +502,29 @@
       {
         "name": "close",
         "decidedBy": "error",
-        "triangles": 54448,
-        "vertices": 27326,
-        "errorMm": 0.0198939,
-        "glbBytes": 1202548,
-        "compactGlbBytes": 390780
+        "triangles": 54457,
+        "vertices": 27330,
+        "errorMm": 0.0198268,
+        "glbBytes": 1202732,
+        "compactGlbBytes": 390792
       },
       {
         "name": "table",
         "decidedBy": "error",
-        "triangles": 35174,
-        "vertices": 17665,
-        "errorMm": 0.049785,
-        "glbBytes": 777748,
-        "compactGlbBytes": 260044
+        "triangles": 35132,
+        "vertices": 17644,
+        "errorMm": 0.0498088,
+        "glbBytes": 776824,
+        "compactGlbBytes": 259808
       },
       {
         "name": "far",
         "decidedBy": "error",
-        "triangles": 5330,
-        "vertices": 2689,
-        "errorMm": 0.198406,
-        "glbBytes": 119444,
-        "compactGlbBytes": 43596
+        "triangles": 5309,
+        "vertices": 2679,
+        "errorMm": 0.199916,
+        "glbBytes": 119000,
+        "compactGlbBytes": 43416
       }
     ],
     "spot": "marked",

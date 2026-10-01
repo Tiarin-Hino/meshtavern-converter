@@ -6,11 +6,12 @@ import {
   movedSoup,
   WINGED_FIGURE,
 } from '../../regression/shapes';
-import { assembleFigure, IN_PLACE_GAP_MM, MAX_PARTS, proposedJoints, wholePart } from './assemble';
+import { assembleFigure, EXPLODE_MM, MAX_PARTS, proposedJoints, pulledApart } from './assemble';
 import type { Vec3 } from './base';
-import type { PartJoint } from './marks';
+import type { PartJoint, PatchPair } from './marks';
 import { weldVertices, type IndexedMesh } from './mesh';
 import { PROBLEM_MESSAGES } from './problems';
+import { IDENTITY } from './rotation';
 import { runPipeline } from './run';
 import { encodeBinaryStl } from './stl';
 
@@ -27,6 +28,11 @@ function farthest(a: Float32Array, b: Float32Array): number {
 const WING_MOVE: Vec3 = [50, 0, 0];
 const TIP_MOVE: Vec3 = [0, 60, -5];
 const plus = (p: Vec3, by: Vec3): Vec3 => [p[0] + by[0], p[1] + by[1], p[2] + by[2]];
+/** One tap on each side. */
+const tapPair = (onFile: number, on: Vec3, ofFile: number, of: Vec3): PatchPair => ({
+  on: { file: onFile, strokes: [{ tap: on }] },
+  of: { file: ofFile, strokes: [{ tap: of }] },
+});
 
 describe('assembleFigure', { timeout: 60_000 }, () => {
   it('keeps parts where their files put them: the same bits as the one-piece mesh', () => {
@@ -40,19 +46,41 @@ describe('assembleFigure', { timeout: 60_000 }, () => {
     expect(parts.map((part) => part.triangles)).toEqual(meshes.map((m) => m.indices.length / 3));
   });
 
-  it('puts a part exported apart back by a pair of marks', () => {
+  it('puts a part exported apart back by a pair of taps, only moving it', () => {
     const { whole, body, wing, tip } = generateWingedFigure();
     const meshes = [body, movedSoup(wing, WING_MOVE), tip].map(welded);
     const joint: PartJoint = {
       part: 1,
       onto: 0,
-      spot: { file: 0, point: WINGED_FIGURE.joint },
-      contact: { file: 1, point: plus(WINGED_FIGURE.joint, WING_MOVE) },
+      pairs: [tapPair(0, WINGED_FIGURE.joint, 1, plus(WINGED_FIGURE.joint, WING_MOVE))],
     };
     const { mesh, parts } = assembleFigure(meshes, [0, 1, 2], [joint]);
     expect(farthest(mesh.positions, welded(whole).positions)).toBeLessThan(0.01);
     expect(parts[1]).toMatchObject({ file: 1, source: 'marked', joint: { onto: 0, liftMm: 0 } });
+    expect(parts[1]!.joint!.fit.kept).toBe('standing');
+    expect(parts[1]!.rotation).toBe(IDENTITY);
     expect(parts[1]!.translation.map((t, k) => Math.round(t + WING_MOVE[k]!))).toEqual([0, 0, 0]);
+  });
+
+  it('turns a part exported a quarter turn away back by its pair', () => {
+    const { body, wing } = generateWingedFigure();
+    // A quarter turn about z, (x, y, z) → (-y, x, z), then 50 mm away.
+    const quarter = (p: Vec3): Vec3 => plus([0 - p[1], p[0], p[2]], WING_MOVE);
+    const turned = new Float32Array(wing.length);
+    for (let i = 0; i < wing.length; i += 3) {
+      turned.set(quarter([wing[i]!, wing[i + 1]!, wing[i + 2]!]), i);
+    }
+    const meshes = [body, turned].map(welded);
+    const joint: PartJoint = {
+      part: 1,
+      onto: 0,
+      pairs: [tapPair(0, WINGED_FIGURE.joint, 1, quarter(WINGED_FIGURE.joint))],
+    };
+    const { mesh, parts } = assembleFigure(meshes, [0, 1], [joint]);
+    const one = welded(new Float32Array([...body, ...wing]));
+    // Each part welded on its own lists its vertices as the one-piece mesh does.
+    expect(farthest(mesh.positions, one.positions)).toBeLessThan(0.1);
+    expect(parts[1]!.joint!.fit.kept).toBe('free');
   });
 
   it('resolves a joint onto a part that has its own joint after it, whatever the order', () => {
@@ -63,14 +91,19 @@ describe('assembleFigure', { timeout: 60_000 }, () => {
       {
         part: 1,
         onto: 2,
-        spot: { file: 2, point: plus(WINGED_FIGURE.tipJoint, WING_MOVE) },
-        contact: { file: 1, point: plus(WINGED_FIGURE.tipJoint, TIP_MOVE) },
+        pairs: [
+          tapPair(
+            2,
+            plus(WINGED_FIGURE.tipJoint, WING_MOVE),
+            1,
+            plus(WINGED_FIGURE.tipJoint, TIP_MOVE),
+          ),
+        ],
       },
       {
         part: 2,
         onto: 0,
-        spot: { file: 0, point: WINGED_FIGURE.joint },
-        contact: { file: 2, point: plus(WINGED_FIGURE.joint, WING_MOVE) },
+        pairs: [tapPair(0, WINGED_FIGURE.joint, 2, plus(WINGED_FIGURE.joint, WING_MOVE))],
       },
     ];
     const { mesh } = assembleFigure(meshes, [0, 2, 1], joints);
@@ -78,21 +111,33 @@ describe('assembleFigure', { timeout: 60_000 }, () => {
     expect(farthest(mesh.positions, welded(whole).positions)).toBeLessThan(0.01);
   });
 
-  it('raises a part along the spot normal and turns it about it', () => {
+  it('raises a part along the on patch normal and turns it about it', () => {
     const { body, wing } = generateWingedFigure();
     const meshes = [body, wing].map(welded);
     const joint = (more: Partial<PartJoint>): PartJoint => ({
       part: 1,
       onto: 0,
-      spot: { file: 0, point: WINGED_FIGURE.joint },
-      contact: { file: 1, point: WINGED_FIGURE.joint },
+      pairs: [tapPair(0, WINGED_FIGURE.joint, 1, WINGED_FIGURE.joint)],
       ...more,
     });
     const raised = assembleFigure(meshes, [0, 1], [joint({ liftMm: 1 })]).parts[1]!;
     expect(raised.translation[0]).toBeCloseTo(1, 9);
+    expect(raised.joint!.liftMm).toBe(1);
     const turned = assembleFigure(meshes, [0, 1], [joint({ turnDeg: 90 })]).parts[1]!;
-    expect(turned.joint!.contact.point).toEqual(WINGED_FIGURE.joint);
+    const [pair] = turned.joint!.pairs;
+    for (let k = 0; k < 3; k++) expect(pair!.of.centre[k]).toBeCloseTo(pair!.on.centre[k]!, 9);
     expect(turned.joint!.turnDeg).toBe(90);
+  });
+
+  it('leaves a part where its file puts it when its pairs mark nothing', () => {
+    const { body, wing } = generateWingedFigure();
+    const meshes = [body, wing].map(welded);
+    const joint: PartJoint = {
+      part: 1,
+      onto: 0,
+      pairs: [{ on: { file: 0, strokes: [] }, of: { file: 1, strokes: [] } }],
+    };
+    expect(assembleFigure(meshes, [0, 1], [joint]).parts[1]!.source).toBe('files');
   });
 
   it('refuses a joint that goes round or names a file that is not a part', () => {
@@ -101,8 +146,7 @@ describe('assembleFigure', { timeout: 60_000 }, () => {
     const joint = (part: number, onto: number): PartJoint => ({
       part,
       onto,
-      spot: { file: onto, point: [0, 0, 0] },
-      contact: { file: part, point: [0, 0, 0] },
+      pairs: [tapPair(onto, [0, 0, 0], part, [0, 0, 0])],
     });
     const detail = (joints: PartJoint[]): string | undefined => {
       try {
@@ -114,26 +158,37 @@ describe('assembleFigure', { timeout: 60_000 }, () => {
     };
     expect(detail([joint(1, 2), joint(2, 1)])).toMatch(/go round/);
     expect(detail([joint(0, 1)])).toMatch(/a joint of file 0/);
+    expect(detail([{ part: 1, onto: 0, pairs: [tapPair(2, [0, 0, 0], 1, [0, 0, 0])] }])).toMatch(
+      /pairs on 2\/1/,
+    );
   });
 });
 
 describe('proposedJoints', { timeout: 60_000 }, () => {
-  it('pins where a part in place touches the body, and nothing for a part lying apart', () => {
+  it('proposes the pair where a part in place touches the body, and nothing for a part apart', () => {
     const { body, wing } = generateWingedFigure();
     const inPlace = [body, wing].map(welded);
-    const parts = inPlace.map((mesh, file) => ({
-      ...wholePart(file, mesh),
-      source: file === 0 ? ('body' as const) : ('files' as const),
-    }));
-    const [proposal] = proposedJoints(inPlace, parts);
+    const [proposal, more] = proposedJoints(inPlace, [0, 1]);
+    expect(more).toBeUndefined();
     expect(proposal).toMatchObject({ part: 1, onto: 0 });
-    expect(proposal!.gapMm).toBeLessThan(IN_PLACE_GAP_MM);
+    expect(proposal!.pairs).toHaveLength(1);
     // The wing's root lies on the shoulder plate's face, x = 8.5.
-    expect(proposal!.contact[0]).toBeCloseTo(WINGED_FIGURE.joint[0], 4);
-    expect(proposal!.spot[0]).toBeCloseTo(WINGED_FIGURE.joint[0], 4);
+    expect(proposal!.pairs[0]!.of.centre[0]).toBeCloseTo(WINGED_FIGURE.joint[0], 4);
+    expect(Math.abs(proposal!.pairs[0]!.on.centre[0] - WINGED_FIGURE.joint[0])).toBeLessThan(0.01);
 
     const apart = [body, movedSoup(wing, WING_MOVE)].map(welded);
-    expect(proposedJoints(apart, parts)).toEqual([]);
+    expect(proposedJoints(apart, [0, 1])).toEqual([]);
+  });
+
+  it('pulls the parts that touch away from the body, and leaves the others', () => {
+    const { body, wing, tip } = generateWingedFigure();
+    const meshes = [body, wing, movedSoup(tip, TIP_MOVE)].map(welded);
+    const pulled = pulledApart(meshes, [0, 1, 2], new Set([0, 1]));
+    expect(pulled[0]!.translation).toEqual([0, 0, 0]);
+    expect(Math.hypot(...pulled[1]!.translation)).toBeCloseTo(EXPLODE_MM, 9);
+    // The wing lies to the body's +x.
+    expect(pulled[1]!.translation[0]).toBeGreaterThan(0);
+    expect(pulled[2]!.translation).toEqual([0, 0, 0]);
   });
 });
 

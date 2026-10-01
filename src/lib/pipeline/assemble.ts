@@ -1,13 +1,22 @@
 /**
- * A figure shipped in several files, put together before anything else (issue #93, design note
- * docs/design/marks-where-parts-meet.md §4.2): every part where its file puts it, or where a
- * pair of marks puts it against a part already placed. The union is one mesh in the body's file
- * frame, the body first, then the other parts in file order; the parts stay separate surfaces,
- * as a figure and its base do after #70.
+ * A figure shipped in several files, put together before anything else (issue #93, design notes
+ * docs/design/marks-where-parts-meet.md §4.2 and docs/design/patches-where-parts-meet.md §5.5):
+ * every part where its file puts it, or where its pairs of patches fit it against a part already
+ * placed. The union is one mesh in the body's file frame, the body first, then the other parts in
+ * file order; the parts stay separate surfaces, as a figure and its base do after #70.
  */
 import type { Vec3 } from './base';
-import { meetingRotation, resolveMark, type Mark, type PartJoint } from './marks';
-import { TriangleBvh, type SurfaceHit } from './bvh';
+import { TriangleBvh } from './bvh';
+import { contactPatches } from './contact';
+import { fitMeeting, nudged, type Fit } from './fit';
+import {
+  MAX_PAIRS,
+  resolvePatch,
+  summaryOf,
+  type Patch,
+  type PartJoint,
+  type PatchSummary,
+} from './marks';
 import type { IndexedMesh } from './mesh';
 import { ConversionProblem } from './problems';
 import { apply, IDENTITY, toMatrix, type Rotation } from './rotation';
@@ -21,6 +30,12 @@ export interface PartsOptions {
   joints: PartJoint[];
 }
 
+/** A pair of patches as resolved, without their triangles. */
+export interface PairSummary {
+  on: PatchSummary;
+  of: PatchSummary;
+}
+
 /** One part of a figure as it was put together. */
 export interface PartResult {
   file: number;
@@ -29,10 +44,26 @@ export interface PartResult {
   /** The part's file coordinates to the body's file frame. Identity for `body` and `files`. */
   rotation: Rotation;
   translation: Vec3;
-  /** Its joint as resolved, in the body's frame: the spot on `onto`, the contact where it ended. Only for `marked`. */
-  joint?: { onto: number; spot: Mark; contact: Mark; liftMm: number; turnDeg: number };
+  /** Its joint as resolved, in the body's frame: the pairs as they ended. Only for `marked`. */
+  joint?: { onto: number; pairs: PairSummary[]; liftMm: number; turnDeg: number; fit: Fit };
   /** Its triangles in the merged mesh: the figure lists the body first, then the parts in file order, then the base. */
   triangles: number;
+}
+
+/** A file's search tree, built once per conversion when a patch is first resolved on it. */
+export type TreeOf = (file: number) => TriangleBvh;
+
+/** Search trees built on demand over these meshes, kept. */
+export function treesOver(meshes: readonly IndexedMesh[]): TreeOf {
+  const trees = new Map<number, TriangleBvh>();
+  return (file) => {
+    let tree = trees.get(file);
+    if (!tree) {
+      tree = new TriangleBvh(meshes[file]!);
+      trees.set(file, tree);
+    }
+    return tree;
+  };
 }
 
 /** A transform: file coordinates to the body's file frame, `rotation · p + translation`. */
@@ -48,39 +79,55 @@ const placePoint = ({ rotation, translation }: Transform, p: Vec3): Vec3 => {
   return [turned[0] + translation[0], turned[1] + translation[1], turned[2] + translation[2]];
 };
 
+/** A patch summary carried by a transform: its centre placed, its normal turned. */
+export const placeSummary = (
+  transform: { rotation: Rotation; translation: Vec3 },
+  summary: PatchSummary,
+): PatchSummary => ({
+  ...summaryOf(summary),
+  centre: placePoint(transform, summary.centre),
+  normal: apply(transform.rotation, summary.normal),
+});
+
+/** The pairs of a meeting resolved on their files; a pair with a side that marks nothing is left out. */
+export function resolvePairs(
+  meshes: readonly IndexedMesh[],
+  treeOf: TreeOf,
+  pairs: PartJoint['pairs'],
+): { on: Patch; of: Patch }[] {
+  return pairs
+    .slice(0, MAX_PAIRS)
+    .map(({ on, of }) => ({
+      on: resolvePatch(meshes[on.file]!, treeOf(on.file), on),
+      of: resolvePatch(meshes[of.file]!, treeOf(of.file), of),
+    }))
+    .filter(({ on, of }) => on.triangles.length > 0 && of.triangles.length > 0);
+}
+
 /**
- * The transform a joint gives its part (design note §4.2): the spot resolved on `onto`'s file
- * and carried into the body's frame by `onto`'s transform, the contact resolved on the part's
- * file; the contact's normal turned against the spot's, `turnDeg` about it, the contact point on
- * the spot point raised by `liftMm` along the spot's normal.
+ * The transform a joint gives its part (patches design note §5.5): its pairs resolved on their
+ * files, the `on` patches carried into the body's frame by `onto`'s transform, the `of` patches
+ * as the part's file puts them; the least change that fits (`fitMeeting`, without an up), then
+ * the person's lift and turn about the `on` patches' normal. Null when no pair marks anything.
  */
 export function jointTransform(
-  part: IndexedMesh,
-  onto: IndexedMesh,
+  meshes: readonly IndexedMesh[],
+  treeOf: TreeOf,
   ontoTransform: Transform,
   joint: PartJoint,
-): { transform: Transform; spot: Mark; contact: Mark } {
-  const spotOnFile = resolveMark(onto, joint.spot.point);
-  const contactOnFile = resolveMark(part, joint.contact.point);
-  if (!spotOnFile || !contactOnFile)
-    throw new ConversionProblem('unexpected', `a joint of file ${joint.part} on an empty file`);
-  const point = placePoint(ontoTransform, spotOnFile.point);
-  const normal = apply(ontoTransform.rotation, spotOnFile.normal);
-  const liftMm = joint.liftMm ?? 0;
-  const rotation = meetingRotation(contactOnFile.normal, normal, joint.turnDeg ?? 0);
-  const target: Vec3 = [
-    point[0] + liftMm * normal[0],
-    point[1] + liftMm * normal[1],
-    point[2] + liftMm * normal[2],
-  ];
-  const turned = apply(rotation, contactOnFile.point);
+): { transform: Transform; pairs: PairSummary[]; fit: Fit } | null {
+  const resolved = resolvePairs(meshes, treeOf, joint.pairs);
+  if (resolved.length === 0) return null;
+  const pairs = resolved.map(({ on, of }) => ({
+    on: placeSummary(ontoTransform, on),
+    of: summaryOf(of),
+  }));
+  const fitted = fitMeeting(pairs, joint.turn ? { turn: joint.turn } : {});
+  const transform = nudged(fitted, pairs, joint.liftMm ?? 0, joint.turnDeg ?? 0);
   return {
-    transform: {
-      rotation,
-      translation: [target[0] - turned[0], target[1] - turned[1], target[2] - turned[2]],
-    },
-    spot: { point, normal },
-    contact: { point: target, normal: [0 - normal[0], 0 - normal[1], 0 - normal[2]] },
+    transform: { rotation: transform.rotation, translation: transform.translation },
+    pairs: pairs.map(({ on, of }) => ({ on, of: placeSummary(transform, of) })),
+    fit: fitted.fit,
   };
 }
 
@@ -101,19 +148,22 @@ function transformed(positions: Float32Array, { rotation, translation }: Transfo
 }
 
 /**
- * The figure put together from its parts (design note §4.2). The body (`figureFiles[0]`) stays
- * in its file frame; a part without a joint keeps its file coordinates, bit for bit; a part with
- * one goes where the joint puts it against its `onto`, which is resolved first whatever the
- * order of the joints (a cycle, or a joint naming a file that is not a figure part, is a bug of
- * the caller: `unexpected`). The union lists the body, then the other parts in file order.
+ * The figure put together from its parts (design note §4.2, patches §5.5). The body
+ * (`figureFiles[0]`) stays in its file frame; a part without a joint keeps its file coordinates,
+ * bit for bit; a part with one goes where its pairs fit it against its `onto`, which is resolved
+ * first whatever the order of the joints (a cycle, or a joint naming a file that is not a figure
+ * part, is a bug of the caller: `unexpected`). A joint whose pairs mark nothing leaves its part
+ * where its file puts it. The union lists the body, then the other parts in file order.
  *
  * @param meshes Every file's welded mesh, by file index; the base's, if any, is not read.
  * @param figureFiles The figure's parts by file index, the body first.
+ * @param treeOf The files' search trees, kept by the caller across answers.
  */
 export function assembleFigure(
   meshes: readonly IndexedMesh[],
   figureFiles: readonly number[],
   joints: readonly PartJoint[],
+  treeOf: TreeOf = treesOver(meshes),
 ): { mesh: IndexedMesh; parts: PartResult[] } {
   const body = figureFiles[0]!;
   const isPart = (file: number): boolean => figureFiles.includes(file) && file !== body;
@@ -123,13 +173,14 @@ export function assembleFigure(
       !isPart(joint.part) ||
       !figureFiles.includes(joint.onto) ||
       joint.onto === joint.part ||
-      joint.spot.file !== joint.onto ||
-      joint.contact.file !== joint.part
-    )
+      joint.pairs.some(({ on, of }) => on.file !== joint.onto || of.file !== joint.part)
+    ) {
+      const sides = joint.pairs.map(({ on, of }) => `${on.file}/${of.file}`).join(', ');
       throw new ConversionProblem(
         'unexpected',
-        `a joint of file ${joint.part} onto ${joint.onto} with marks on ${joint.spot.file} and ${joint.contact.file}`,
+        `a joint of file ${joint.part} onto ${joint.onto} with pairs on ${sides}`,
       );
+    }
     byPart.set(joint.part, joint);
   }
 
@@ -148,22 +199,21 @@ export function assembleFigure(
       throw new ConversionProblem('unexpected', `the joints of files ${[...resolving]} go round`);
     resolving.add(file);
     const onto = transformOf(joint.onto);
-    const { transform, spot, contact } = jointTransform(
-      meshes[file]!,
-      meshes[joint.onto]!,
-      onto,
-      joint,
-    );
+    const placed = jointTransform(meshes, treeOf, onto, joint);
     resolving.delete(file);
-    transforms.set(file, transform);
+    if (!placed) {
+      transforms.set(file, HOLD);
+      return HOLD;
+    }
+    transforms.set(file, placed.transform);
     resolved.set(file, {
       onto: joint.onto,
-      spot,
-      contact,
+      pairs: placed.pairs,
       liftMm: joint.liftMm ?? 0,
       turnDeg: joint.turnDeg ?? 0,
+      fit: placed.fit,
     });
-    return transform;
+    return placed.transform;
   };
 
   let vertexCount = 0;
@@ -207,89 +257,89 @@ export const wholePart = (file: number, mesh: IndexedMesh): PartResult => ({
   triangles: mesh.indices.length / 3,
 });
 
-/** A mark resolved on a part's file, carried into the body's frame by the part's transform. */
-export const partMark = (part: Pick<PartResult, 'rotation' | 'translation'>, mark: Mark): Mark => ({
-  point: placePoint(part, mark.point),
-  normal: apply(part.rotation, mark.normal),
-});
-
 /**
- * A part further than this from every other part of the figure lies apart in its file: it gets
- * no proposed marks (PM decision 2026-09-30: nothing new is detected). Parts exported in place
- * overlap or touch. _(proposal)_
+ * A part further than this from every other part of the figure lies apart in its file: it is
+ * not pulled apart further at the parts question. Parts exported in place overlap or touch.
+ * _(proposal)_
  */
 export const IN_PLACE_GAP_MM = 1;
-/** At most this many of a part's vertices are tried for where it touches the others. _(proposal)_ */
-export const PROPOSAL_SAMPLES = 20_000;
+/** At the parts question, each part that touches another is pulled this far from the body's middle. _(proposal)_ */
+export const EXPLODE_MM = 15;
 
-/** A proposed joint: where a part in place touches a part next to it, as picks in their files. */
+/** Where a part its file puts in place touches another, as pairs of patches in their files' coordinates. */
 export interface ProposedJoint {
   part: number;
   onto: number;
-  spot: Vec3;
-  contact: Vec3;
-  gapMm: number;
+  pairs: { on: Patch; of: Patch }[];
 }
 
 /**
- * Where each part its file puts in place touches the others (design note §14, PM decision): the
- * part's vertex nearest to another part's surface and the closest point there, found over at most
- * `PROPOSAL_SAMPLES` of its vertices with a search tree per other part. A part whose nearest gap
- * is more than `IN_PLACE_GAP_MM` lies apart and gets none. Parts placed by a joint are left out,
- * as parts and as neighbours: their files do not put them where they are.
+ * Where each part touches the others where the files put them (patches §5.3): for each part
+ * other than the body, `contactPatches` against every other part; the part it touches with the
+ * largest area is its `onto`. A part that touches nothing gets none: it lies apart.
  *
  * @param meshes Every file's welded mesh, by file index.
- * @param parts The figure's parts as put together.
+ * @param figureFiles The figure's parts by file index, the body first.
  */
 export function proposedJoints(
   meshes: readonly IndexedMesh[],
-  parts: readonly PartResult[],
+  figureFiles: readonly number[],
+  treeOf: TreeOf = treesOver(meshes),
 ): ProposedJoint[] {
-  const inPlace = parts.filter((part) => part.source !== 'marked');
-  const trees = new Map<number, TriangleBvh>();
-  const treeOf = (file: number): TriangleBvh => {
-    let tree = trees.get(file);
-    if (!tree) {
-      tree = new TriangleBvh(meshes[file]!);
-      trees.set(file, tree);
-    }
-    return tree;
-  };
-  const hit: SurfaceHit = { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 };
   const proposals: ProposedJoint[] = [];
-  for (const part of inPlace) {
-    if (part.source !== 'files') continue;
-    const { positions } = meshes[part.file]!;
-    const count = positions.length / 3;
-    const stride = Math.max(1, Math.ceil(count / PROPOSAL_SAMPLES));
+  for (const part of figureFiles.slice(1)) {
     let best: ProposedJoint | null = null;
-    let bestD2 = IN_PLACE_GAP_MM * IN_PLACE_GAP_MM;
-    for (const other of inPlace) {
-      if (other.file === part.file) continue;
-      const tree = treeOf(other.file);
-      const { positions: otherPositions, indices } = meshes[other.file]!;
-      for (let v = 0; v < count; v += stride) {
-        const x = positions[v * 3]!;
-        const y = positions[v * 3 + 1]!;
-        const z = positions[v * 3 + 2]!;
-        tree.closest(hit, x, y, z, bestD2);
-        if (hit.triangle < 0 || !(hit.distanceSquared < bestD2)) continue;
-        bestD2 = hit.distanceSquared;
-        const corner = (k: number, axis: number): number =>
-          otherPositions[indices[hit.triangle * 3 + k]! * 3 + axis]!;
-        const at = (axis: number): number =>
-          hit.u * corner(0, axis) + hit.v * corner(1, axis) + hit.w * corner(2, axis);
-        best = {
-          part: part.file,
-          onto: other.file,
-          spot: [at(0), at(1), at(2)],
-          contact: [x, y, z],
-          gapMm: Math.sqrt(bestD2),
-        };
-        if (bestD2 === 0) break;
+    let bestArea = 0;
+    for (const onto of figureFiles) {
+      if (onto === part) continue;
+      const pairs = contactPatches(
+        { file: onto, mesh: meshes[onto]!, tree: treeOf(onto) },
+        { file: part, mesh: meshes[part]!, positions: meshes[part]!.positions },
+      );
+      const area = pairs.reduce((sum, pair) => sum + pair.of.areaMm2, 0);
+      if (area > bestArea) {
+        bestArea = area;
+        best = { part, onto, pairs };
       }
     }
     if (best) proposals.push(best);
   }
   return proposals;
+}
+
+/** The middle of a mesh's box. */
+function middleOf(positions: Float32Array): Vec3 {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      if (positions[i + k]! < min[k]!) min[k] = positions[i + k]!;
+      if (positions[i + k]! > max[k]!) max[k] = positions[i + k]!;
+    }
+  }
+  return [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+}
+
+/**
+ * The parts pulled apart (patches §3.3): each part that touches another (`touching`) moved
+ * `EXPLODE_MM` from the middle of the body's box towards the middle of its own; the body and the
+ * parts that lie apart stay. Translations in the body's file frame.
+ */
+export function pulledApart(
+  meshes: readonly IndexedMesh[],
+  figureFiles: readonly number[],
+  touching: ReadonlySet<number>,
+): { file: number; translation: Vec3 }[] {
+  const body = middleOf(meshes[figureFiles[0]!]!.positions);
+  return figureFiles.map((file, k) => {
+    if (k === 0 || !touching.has(file)) return { file, translation: [0, 0, 0] };
+    const own = middleOf(meshes[file]!.positions);
+    const d: Vec3 = [own[0] - body[0], own[1] - body[1], own[2] - body[2]];
+    const length = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const away: Vec3 = length > 0 ? [d[0] / length, d[1] / length, d[2] / length] : [1, 0, 0];
+    return {
+      file,
+      translation: [away[0] * EXPLODE_MM, away[1] * EXPLODE_MM, away[2] * EXPLODE_MM],
+    };
+  });
 }

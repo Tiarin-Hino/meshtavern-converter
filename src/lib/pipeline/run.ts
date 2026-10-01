@@ -13,11 +13,12 @@ import {
   type AskOptions,
   type AskUp,
   type Box,
-  type MarkedPair,
   type MeetQuestion,
   type PartPlace,
   type Question,
   type Shown,
+  type ShownPatch,
+  type Target,
   type UpQuestion,
   type UpReason,
   type UpRole,
@@ -25,18 +26,40 @@ import {
 import {
   assembleFigure,
   MAX_PARTS,
-  partMark,
+  placeSummary,
   proposedJoints,
+  pulledApart,
+  resolvePairs,
+  treesOver,
   wholePart,
   type PartResult,
   type PartsOptions,
+  type TreeOf,
 } from './assemble';
 import { bake, type BakedMaps } from './bake';
 import { detailResolutionFor, surfaceAreaMm2 } from './bake-policy';
 import { compressDetail, DETAIL_EFFORT } from './compress';
 import type { IndexedMesh } from './mesh';
 import { computeVertexNormals, dropInvalidTriangles, weldVertices } from './mesh';
-import { resolveMark, type Mark, type MarkPick, type Meeting, type PartJoint } from './marks';
+import { contactPatches } from './contact';
+import {
+  applyMeetAction,
+  complete,
+  MAX_PAIRS,
+  marksOf,
+  resolvePatch,
+  startMeeting,
+  summaryOf,
+  type Hit,
+  type MarkingAction,
+  type Meeting,
+  type MeetContext,
+  type MeetNote,
+  type MeetState,
+  type PartJoint,
+  type Patch,
+  type PatchPick,
+} from './marks';
 import { checkFits, checkNeeded, estimateAssemblyBytes, estimatePairBytes } from './memory';
 import {
   coverageFor,
@@ -63,7 +86,6 @@ import {
   type PairingOptions,
 } from './pair';
 import {
-  contactFootprint,
   decideFigure,
   extentOf,
   mergeMeshes,
@@ -359,6 +381,7 @@ function figureSourceOf(
   { meshes, standing }: FilesStanding,
   pairing: Pairing,
   joints: readonly PartJoint[],
+  treeOf?: TreeOf,
 ): FigureSource {
   const parts = figureFiles(pairing);
   if (parts.length === 1) {
@@ -370,7 +393,7 @@ function figureSourceOf(
       parts: [wholePart(file, mesh)],
     };
   }
-  const assembled = assembleFigure(meshes, parts, joints);
+  const assembled = assembleFigure(meshes, parts, joints, treeOf);
   return {
     mesh: assembled.mesh,
     pass: resolveOrientation(assembled.mesh, {}),
@@ -577,60 +600,68 @@ interface PlacedPair {
 }
 
 /**
- * The figure placed on its base by two marks (#93, design note §4.3). It stands as the pair's
- * rules stood it (the decision of #92, the same with questions or without), and the meeting turns
- * it from there. The contact may be on any of the figure's parts: it is carried into the union by
- * that part's transform. The orientation is the composed one, `marked`, unless the meeting is
- * exactly the identity: then the figure stands as it did.
+ * How the figure of a pair stands before it is placed: as the pair's rules stood it (the
+ * decision of #92, the same with questions or without): the base's way when registered, else the
+ * candidate the decision took.
+ */
+function standingOf(oriented: OrientedPair): Orientation {
+  const { figure, base, files, alternative } = oriented;
+  const decided = oriented.decided ?? decideFigure(figure, base, files, alternative?.placed);
+  if (decided.registered) return oriented.baseOrientation;
+  return decided.candidate === 1 && alternative ? alternative.orientation : oriented.orientation;
+}
+
+/**
+ * The figure placed on its base by pairs of patches (#93, patches design note §5.5). It stands
+ * as the pair's rules stood it, and the fit moves, turns about the up or tilts it from there. An
+ * `of` patch may be on any of the figure's parts: it is carried into the union by that part's
+ * transform. The orientation is the composed one, `marked`, unless the meeting only moved the
+ * figure: then it stands as it did. Null when no pair marks anything.
  */
 function placeMarkedPair(
   oriented: OrientedPair,
-  meeting: NonNullable<PlacementOptions['marks']>,
-): PlacedPair {
-  const { figure, base, pairing, files, alternative, sources, parts } = oriented;
-  const part = parts.find((entry) => entry.file === meeting.contact.file);
-  if (meeting.spot.file !== pairing.baseFile || !part)
+  meeting: Meeting,
+  treeOf: TreeOf,
+): PlacedPair | null {
+  const { base, pairing, sources, parts, meshes } = oriented;
+  const partOf = (file: number): PartResult | undefined =>
+    parts.find((entry) => entry.file === file);
+  if (meeting.pairs.some(({ on, of }) => on.file !== pairing.baseFile || !partOf(of.file)))
     throw new ConversionProblem(
       'unexpected',
-      `marks on files ${meeting.spot.file} and ${meeting.contact.file}, base ${pairing.baseFile}`,
+      `pairs on files ${meeting.pairs.map(({ on, of }) => `${on.file}/${of.file}`).join(', ')}, base ${pairing.baseFile}`,
     );
-  const decided = oriented.decided ?? decideFigure(figure, base, files, alternative?.placed);
-  const standing = decided.registered
-    ? oriented.baseOrientation
-    : decided.candidate === 1 && alternative
-      ? alternative.orientation
-      : oriented.orientation;
-  const spot = resolveMark(sources.base, meeting.spot.point);
-  const onPart = resolveMark(oriented.meshes[part.file]!, meeting.contact.point);
-  if (!spot || !onPart)
-    throw new ConversionProblem('unexpected', 'a mark on a file without triangles');
-  const contact = partMark(part, onPart);
+  const resolved = resolvePairs(meshes, treeOf, meeting.pairs);
+  if (resolved.length === 0) return null;
+  const standing = standingOf(oriented);
+  const pairs = resolved.map(({ on, of }) => ({
+    on: summaryOf(on),
+    of: placeSummary(partOf(of.file)!, of),
+  }));
   const placed = placeMarked(
     sources.figure,
     standing.rotation,
     base,
     sources.baseRotation,
-    spot,
-    contact,
-    meeting.liftMm ?? 0,
-    meeting.turnDeg ?? 0,
+    pairs,
+    meeting,
   );
   const mesh = mergeMeshes(
     { positions: placed.positions, indices: sources.figure.indices },
     base.mesh,
   );
-  const identity = placed.meeting.every((value, i) => value === IDENTITY[i]);
   const up = nearestUpAxis(placed.rotation);
-  const orientation: Orientation = identity
-    ? standing
-    : {
-        up,
-        method: 'marked',
-        confidence: 1,
-        rotation: placed.rotation,
-        tiltDeg: angleDeg(fileUp(placed.rotation), axisVector(up)),
-        setDownDeg: 0,
-      };
+  const orientation: Orientation =
+    placed.meeting === IDENTITY
+      ? standing
+      : {
+          up,
+          method: 'marked',
+          confidence: 1,
+          rotation: placed.rotation,
+          tiltDeg: angleDeg(fileUp(placed.rotation), axisVector(up)),
+          setDownDeg: 0,
+        };
   return {
     merged: { mesh, sizeMm: extentOf(mesh.positions), base: base.base },
     pair: {
@@ -648,14 +679,21 @@ function placeMarkedPair(
 }
 
 /** The place step for a pair, and the orientation the figure ends up with. */
-function placeOrientedPair(oriented: OrientedPair, placementOptions: PlacementOptions): PlacedPair {
-  if (placementOptions.marks) return placeMarkedPair(oriented, placementOptions.marks);
+function placeOrientedPair(
+  oriented: OrientedPair,
+  placementOptions: PlacementOptions,
+  treeOf: TreeOf,
+): PlacedPair {
+  if (placementOptions.marks) {
+    const marked = placeMarkedPair(oriented, placementOptions.marks, treeOf);
+    if (marked) return marked;
+  }
   const { figure, base, pairing, files, alternative, decided, parts } = oriented;
   const placed = placeOnBase(
     figure,
     base,
     pairing,
-    placementOptions,
+    withoutMarks(placementOptions),
     files,
     alternative?.placed,
     decided,
@@ -675,10 +713,18 @@ function placeOrientedPair(oriented: OrientedPair, placementOptions: PlacementOp
     yawDeg === 0
       ? orientation.rotation
       : multiply(fromAxisAngle([0, 1, 0], yawDeg), orientation.rotation);
-  return { merged: placed.merged, pair, orientation, standing: orientation, figureRotation };
+  return {
+    merged: placed.merged,
+    pair,
+    orientation,
+    standing: orientation,
+    figureRotation,
+  };
 }
+
 /** Placement options without the marks: what the automatic placement takes. */
 function withoutMarks(options: PlacementOptions): PlacementOptions {
+  if (!('marks' in options)) return options;
   const rest = { ...options };
   delete rest.marks;
   return rest;
@@ -706,8 +752,8 @@ function baseShown(oriented: OrientedPair): Shown {
 }
 
 /**
- * The meet question's scene (#93 design note §4.4): the base's placed frame, the base where the
- * place step put it and every part of the figure where the placement shown put it.
+ * The final view of a figure on its base (#93): the base's placed frame, the base where the
+ * place step put it and every part of the figure where the placement put it.
  */
 function meetShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[]; box: Box } {
   const rotation = placed.figureRotation;
@@ -726,13 +772,12 @@ function meetShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[]
 }
 
 /**
- * The figure standing beside its base, `APART_GAP_MM` to its right, for marking both (#93):
- * the base as the place step put it, the figure as it stood at its question.
+ * The figure standing beside its base, `APART_GAP_MM` to its right (#93): the base as the place
+ * step puts it, the figure as it stands before it is placed. The pairs stop of a pair.
  */
-function apartShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[]; box: Box } {
+function apartShown(oriented: OrientedPair, standing: Rotation): { shown: Shown[]; box: Box } {
   const baseBox = boxOf(oriented.base.mesh.positions);
-  const rotation = placed.standing.rotation;
-  const figureBox = turnedBox(oriented.sources.figure.positions, rotation);
+  const figureBox = turnedBox(oriented.sources.figure.positions, standing);
   const translation: Vec3 = [
     baseBox.max[0] + APART_GAP_MM - figureBox.min[0],
     0 - figureBox.min[1],
@@ -743,7 +788,7 @@ function apartShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[
   return {
     shown: [
       baseShown(oriented),
-      ...oriented.parts.map((part) => composeShown(part, rotation, translation)),
+      ...oriented.parts.map((part) => composeShown(part, standing, translation)),
     ],
     box: {
       min: [baseBox.min[0], Math.min(baseBox.min[1], 0), Math.min(baseBox.min[2], 0 - depth)],
@@ -757,56 +802,46 @@ function apartShown(oriented: OrientedPair, placed: PlacedPair): { shown: Shown[
 }
 
 /**
- * The automatic placement as pins (PM decision 2026-09-30): the figure's contact point, the
- * vertex of its contact footprint nearest the footprint's centre, and the spot on the base where
- * that vertex was set. Both as picks in their files' coordinates, resolved like marks.
+ * Where the automatic placement sets the figure on its base, as pairs of patches (patches
+ * design note §5.3): each part's vertices as placed, carried back into the base file's
+ * coordinates, against the base file; the `MAX_PAIRS` largest pairs over all parts.
  */
-function proposedMeeting(
+function proposedPairs(
   oriented: OrientedPair,
   automatic: PlacedPair,
-  markOn: (pick: MarkPick) => Mark & { file: number },
-): MarkedPair[] {
-  const placed = automatic.merged.mesh.positions.subarray(0, automatic.pair.figureVertices * 3);
-  const contact = contactFootprint(placed);
-  if (contact.points.length === 0) return [];
-  let vertex = contact.points[0]!;
-  let nearest = Infinity;
-  for (const point of contact.points) {
-    const dx = placed[point * 3]! - contact.centre[0];
-    const dz = placed[point * 3 + 2]! - contact.centre[1];
-    if (dx * dx + dz * dz < nearest) {
-      nearest = dx * dx + dz * dz;
-      vertex = point;
-    }
-  }
-  // The union lists the parts in order: the vertex's part, and its place in that part's file.
+  treeOf: TreeOf,
+): { on: Patch; of: Patch }[] {
+  const { meshes, parts, pairing } = oriented;
+  const baseFile = pairing.baseFile;
+  const placed = automatic.merged.mesh.positions;
+  const back = invert(oriented.sources.baseRotation);
+  const shift = oriented.base.shift ?? [0, 0, 0];
+  const pairs: { on: Patch; of: Patch }[] = [];
   let first = 0;
-  for (const part of oriented.parts) {
-    const { positions } = oriented.meshes[part.file]!;
-    const count = positions.length / 3;
-    if (vertex < first + count) {
-      const local = vertex - first;
-      const shift = oriented.base.shift ?? [0, 0, 0];
-      const onBase = apply(invert(oriented.sources.baseRotation), [
-        placed[vertex * 3]! + shift[0],
-        placed[vertex * 3 + 1]! + shift[1],
-        placed[vertex * 3 + 2]! + shift[2],
+  for (const part of parts) {
+    const mesh = meshes[part.file]!;
+    const count = mesh.positions.length;
+    const positions = new Float32Array(count);
+    for (let i = 0; i < count; i += 3) {
+      const p = apply(back, [
+        placed[first + i]! + shift[0],
+        placed[first + i + 1]! + shift[1],
+        placed[first + i + 2]! + shift[2],
       ]);
-      return [
-        {
-          spot: markOn({ file: oriented.pairing.baseFile, point: onBase }),
-          contact: markOn({
-            file: part.file,
-            point: [positions[local * 3]!, positions[local * 3 + 1]!, positions[local * 3 + 2]!],
-          }),
-        },
-      ];
+      positions[i] = p[0];
+      positions[i + 1] = p[1];
+      positions[i + 2] = p[2];
     }
     first += count;
+    pairs.push(
+      ...contactPatches(
+        { file: baseFile, mesh: meshes[baseFile]!, tree: treeOf(baseFile) },
+        { file: part.file, mesh, positions },
+      ),
+    );
   }
-  return [];
+  return pairs.sort((a, b) => b.of.areaMm2 - a.of.areaMm2).slice(0, MAX_PAIRS);
 }
-
 /** Where a figure was set on its base, without the steps after placing (development and tooling). */
 export interface PairPlacement {
   pair: PairResult;
@@ -845,7 +880,7 @@ export function placePairOnly(
     options.orientation ?? {},
     options.baseOrientation ?? {},
   );
-  const placed = placeOrientedPair(oriented, options.placement ?? {});
+  const placed = placeOrientedPair(oriented, options.placement ?? {}, treesOver(meshes));
   return {
     pair: placed.pair,
     orientation: placed.orientation,
@@ -994,23 +1029,56 @@ export async function runPipeline(
     }
     return out;
   };
-  /** Marks as resolved on a file, once per point: an answer that keeps a mark does not pay for it again. */
-  const resolvedMarks = new Map<string, Mark & { file: number }>();
-  const markOn = ({ file, point }: MarkPick): Mark & { file: number } => {
-    const key = `${file}:${point.join(',')}`;
-    let mark = resolvedMarks.get(key);
-    if (!mark) {
-      const resolved = resolveMark(meshes[file]!, point);
-      if (!resolved) throw new ConversionProblem('unexpected', `a mark on empty file ${file}`);
-      mark = { ...resolved, file };
-      resolvedMarks.set(key, mark);
+  /**
+   * The files' search trees for marks and picks (patches design note §4): built once per file the
+   * first time they are needed, released before the size step.
+   */
+  let trees: TreeOf | null = null;
+  const treeOf: TreeOf = (file) => (trees ??= treesOver(meshes))(file);
+  /** Patches resolved once per file and strokes: an answer that keeps a side does not pay for it again. */
+  const patches = new Map<string, Patch>();
+  const patchOf = (pick: PatchPick): Patch => {
+    const key = `${pick.file}:${JSON.stringify(pick.strokes)}`;
+    let patch = patches.get(key);
+    if (!patch) {
+      patch = resolvePatch(meshes[pick.file]!, treeOf(pick.file), pick);
+      patches.set(key, patch);
     }
-    return mark;
+    return patch;
   };
-  const markedPair = (meeting: Meeting): MarkedPair => ({
-    spot: markOn(meeting.spot),
-    contact: markOn(meeting.contact),
+  /** A patch for the page: its triangles copied, because they are transferred. */
+  const shownPatch = (patch: Patch): ShownPatch => ({
+    ...summaryOf(patch),
+    triangles: patch.triangles.slice(),
   });
+  /**
+   * Where a finger is on the files drawn (§4): its ray carried into each file's frame by the
+   * inverse of that file's transform, the nearest hit of all.
+   */
+  const hitOf = (target: Target, shown: readonly Shown[]): Hit | null => {
+    if (!('ray' in target)) return { file: target.file, point: target.point };
+    const { origin, direction } = target.ray;
+    let best: Hit | null = null;
+    let bestT = Infinity;
+    for (const { file, rotation, translation } of shown) {
+      const back = invert(rotation);
+      const o = apply(back, [
+        origin[0] - translation[0],
+        origin[1] - translation[1],
+        origin[2] - translation[2],
+      ]);
+      const d = apply(back, direction);
+      const hit = treeOf(file).raycast(o, d);
+      if (hit && hit.t < bestT) {
+        bestT = hit.t;
+        best = {
+          file,
+          point: [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t],
+        };
+      }
+    }
+    return best;
+  };
   const rolesOf = (pairing: Pairing | null): Question['roles'] => ({
     baseFile: pairing?.baseFile ?? null,
     figureFiles: pairing ? figureFiles(pairing) : [0],
@@ -1025,6 +1093,223 @@ export async function runPipeline(
     return answer as Extract<Answer, { kind: K }>;
   };
 
+  /** What a meet question needs to know about its step (patches design note §5.6). */
+  interface MeetingAsk<P> {
+    step: 'assemble' | 'place';
+    context: MeetContext;
+    /** The marks the conversion came with. */
+    initial: Meeting | PartJoint[] | null;
+    /** The base question: the automatic placement's lift and turn the conversion came with. */
+    automatic: { liftMm?: number; turnDeg?: number };
+    /** Every file shown: their trees are built while the first question waits. */
+    files: readonly number[];
+    /** Where the parts touch as the converter would put them: computed once, at the first question. */
+    proposal: () => { on: Patch; of: Patch }[];
+    /** The parts put together by the marks, or as proposed. */
+    place: (state: MeetState) => P;
+    /** What to draw at a stage. */
+    scene: (
+      stage: MeetState['stage'],
+      placed: P | null,
+    ) => Pick<MeetQuestion, 'shown' | 'box' | 'apart' | 'parts' | 'placement' | 'roles'>;
+    /** No final view when it would be the picture just confirmed (a kit in place, §15 Q5). */
+    skipFinal: (state: MeetState) => boolean;
+  }
+
+  /**
+   * Asks where the parts meet (§5.6): the pairs stop, then the final view, until confirmed. Every
+   * action is applied in the step's time; waiting is in no step. Returns the state confirmed and
+   * the parts put together by it.
+   */
+  const askMeeting = async <P>(
+    ask: AskUp,
+    m: MeetingAsk<P>,
+  ): Promise<{ state: MeetState; placed: P }> => {
+    let state = startMeeting(m.initial, m.automatic, m.context);
+    let placed: P | null = null;
+    let proposal: { on: Patch; of: Patch }[] | null = null;
+    let note: MeetNote | null = null;
+    let picked: Hit | null | undefined;
+    let start: number | undefined;
+    let tries = 0;
+    const done = (): { state: MeetState; placed: P } => {
+      asked.push({
+        role: m.context.about === 'base' ? 'meet' : 'parts',
+        tries,
+        waitedMs: performance.now() - start!,
+      });
+      return { state, placed: placed! };
+    };
+    for (;;) {
+      const question = resume(m.step, (): MeetQuestion => {
+        proposal ??= m.proposal();
+        const { draft } = state;
+        const pairs = draft
+          ? draft.pairs.map(({ on, of }) => ({
+              on: on && shownPatch(patchOf(on)),
+              of: of && shownPatch(patchOf(of)),
+            }))
+          : proposal.map(({ on, of }) => ({
+              on: shownPatch(on),
+              of: shownPatch(of),
+            }));
+        return {
+          kind: 'meet',
+          about: m.context.about,
+          stage: state.stage,
+          pairs,
+          proposed: draft === null,
+          marks: marksOf(draft, m.context),
+          ...m.scene(state.stage, placed),
+          meshes: [],
+          ...(picked !== undefined && { picked }),
+          ...(note && { note }),
+        };
+      });
+      question.meshes = meshesFor([...question.shown, ...(question.apart?.shown ?? [])]);
+      note = null;
+      picked = undefined;
+      start ??= performance.now();
+      const pending = ask(question);
+      // The first tap should not wait for a tree.
+      resume(m.step, () => m.files.forEach((file) => treeOf(file)));
+      const { action } = expectAnswer(await pending, 'meet');
+      const hit = (target: Target): Hit | null =>
+        hitOf(
+          target,
+          'ray' in target && target.apart && question.apart ? question.apart.shown : question.shown,
+        );
+      const mark = (marking: MarkingAction): void => {
+        const applied = resume(m.step, () => applyMeetAction(state, marking, m.context));
+        state = applied.state;
+        note = applied.note;
+        tries++;
+      };
+      switch (action.do) {
+        case 'pick':
+          picked = resume(m.step, () => hit(action.at));
+          break;
+        case 'tap':
+          mark({
+            do: 'tap',
+            hit: resume(m.step, () => hit(action.at)),
+            pair: action.pair,
+          });
+          state = { ...state, stage: 'pairs' };
+          break;
+        case 'brush':
+          mark({
+            do: 'brush',
+            hits: resume(m.step, () => action.at.map(hit)),
+            pair: action.pair,
+            radiusMm: action.radiusMm,
+            ...(action.erase && { erase: true }),
+          });
+          state = { ...state, stage: 'pairs' };
+          break;
+        case 'clear':
+        case 'undo':
+        case 'set':
+          mark(action);
+          state = { ...state, stage: 'pairs' };
+          break;
+        case 'nudge':
+          mark(action);
+          if (state.stage === 'fitted') placed = resume(m.step, () => m.place(state));
+          break;
+        case 'back':
+          state = { ...state, stage: 'pairs' };
+          break;
+        case 'fit':
+        case 'confirm':
+          if (state.stage === 'fitted' && action.do === 'confirm') return done();
+          placed = resume(m.step, () => m.place(state));
+          if (m.skipFinal(state)) return done();
+          state = { ...state, stage: 'fitted' };
+          break;
+      }
+    }
+  };
+
+  /**
+   * The parts question (patches design note §3.3, §5.6): the figure's parts where their files put
+   * them, turned by the body's detected up and stood on the grid, with the pairs where they touch;
+   * then put together by the person's pairs. Inside the assemble step's time.
+   */
+  const askParts = async (
+    ask: AskUp,
+    standing: FilesStanding,
+    pairing: Pairing,
+    joints: PartJoint[],
+  ): Promise<{ source: FigureSource; joints: PartJoint[] }> => {
+    const files = figureFiles(pairing);
+    const body = files[0]!;
+    const context: MeetContext = {
+      about: 'parts',
+      baseFile: pairing.baseFile,
+      figureFiles: files,
+    };
+    const scenes = within('assemble', () => {
+      const up = resolveOrientation(meshes[body]!, {}, standing.standing[body]!.detection)
+        .orientation.rotation;
+      const inFiles = figureSourceOf(standing, pairing, [], treeOf);
+      const proposals = proposedJoints(meshes, files, treeOf);
+      const touching = new Set(proposals.flatMap(({ part, onto }) => [part, onto]));
+      const pulled = pulledApart(meshes, files, touching);
+      // The union moved part by part, for the box of the parts pulled apart.
+      const moved = inFiles.mesh.positions.slice();
+      let at = 0;
+      for (const { file, translation } of pulled) {
+        const end = at + meshes[file]!.positions.length;
+        for (let i = at; i < end; i += 3) {
+          moved[i] = moved[i]! + translation[0];
+          moved[i + 1] = moved[i + 1]! + translation[1];
+          moved[i + 2] = moved[i + 2]! + translation[2];
+        }
+        at = end;
+      }
+      const apart = standShown(
+        pulled.map(({ file, translation }) => ({
+          file,
+          rotation: IDENTITY,
+          translation,
+        })),
+        moved,
+        up,
+      );
+      return { up, inFiles, proposals, apart };
+    });
+    const answered = await askMeeting<FigureSource>(ask, {
+      step: 'assemble',
+      context,
+      initial: joints,
+      automatic: {},
+      files,
+      proposal: () => scenes.proposals.flatMap((proposal) => proposal.pairs),
+      place: (state) =>
+        figureSourceOf(
+          standing,
+          pairing,
+          (marksOf(state.draft, context) as PartJoint[] | null) ?? [],
+          treeOf,
+        ),
+      scene: (stage, placed) => {
+        const source = stage === 'fitted' && placed ? placed : scenes.inFiles;
+        return {
+          ...standShown(source.parts, source.mesh.positions, scenes.up),
+          apart: stage === 'pairs' ? scenes.apart : null,
+          parts: source.parts,
+          placement: null,
+          roles: rolesOf(pairing),
+        };
+      },
+      skipFinal: (state) => !state.draft?.pairs.some(complete),
+    });
+    return {
+      source: answered.placed,
+      joints: (marksOf(answered.state.draft, context) as PartJoint[] | null) ?? [],
+    };
+  };
   /** How an up question ended: confirmed, or the roles changed (a swap, or another base named). */
   type Answered<T> =
     | { standing: T; options: OrientationOptions; restart: null }
@@ -1076,73 +1361,6 @@ export async function runPipeline(
       if (answer.confirm) {
         asked.push({ role, tries, waitedMs: performance.now() - start });
         return { standing, options, restart: null };
-      }
-      tries++;
-    }
-  };
-
-  /**
-   * The parts question (#93 design note §4.2): the figure's parts as they go together, turned by
-   * the body's detected up and stood on the grid, with pins where the parts in place touch.
-   * Every answer puts the parts together again, inside the assemble step's time.
-   */
-  const askParts = async (
-    ask: AskUp,
-    standing: FilesStanding,
-    pairing: Pairing,
-    joints: PartJoint[],
-  ): Promise<{ source: FigureSource; joints: PartJoint[] }> => {
-    const body = bodyFile(pairing);
-    const up = resolveOrientation(meshes[body]!, {}, standing.standing[body]!.detection).orientation
-      .rotation;
-    let current = joints;
-    let source = within('assemble', () => figureSourceOf(standing, pairing, current));
-    // Where the files put each part: proposed once, for the parts no joint moves.
-    const proposals = within('assemble', () =>
-      proposedJoints(
-        meshes,
-        figureFiles(pairing)
-          .map((file) => wholePart(file, meshes[file]!))
-          .map((part, k) => (k === 0 ? part : { ...part, source: 'files' as const })),
-      ).map((proposal) => ({
-        part: proposal.part,
-        onto: proposal.onto,
-        pins: {
-          spot: markOn({ file: proposal.onto, point: proposal.spot }),
-          contact: markOn({ file: proposal.part, point: proposal.contact }),
-        },
-      })),
-    );
-    let start: number | undefined;
-    let tries = 0;
-    for (;;) {
-      const question = resume('assemble', (): MeetQuestion => {
-        const moved = new Set(current.map((joint) => joint.part));
-        const drawn = standShown(source.parts, source.mesh.positions, up);
-        return {
-          kind: 'meet',
-          about: 'parts',
-          parts: source.parts,
-          placement: null,
-          marks: current.map(markedPair),
-          proposed: proposals
-            .filter(({ part, onto }) => !moved.has(part) && !moved.has(onto))
-            .map(({ pins }) => pins),
-          apart: null,
-          roles: rolesOf(pairing),
-          ...drawn,
-          meshes: meshesFor(drawn.shown),
-        };
-      });
-      start ??= performance.now();
-      const answer = expectAnswer(await ask(question), 'meet');
-      if (JSON.stringify(answer.joints) !== JSON.stringify(current)) {
-        current = answer.joints;
-        source = resume('assemble', () => figureSourceOf(standing, pairing, current));
-      }
-      if (answer.confirm) {
-        asked.push({ role: 'parts', tries, waitedMs: performance.now() - start });
-        return { source, joints: current };
       }
       tries++;
     }
@@ -1406,57 +1624,65 @@ export async function runPipeline(
   if (oriented.base) {
     const pairOriented = oriented;
     const { figure, base } = pairOriented;
-    let meeting: Meeting | null = placementOptions.marks ?? null;
-    const placeWith = (marks: Meeting | null): PlacedPair =>
-      placeOrientedPair(pairOriented, marks ? { marks } : withoutMarks(placementOptions));
     let placedPair = run(
       'place',
-      () => placeWith(meeting),
+      () => placeOrientedPair(pairOriented, placementOptions, treeOf),
       (p) => fileBytes + meshBytes(figure.mesh) + meshBytes(base.mesh) + meshBytes(p.merged.mesh),
     );
     if (askUp && askMeet) {
-      // Shown before the conversion for every pair (PM decision 2026-09-30): the automatic
-      // placement with its pins, until the person marks their own.
-      let automatic = meeting ? null : placedPair;
-      let proposed: MarkedPair[] | null = null;
-      let start: number | undefined;
-      let tries = 0;
-      for (;;) {
-        const question = resume('place', (): MeetQuestion => {
-          automatic ??= placeWith(null);
-          proposed ??= proposedMeeting(pairOriented, automatic, markOn);
-          return {
-            kind: 'meet',
-            about: 'base',
-            parts: pairOriented.parts,
-            placement: placedPair.pair.placement,
-            marks: meeting ? [markedPair(meeting)] : [],
-            proposed,
-            roles: rolesOf(pairOriented.pairing),
-            ...meetShown(pairOriented, placedPair),
-            apart: apartShown(pairOriented, placedPair),
-            meshes: [],
-          };
-        });
-        question.meshes = meshesFor([...question.shown, ...question.apart!.shown]);
-        start ??= performance.now();
-        const answer = expectAnswer(await askUp(question), 'meet');
-        if (JSON.stringify(answer.meeting) !== JSON.stringify(meeting)) {
-          meeting = answer.meeting;
-          placedPair = resume('place', () => placeWith(meeting));
-        }
-        if (answer.confirm) {
-          asked.push({
-            role: 'meet',
-            tries,
-            waitedMs: performance.now() - start,
-          });
-          break;
-        }
-        tries++;
-      }
+      // Shown before the conversion for every pair (PM decision 2026-09-30): the pairs where the
+      // automatic placement sets the figure, apart, then the figure placed (PM decision
+      // 2026-10-01).
+      const automaticOptions = withoutMarks(placementOptions);
+      let automatic: PlacedPair | null = placementOptions.marks ? null : placedPair;
+      const automaticPlacement = (): PlacedPair =>
+        (automatic ??= placeOrientedPair(pairOriented, automaticOptions, treeOf));
+      const context: MeetContext = {
+        about: 'base',
+        baseFile: pairOriented.pairing.baseFile,
+        figureFiles: figureFiles(pairOriented.pairing),
+      };
+      const apart = resume('place', () =>
+        apartShown(pairOriented, standingOf(pairOriented).rotation),
+      );
+      const roles = rolesOf(pairOriented.pairing);
+      const answered = await askMeeting<PlacedPair>(askUp, {
+        step: 'place',
+        context,
+        initial: placementOptions.marks ?? null,
+        automatic: automaticOptions,
+        files: [context.baseFile!, ...context.figureFiles],
+        proposal: () => proposedPairs(pairOriented, automaticPlacement(), treeOf),
+        place: (state) => {
+          const marks = marksOf(state.draft, context) as Meeting | null;
+          if (marks) return placeOrientedPair(pairOriented, { marks }, treeOf);
+          if (!state.automatic.nudged) return automaticPlacement();
+          const { liftMm, turnDeg } = state.automatic;
+          return placeOrientedPair(pairOriented, { ...automaticOptions, liftMm, turnDeg }, treeOf);
+        },
+        scene: (stage, placed) =>
+          stage === 'fitted' && placed
+            ? {
+                ...meetShown(pairOriented, placed),
+                apart: null,
+                parts: placed.pair.parts,
+                placement: placed.pair.placement,
+                roles,
+              }
+            : { ...apart, apart: null, parts: pairOriented.parts, placement: null, roles },
+        skipFinal: () => false,
+      });
+      placedPair = answered.placed;
+      const marks = marksOf(answered.state.draft, context) as Meeting | null;
+      const { automatic: nudges } = answered.state;
       choices = { ...choices };
-      if (meeting) choices.placement = { marks: meeting };
+      if (marks) choices.placement = { marks };
+      else if (nudges.nudged)
+        choices.placement = {
+          ...automaticOptions,
+          liftMm: nudges.liftMm,
+          turnDeg: nudges.turnDeg,
+        };
       else delete choices.placement;
     }
     pair = placedPair.pair;
@@ -1475,6 +1701,9 @@ export async function runPipeline(
     };
   }
 
+  // The trees and patches of the questions are not needed any more.
+  trees = null;
+  patches.clear();
   const placed = run(
     'size',
     // A figure on its base file has its base: the plain one is never added.
