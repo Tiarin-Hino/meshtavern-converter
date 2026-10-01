@@ -192,6 +192,50 @@ test('makes parts of one figure when there is no base, pulls them apart, refuses
   expect(await page.evaluate(() => window.__mt.state.errorCode)).toBe('too-many-files');
 });
 
+/** A soup moved onto its own print plate: centred on the origin across x and y, on z = 0. */
+function onItsPlate(soup: Float32Array): Float32Array {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < soup.length; i += 3)
+    for (let k = 0; k < 3; k++) {
+      min[k] = Math.min(min[k]!, soup[i + k]!);
+      max[k] = Math.max(max[k]!, soup[i + k]!);
+    }
+  return movedSoup(soup, [-(min[0]! + max[0]!) / 2, -(min[1]! + max[1]!) / 2, -min[2]!]);
+}
+
+test('lays a kit exported for print in a row, with nothing proposed', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(240_000);
+  await open(page);
+  const { body, wing, tip } = generateWingedFigure();
+  await page.setInputFiles('#file', [
+    file('body.stl', onItsPlate(body)),
+    file('wing.stl', onItsPlate(wing)),
+    file('tip.stl', onItsPlate(tip)),
+    file('recess-base.stl', generateRecessBase()),
+  ]);
+  const parts = (await question(page)) as MeetAsked;
+  expect(parts).toMatchObject({ about: 'parts', stage: 'pairs', proposed: true, inPlace: false });
+  expect(parts.pairs).toEqual([]);
+  await expect(page.locator('#meet-hint')).toHaveText(
+    'Each part comes on its own. Tap where two parts touch, on both, to put them together.',
+  );
+  await expect(page.locator('#meet-apart')).toBeHidden();
+  await expect(page.locator('#meet-parts li')).toHaveText([
+    'body · the body',
+    'wing · lies apart: mark where it goes',
+    'tip · lies apart: mark where it goes',
+  ]);
+  // Side by side, left to right in the order of the parts.
+  const xs = parts.apart!.shown.map((s) => s.translation[0]);
+  expect(xs[1]).toBeGreaterThan(xs[0]!);
+  expect(xs[2]).toBeGreaterThan(xs[1]!);
+  await shoot(page, testInfo, 'parts-laid-in-a-row');
+  await page.evaluate(() => window.__mt.cancel());
+});
+
 test('drops the joints when another base is chosen after them', async ({ page }) => {
   test.setTimeout(240_000);
   await open(page);
