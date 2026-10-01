@@ -1,3 +1,4 @@
+import type { Vec3 } from './base';
 import type { IndexedMesh } from './mesh';
 
 /**
@@ -211,6 +212,164 @@ export class TriangleBvh {
       }
     }
     return out;
+  }
+
+  /**
+   * The nearest triangle a ray hits, from either side (#93: a tap is a ray from the camera).
+   * `t` is the distance along `direction` in its own length; only hits with `t >= 0` count.
+   * Ties go to the lower triangle index. Null when the ray misses.
+   */
+  raycast(origin: Vec3, direction: Vec3): { triangle: number; t: number } | null {
+    if (this.nodes === 0) return null;
+    const [ox, oy, oz] = origin;
+    const [dx, dy, dz] = direction;
+    // Slab test; a zero component makes its inverse infinite, which the min/max handle.
+    const ix = 1 / dx;
+    const iy = 1 / dy;
+    const iz = 1 / dz;
+    let best = -1;
+    let bestT = Infinity;
+    let top = 0;
+    this.stack[top++] = 0;
+    while (top > 0) {
+      const node = this.stack[--top]!;
+      const entry = this.boxEntry(node, ox, oy, oz, ix, iy, iz);
+      if (entry > bestT) continue;
+      const left = this.child[node]!;
+      if (left < 0) {
+        const end = this.first[node]! + this.count[node]!;
+        for (let i = this.first[node]!; i < end; i++) {
+          const triangle = this.order[i]!;
+          const t = this.rayTriangle(triangle, ox, oy, oz, dx, dy, dz);
+          if (t < bestT || (t === bestT && triangle < best)) {
+            bestT = t;
+            best = triangle;
+          }
+        }
+        continue;
+      }
+      const el = this.boxEntry(left, ox, oy, oz, ix, iy, iz);
+      const er = this.boxEntry(left + 1, ox, oy, oz, ix, iy, iz);
+      // Nearer child last, so it is popped first.
+      if (el < er) {
+        if (er <= bestT) this.stack[top++] = left + 1;
+        if (el <= bestT) this.stack[top++] = left;
+      } else {
+        if (el <= bestT) this.stack[top++] = left;
+        if (er <= bestT) this.stack[top++] = left + 1;
+      }
+    }
+    return best < 0 ? null : { triangle: best, t: bestT };
+  }
+
+  /** Where a ray enters a node's box (0 when it starts inside); Infinity when it misses. */
+  private boxEntry(
+    node: number,
+    ox: number,
+    oy: number,
+    oz: number,
+    ix: number,
+    iy: number,
+    iz: number,
+  ): number {
+    const b = node * 6;
+    let near = 0;
+    let far = Infinity;
+    for (let axis = 0; axis < 3; axis++) {
+      const o = axis === 0 ? ox : axis === 1 ? oy : oz;
+      const inv = axis === 0 ? ix : axis === 1 ? iy : iz;
+      const lo = this.bounds[b + axis]!;
+      const hi = this.bounds[b + 3 + axis]!;
+      if (!Number.isFinite(inv)) {
+        // Parallel to this slab: inside it or never.
+        if (o < lo || o > hi) return Infinity;
+        continue;
+      }
+      let t1 = (lo - o) * inv;
+      let t2 = (hi - o) * inv;
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      if (t1 > near) near = t1;
+      if (t2 < far) far = t2;
+      if (near > far) return Infinity;
+    }
+    return near;
+  }
+
+  /** Möller–Trumbore, both sides: the ray's `t` at the triangle, or Infinity. */
+  private rayTriangle(
+    triangle: number,
+    ox: number,
+    oy: number,
+    oz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+  ): number {
+    const { positions, indices } = this.mesh;
+    const ia = indices[triangle * 3]! * 3;
+    const ib = indices[triangle * 3 + 1]! * 3;
+    const ic = indices[triangle * 3 + 2]! * 3;
+    const ax = positions[ia]!;
+    const ay = positions[ia + 1]!;
+    const az = positions[ia + 2]!;
+    const e1x = positions[ib]! - ax;
+    const e1y = positions[ib + 1]! - ay;
+    const e1z = positions[ib + 2]! - az;
+    const e2x = positions[ic]! - ax;
+    const e2y = positions[ic + 1]! - ay;
+    const e2z = positions[ic + 2]! - az;
+    const px = dy * e2z - dz * e2y;
+    const py = dz * e2x - dx * e2z;
+    const pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (det === 0) return Infinity;
+    const inv = 1 / det;
+    const sx = ox - ax;
+    const sy = oy - ay;
+    const sz = oz - az;
+    const u = (sx * px + sy * py + sz * pz) * inv;
+    if (u < 0 || u > 1) return Infinity;
+    const qx = sy * e1z - sz * e1y;
+    const qy = sz * e1x - sx * e1z;
+    const qz = sx * e1y - sy * e1x;
+    const v = (dx * qx + dy * qy + dz * qz) * inv;
+    if (v < 0 || u + v > 1) return Infinity;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    return t >= 0 ? t : Infinity;
+  }
+
+  /**
+   * Every triangle whose centroid lies within `radius` of (x, y, z) (#93: a tap's reach, a brush
+   * dab). Visited in tree order; a caller that needs an order sorts.
+   */
+  within(x: number, y: number, z: number, radius: number, visit: (triangle: number) => void): void {
+    if (this.nodes === 0) return;
+    const { positions, indices } = this.mesh;
+    const r2 = radius * radius;
+    let top = 0;
+    this.stack[top++] = 0;
+    while (top > 0) {
+      const node = this.stack[--top]!;
+      // A centroid lies inside its triangle's box, so inside every box above it.
+      if (this.boxDistanceSquared(node, x, y, z) > r2) continue;
+      const left = this.child[node]!;
+      if (left >= 0) {
+        this.stack[top++] = left;
+        this.stack[top++] = left + 1;
+        continue;
+      }
+      const end = this.first[node]! + this.count[node]!;
+      for (let i = this.first[node]!; i < end; i++) {
+        const t = this.order[i]!;
+        const a = indices[t * 3]! * 3;
+        const b = indices[t * 3 + 1]! * 3;
+        const c = indices[t * 3 + 2]! * 3;
+        const gx = (positions[a]! + positions[b]! + positions[c]!) / 3 - x;
+        const gy = (positions[a + 1]! + positions[b + 1]! + positions[c + 1]!) / 3 - y;
+        const gz = (positions[a + 2]! + positions[b + 2]! + positions[c + 2]!) / 3 - z;
+        if (gx * gx + gy * gy + gz * gz <= r2) visit(t);
+      }
+    }
   }
 
   /** Closest point on one triangle (Ericson, Real-Time Collision Detection 5.1.5); updates `out` if nearer and facing. */

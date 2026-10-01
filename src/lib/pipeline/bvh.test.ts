@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TriangleBvh, type SurfaceHit } from './bvh';
+import { generateRecessBase } from '../../regression/shapes';
 import { generateBumpySheet } from './generate';
 import { computeVertexNormals, weldVertices, type IndexedMesh } from './mesh';
 
@@ -105,5 +106,139 @@ describe('TriangleBvh.closest', () => {
   it('handles an empty mesh', () => {
     const empty = new TriangleBvh({ positions: new Float32Array(0), indices: new Uint32Array(0) });
     expect(empty.closest(newHit(), 0, 0, 0, Infinity).triangle).toBe(-1);
+  });
+});
+
+/** A deterministic stream of numbers in [0, 1): the same 200 rays and balls on every machine. */
+function seeded(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+}
+
+/** Every triangle tested against the ray (Möller–Trumbore, both sides): the reference for `raycast`. */
+function bruteRaycast(
+  mesh: IndexedMesh,
+  origin: [number, number, number],
+  d: [number, number, number],
+): { triangle: number; t: number } | null {
+  let best: { triangle: number; t: number } | null = null;
+  const p = mesh.positions;
+  const sub = (i: number, j: number): number[] =>
+    [0, 1, 2].map((k) => p[i * 3 + k]! - p[j * 3 + k]!);
+  const crossOf = (a: number[], b: number[]): number[] => [
+    a[1]! * b[2]! - a[2]! * b[1]!,
+    a[2]! * b[0]! - a[0]! * b[2]!,
+    a[0]! * b[1]! - a[1]! * b[0]!,
+  ];
+  const dotOf = (a: number[], b: number[]): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+  for (let t = 0; t < mesh.indices.length / 3; t++) {
+    const [a, b, c] = [0, 1, 2].map((k) => mesh.indices[t * 3 + k]!) as [number, number, number];
+    const e1 = sub(b, a);
+    const e2 = sub(c, a);
+    const h = crossOf(d, e2);
+    const det = dotOf(e1, h);
+    if (det === 0) continue;
+    const s = [0, 1, 2].map((k) => origin[k]! - p[a * 3 + k]!);
+    const u = dotOf(s, h) / det;
+    const q = crossOf(s, e1);
+    const v = dotOf(d, q) / det;
+    const at = dotOf(e2, q) / det;
+    if (u < 0 || v < 0 || u + v > 1 || at < 0) continue;
+    if (!best || at < best.t) best = { triangle: t, t: at };
+  }
+  return best;
+}
+
+describe('TriangleBvh.raycast and within', () => {
+  const recess = weldVertices(generateRecessBase()).mesh;
+  const meshes: [string, IndexedMesh][] = [
+    ['bumpy sheet', weldVertices(generateBumpySheet(12)).mesh],
+    ['recess base', recess],
+  ];
+
+  for (const [name, mesh] of meshes) {
+    const tree = new TriangleBvh(mesh);
+    const box = [0, 1, 2].map((axis) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = axis; i < mesh.positions.length; i += 3) {
+        lo = Math.min(lo, mesh.positions[i]!);
+        hi = Math.max(hi, mesh.positions[i]!);
+      }
+      return [lo, hi] as const;
+    });
+
+    it(`hits the nearest triangle a ray meets on the ${name}, as brute force does`, () => {
+      const random = seeded(7);
+      const rays = 200;
+      let hits = 0;
+      for (let k = 0; k < rays; k++) {
+        const target = box.map(([lo, hi]) => lo + (hi - lo) * random()) as [number, number, number];
+        const origin = box.map(([lo, hi]) => lo - 20 + (hi - lo + 40) * random()) as [
+          number,
+          number,
+          number,
+        ];
+        const direction: [number, number, number] = [
+          target[0] - origin[0],
+          target[1] - origin[1],
+          target[2] - origin[2],
+        ];
+        const hit = tree.raycast(origin, direction);
+        const reference = bruteRaycast(mesh, origin, direction);
+        if (!reference) {
+          expect(hit).toBeNull();
+          continue;
+        }
+        hits++;
+        expect(hit).not.toBeNull();
+        expect(hit!.t).toBeCloseTo(reference.t, 9);
+      }
+      expect(hits).toBeGreaterThan(rays / 4);
+    });
+
+    it(`finds every triangle whose centroid is within a ball on the ${name}`, () => {
+      const random = seeded(11);
+      for (let k = 0; k < 200; k++) {
+        const centre = box.map(([lo, hi]) => lo + (hi - lo) * random()) as [number, number, number];
+        const radius = 0.5 + 6 * random();
+        const found: number[] = [];
+        tree.within(centre[0], centre[1], centre[2], radius, (t) => found.push(t));
+        const expected: number[] = [];
+        for (let t = 0; t < mesh.indices.length / 3; t++) {
+          let d2 = 0;
+          for (let axis = 0; axis < 3; axis++) {
+            const g =
+              (mesh.positions[mesh.indices[t * 3]! * 3 + axis]! +
+                mesh.positions[mesh.indices[t * 3 + 1]! * 3 + axis]! +
+                mesh.positions[mesh.indices[t * 3 + 2]! * 3 + axis]!) /
+              3;
+            d2 += (g - centre[axis]!) ** 2;
+          }
+          if (d2 <= radius * radius) expected.push(t);
+        }
+        expect(found.sort((a, b) => a - b)).toEqual(expected);
+      }
+    });
+  }
+
+  it('misses with a ray that points away, or runs beside the mesh', () => {
+    const tree = new TriangleBvh(recess);
+    expect(tree.raycast([0, 0, 50], [0, 0, 1])).toBeNull();
+    expect(tree.raycast([100, 0, 2], [0, 1, 0])).toBeNull();
+    // Straight down onto the recess floor, 3 mm above the 4 mm base: the floor at z = 3.
+    const hit = tree.raycast([0, 0, 50], [0, 0, -1]);
+    expect(hit!.t).toBeCloseTo(47, 5);
+  });
+
+  it('answers nothing on a mesh without triangles', () => {
+    const empty = new TriangleBvh({ positions: new Float32Array(0), indices: new Uint32Array(0) });
+    expect(empty.raycast([0, 0, 0], [0, 0, 1])).toBeNull();
+    const found: number[] = [];
+    empty.within(0, 0, 0, 10, (t) => found.push(t));
+    expect(found).toEqual([]);
   });
 });
