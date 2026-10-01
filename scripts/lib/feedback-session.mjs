@@ -8,7 +8,10 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { asDetected, convertAnswering, fromChoices } from './answer-up.mjs';
 
-/** A pair that does not finish converting within this is recorded as skipped. */
+/**
+ * A pair answered by a script that does not finish converting within this is recorded as skipped.
+ * While the PM answers the questions there is no limit: marking a kit takes as long as it takes.
+ */
 export const FEEDBACK_TIMEOUT_MS = 600_000;
 
 /** The views of a record's sheet: the ones of the corpus report's placement sheet. */
@@ -29,22 +32,30 @@ const KEYS = { r: 'right', s: 'placed', k: 'skipped', n: 'next', escape: 'end' }
 export async function installFeedback(page) {
   let waiting = null;
   await page.exposeFunction('__feedbackKey', (verdict) => waiting?.(verdict));
-  await page.evaluate((keys) => {
-    const overlay = document.createElement('div');
-    overlay.id = 'feedback-overlay';
-    overlay.style.cssText =
-      'position:fixed;left:8px;bottom:8px;z-index:20;max-width:60%;padding:8px 12px;border-radius:8px;' +
-      'background:rgb(0 0 0 / 0.75);color:#fff;font:14px system-ui;pointer-events:none;white-space:pre-line';
-    document.body.append(overlay);
-    document.addEventListener('keydown', (event) => {
-      const target = event.target;
-      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName)) return;
-      const verdict = keys[event.key.toLowerCase()];
-      if (!verdict) return;
-      event.preventDefault();
-      window.__feedbackKey(verdict);
-    });
-  }, KEYS);
+  // The overlay and the keys again on every load: a pair that fails reloads the page.
+  const install = (keys) => {
+    const add = () => {
+      if (document.querySelector('#feedback-overlay')) return;
+      const overlay = document.createElement('div');
+      overlay.id = 'feedback-overlay';
+      overlay.style.cssText =
+        'position:fixed;left:8px;bottom:8px;z-index:20;max-width:60%;padding:8px 12px;border-radius:8px;' +
+        'background:rgb(0 0 0 / 0.75);color:#fff;font:14px system-ui;pointer-events:none;white-space:pre-line';
+      document.body.append(overlay);
+      document.addEventListener('keydown', (event) => {
+        const target = event.target;
+        if (['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName)) return;
+        const verdict = keys[event.key.toLowerCase()];
+        if (!verdict) return;
+        event.preventDefault();
+        window.__feedbackKey(verdict);
+      });
+    };
+    if (document.body) add();
+    else document.addEventListener('DOMContentLoaded', add);
+  };
+  await page.addInitScript(install, KEYS);
+  await page.evaluate(install, KEYS);
   return () =>
     new Promise((resolve) => {
       waiting = resolve;
@@ -110,8 +121,8 @@ export function pickFromPair(pair) {
 }
 
 /**
- * Waits for the conversion to end while the PM answers the questions on the page (#92); the
- * overlay says so while one is open.
+ * Waits for the conversion to end while the PM answers the questions on the page (#92), however
+ * long it takes; the overlay says so while one is open.
  */
 async function answeredByThePm(page) {
   await page.waitForFunction(
@@ -123,7 +134,7 @@ async function answeredByThePm(page) {
       return (stats || error) && !busy;
     },
     null,
-    { timeout: FEEDBACK_TIMEOUT_MS, polling: 250 },
+    { timeout: 0, polling: 250 },
   );
 }
 
@@ -167,9 +178,12 @@ export async function reviewPair(page, pair, session) {
         up === 'index' ? pickFromPair(pair) : asDetected,
         FEEDBACK_TIMEOUT_MS,
       );
-  } catch {
-    write({ ...base, verdict: 'skipped', note: 'timeout' });
+  } catch (error) {
+    const note = error instanceof Error ? error.message.split('\n')[0] : String(error);
+    write({ ...base, verdict: 'skipped', note });
+    console.warn(`${pair.key}: skipped (${note})`);
     await page.reload();
+    await page.waitForFunction(() => window.__mt?.state.ready === true);
     return 'skipped';
   }
   const first = await page.evaluate(() => {
