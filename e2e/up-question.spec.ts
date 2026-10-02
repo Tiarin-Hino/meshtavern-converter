@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { encodeBinaryStl } from '../src/lib/dev';
+import { encodeBinaryStl, generateBumpySheet } from '../src/lib/dev';
 import { PROBLEM_MESSAGES } from '../src/lib';
 import { COPY } from '../src/page/page-state';
 import {
@@ -116,6 +116,23 @@ test('stops after the orient step and converts on Confirm', async ({ page }, tes
   expect(stats.asked).toEqual([{ role: 'mini', tries: 0, waitedMs: expect.any(Number) }]);
   expect(stats.upMethod).toBe('base');
   expect(await page.evaluate(() => window.__mt.state.questionMs)).toBeGreaterThan(0);
+});
+
+test('draws a large mesh at the question a chunk per frame, all of it', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await open(page);
+  // 600 quads per side: 720,000 triangles over 361,201 vertices, two chunks (#108).
+  await page.setInputFiles('#file', file('sheet.stl', generateBumpySheet(600)));
+  await question(page);
+  // The time to the question counts until every chunk is added and drawn.
+  await page.waitForFunction(() => window.__mt.state.questionMs !== null);
+  await page.waitForFunction(() => (window.__mt.state.perf?.triangles ?? 0) >= 720_000);
+  await shoot(page, testInfo, 'question-chunked');
+  await page.locator('#ask-confirm').click();
+  await ended(page);
+  expect(await page.evaluate(() => window.__mt.state.error)).toBeNull();
 });
 
 test('stands a lying figure up at the question and converts it once', async ({

@@ -22,6 +22,7 @@ import {
   compressedTextureBytes,
   ownCopy,
 } from '../lib/three';
+import { chunkRanges } from './mesh-chunks';
 
 /** The pairs' colours, as in style.css (`--pair-1` … `--pair-4`). _(proposal, #93)_ */
 const PAIR_COLOURS = [0xf0b35e, 0x7ee0c3, 0xd78ae6, 0x8fb8f5] as const;
@@ -109,9 +110,13 @@ export class Viewer {
   /**
    * The full-detail meshes at a question (#92, #93): each file's in file coordinates at the
    * transform the worker gave it, under `holder`, inside the pivot so a turn previews as it
-   * does on a converted mini. Null when no question is shown.
+   * does on a converted mini. A file is a group of chunks (#108). Null when no question is shown.
    */
-  private question: { holder: THREE.Group; meshes: Map<number, THREE.Mesh> } | null = null;
+  private question: { holder: THREE.Group; meshes: Map<number, QuestionFile> } | null = null;
+  /** The files whose chunks are still being added, a chunk per frame (#108), first come first. */
+  private chunking: QuestionFile[] = [];
+  /** Hooks waiting for `chunking` to empty. */
+  private chunkWaiters: (() => void)[] = [];
   /** The patches at a question (#93), each a child of its file's mesh. */
   private patches: THREE.Mesh[] = [];
   private readonly raycaster = new THREE.Raycaster();
@@ -158,10 +163,30 @@ export class Viewer {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
 
+    // The question's shader is compiled and first drawn now, by a triangle without area, not in
+    // the frame that first shows a large question (#108).
+    const warm = new THREE.Mesh(
+      new THREE.BufferGeometry().setAttribute(
+        'position',
+        new THREE.BufferAttribute(new Float32Array(9), 3),
+      ),
+      this.questionMaterial,
+    );
+    warm.frustumCulled = false;
+    warm.onAfterRender = () => {
+      this.scene.remove(warm);
+      warm.geometry.dispose();
+    };
+    void this.renderer
+      .compileAsync(warm, this.camera, this.scene)
+      .then(() => this.scene.add(warm))
+      .catch(() => undefined);
+
     new ResizeObserver(() => this.resize()).observe(canvas);
     this.resize();
     this.renderer.setAnimationLoop((now) => {
       this.controls.update();
+      this.addNextChunk();
       const start = performance.now();
       this.renderer.render(this.scene, this.camera);
       this.renderTimes[this.frameIndex] = performance.now() - start;
@@ -291,13 +316,13 @@ export class Viewer {
       kept.add(file);
       let shown = meshes.get(file);
       if (!shown) {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-        geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-        shown = new THREE.Mesh(geometry, this.questionMaterial);
-        shown.userData.file = file;
+        shown = new QuestionFile(mesh);
         holder.add(shown);
         meshes.set(file, shown);
+        // An ordinary mini now, whole, as before. A large one a chunk per frame from the next
+        // (#108): this frame already brings the question's first draw of the turn gizmo.
+        if (shown.chunks === 1) shown.addChunk(this.questionMaterial);
+        else this.chunking.push(shown);
       }
       shown.quaternion.set(...rotation);
       shown.position.set(...translation);
@@ -305,7 +330,8 @@ export class Viewer {
     for (const [file, shown] of meshes) {
       if (kept.has(file)) continue;
       holder.remove(shown);
-      shown.geometry.dispose();
+      this.dropChunking(shown);
+      shown.dispose();
       meshes.delete(file);
     }
     const [minX, minY, minZ] = box.min;
@@ -321,6 +347,27 @@ export class Viewer {
     // At a question the wheel zooms towards what is under the cursor (#93).
     this.controls.zoomToCursor = true;
     if (reframe) this.setCamera(34, 22, 1);
+  }
+
+  /** Resolves once every file of the question shown has all its chunks (#108); they are drawn from the next frame. */
+  chunksAdded(): Promise<void> {
+    return this.chunking.length === 0
+      ? Promise.resolve()
+      : new Promise((resolve) => this.chunkWaiters.push(resolve));
+  }
+
+  /** One frame's share of a question's meshes: the next chunk of the first file waiting (#108). */
+  private addNextChunk(): void {
+    const first = this.chunking[0];
+    if (!first) return;
+    first.addChunk(this.questionMaterial);
+    if (first.complete) this.dropChunking(first);
+  }
+
+  /** Stops adding chunks to `file`; whoever waits is told when no file is left. */
+  private dropChunking(file: QuestionFile): void {
+    this.chunking = this.chunking.filter((entry) => entry !== file);
+    if (this.chunking.length === 0) for (const resolve of this.chunkWaiters.splice(0)) resolve();
   }
 
   /**
@@ -358,7 +405,7 @@ export class Viewer {
   }
 
   /**
-   * The patches at a question (#93, patches §7.3): per patch one mesh, a child of its file's mesh
+   * The patches at a question (#93, patches §7.3): per patch one mesh, a child of its file's group
    * sharing its positions, indexed by the patch's triangles. Drawn once solid just in front of
    * the surface and once faint through everything, so a patch under a foot or inside a joint
    * still shows. Both sides of a pair in its colour (`PAIR_COLOURS`); a proposal paler.
@@ -372,9 +419,9 @@ export class Viewer {
       const mesh = this.question.meshes.get(patch.file);
       if (!mesh || patch.triangles.length === 0) continue;
       const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', mesh.geometry.getAttribute('position'));
+      geometry.setAttribute('position', mesh.positions);
       const indices = new Uint32Array(patch.triangles.length * 3);
-      const source = mesh.geometry.getIndex()!.array;
+      const source = mesh.source.indices;
       patch.triangles.forEach((t, k) => {
         indices[k * 3] = source[t * 3]!;
         indices[k * 3 + 1] = source[t * 3 + 1]!;
@@ -428,7 +475,8 @@ export class Viewer {
     const mesh = this.question?.meshes.get(file);
     if (!mesh) return;
     this.pivot.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(mesh);
+    // The file's box, also while chunks are still to come (#108).
+    const box = mesh.box.clone().applyMatrix4(mesh.matrixWorld);
     const size = box.getSize(new THREE.Vector3());
     this.lookAt(box.getCenter(new THREE.Vector3()), Math.max(size.x, size.y, size.z, 1) * 2.3);
   }
@@ -453,7 +501,7 @@ export class Viewer {
       geometries.add(patch.geometry);
       (patch.material as THREE.Material).dispose();
     }
-    // The positions are the file mesh's: only the index goes with the geometry.
+    // The positions are the file's: only the index goes with the geometry.
     for (const geometry of geometries) {
       geometry.deleteAttribute('position');
       geometry.dispose();
@@ -760,7 +808,10 @@ export class Viewer {
     if (this.question) {
       this.pivot.remove(this.question.holder);
       this.scene.remove(this.pivot);
-      for (const mesh of this.question.meshes.values()) mesh.geometry.dispose();
+      for (const file of this.question.meshes.values()) {
+        this.dropChunking(file);
+        file.dispose();
+      }
       this.question = null;
     }
     if (this.figure) {
@@ -795,5 +846,65 @@ export class Viewer {
     this.renderer.setSize(clientWidth, clientHeight, false);
     this.camera.aspect = clientWidth / clientHeight;
     this.camera.updateProjectionMatrix();
+  }
+}
+
+/**
+ * A file's full-detail mesh at a question, as chunks of its triangles (#108): an ordinary mini
+ * is one chunk, its own arrays as before; a large sculpt gets a chunk per frame, each a range of
+ * the index array over the file's positions (shared, handed to the GPU once with the first), so
+ * no frame hands the GPU more than the positions or one chunk. Patches are children too.
+ */
+class QuestionFile extends THREE.Group {
+  /** The positions every chunk and patch draws from. */
+  readonly positions: THREE.BufferAttribute;
+  /** The whole file's box in its own coordinates. */
+  readonly box: THREE.Box3;
+  private readonly sphere: THREE.Sphere;
+  private readonly ranges: { from: number; to: number }[];
+  private next = 0;
+
+  constructor(readonly source: IndexedMesh) {
+    super();
+    this.positions = new THREE.BufferAttribute(source.positions, 3);
+    this.ranges = chunkRanges(source.indices.length / 3, source.positions.byteLength);
+    this.box = new THREE.Box3().setFromArray(source.positions);
+    this.sphere = this.box.getBoundingSphere(new THREE.Sphere());
+  }
+
+  /** How many chunks the file is drawn in. */
+  get chunks(): number {
+    return this.ranges.length;
+  }
+
+  /** True once every chunk is added. */
+  get complete(): boolean {
+    return this.next >= this.ranges.length;
+  }
+
+  /** Adds the next chunk, drawn with `material`. */
+  addChunk(material: THREE.Material): void {
+    const range = this.ranges[this.next++];
+    if (!range) return;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', this.positions);
+    // Given, not measured: three.js would measure each chunk's bounds over all the file's
+    // vertices (to sort what it draws, even when nothing is culled), 150 ms a chunk on the
+    // laptop for the largest corpus mini.
+    geometry.boundingBox = this.box;
+    geometry.boundingSphere = this.sphere;
+    geometry.setIndex(
+      new THREE.BufferAttribute(this.source.indices.subarray(range.from * 3, range.to * 3), 1),
+    );
+    this.add(new THREE.Mesh(geometry, material));
+  }
+
+  /** Releases the chunks' GPU buffers (the shared positions with the first). */
+  dispose(): void {
+    this.next = this.ranges.length;
+    for (const child of [...this.children]) {
+      this.remove(child);
+      (child as THREE.Mesh).geometry.dispose();
+    }
   }
 }
