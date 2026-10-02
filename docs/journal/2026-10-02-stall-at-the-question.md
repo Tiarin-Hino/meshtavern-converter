@@ -3,7 +3,7 @@ title: The stall at the question, located and taken apart
 date: 2026-10-02
 phase: 2
 issues: [108]
-prs: []
+prs: [111]
 topics: [viewer, performance, devices]
 ---
 
