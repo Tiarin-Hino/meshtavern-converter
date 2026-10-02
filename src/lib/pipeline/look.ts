@@ -25,6 +25,60 @@ export const DEFAULT_LOOK: Look = {
   edges: 0.45,
 };
 
+/**
+ * Starting points for the look (issue #45): a name and a value for each of the controls,
+ * nothing the controls cannot reach. The first one is `DEFAULT_LOOK`.
+ */
+export const LOOK_PRESET_IDS = ['primer', 'bone', 'black-drybrush', 'steel', 'bronze'] as const;
+export type LookPresetId = (typeof LOOK_PRESET_IDS)[number];
+
+export interface LookPreset {
+  id: LookPresetId;
+  /** The name the user reads. */
+  label: string;
+  look: Look;
+}
+
+export const LOOK_PRESETS: readonly LookPreset[] = [
+  { id: 'primer', label: 'Grey primer', look: DEFAULT_LOOK },
+  {
+    id: 'bone',
+    label: 'Bone',
+    look: { enabled: true, base: '#d8cdb0', occlusion: 0.8, wash: 0.75, edges: 0.3 },
+  },
+  {
+    id: 'black-drybrush',
+    label: 'Black, drybrushed',
+    look: { enabled: true, base: '#1c1c20', occlusion: 0.5, wash: 0.3, edges: 0.9 },
+  },
+  {
+    id: 'steel',
+    label: 'Steel',
+    look: { enabled: true, base: '#565e68', occlusion: 0.85, wash: 0.8, edges: 0.9 },
+  },
+  {
+    id: 'bronze',
+    label: 'Bronze',
+    look: { enabled: true, base: '#7a4f24', occlusion: 0.85, wash: 0.75, edges: 0.7 },
+  },
+];
+
+/**
+ * The preset a look is, or null when a control was moved away from every one of them.
+ * Read from the values, so it cannot disagree with them.
+ */
+export function presetOf(look: Look): LookPresetId | null {
+  const match = LOOK_PRESETS.find(
+    ({ look: preset }) =>
+      look.enabled === preset.enabled &&
+      look.base.trim().toLowerCase() === preset.base &&
+      look.occlusion === preset.occlusion &&
+      look.wash === preset.wash &&
+      look.edges === preset.edges,
+  );
+  return match?.id ?? null;
+}
+
 /** Raw cavity values are small (a 20° fold is about 0.17); this brings them to a usable range. */
 export const CAVITY_GAIN = 4;
 /** The wash never goes fully black and the drybrush never fully white. */

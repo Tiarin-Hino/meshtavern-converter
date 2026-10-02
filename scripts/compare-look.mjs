@@ -1,6 +1,9 @@
-// Before/after images of the "primed and washed" look for every STL in corpus/, at the
-// table level, in real Chrome. Writes out/look/<name>.png and prints the shade step's time.
-// Usage: npm run build && node scripts/compare-look.mjs
+// Images of the look for every STL in corpus/, at the table level, in real Chrome: the plain
+// base coat and every preset of the page (#45), side by side. Writes out/look/<name>.png and
+// prints the shade step's time.
+// Usage: npm run build && node scripts/compare-look.mjs [--baked] [part of a file name…]
+// Without --baked the minis have the per-vertex look, which is quick; with it they are baked
+// as the table shows them.
 // Nothing from corpus/ or out/ is ever committed.
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -16,13 +19,13 @@ const VIEWS = [
   { name: 'close-up', azimuth: 25, elevation: 8, zoom: 2.6 },
   { name: 'back', azimuth: 205, elevation: 12, zoom: 1 },
 ];
-const LOOKS = [
-  { label: 'plain', look: { enabled: false, base: '#9aa0a8' } },
-  { label: 'primed and washed', look: { enabled: true, base: '#9aa0a8' } },
-  { label: 'bone base coat', look: { enabled: true, base: '#c9b994' } },
-];
 
-const files = corpusFiles();
+const args = process.argv.slice(2);
+const baked = args.includes('--baked');
+const wanted = args.filter((arg) => !arg.startsWith('--'));
+const files = corpusFiles().filter(
+  (file) => wanted.length === 0 || wanted.some((part) => file.includes(part)),
+);
 if (files.length === 0) throw new Error('No STL files in corpus/');
 mkdirSync(OUT, { recursive: true });
 
@@ -36,30 +39,36 @@ await new Promise((resolve) => setTimeout(resolve, 2500));
 const browser = await chromium.launch({ channel: 'chrome', headless: false });
 try {
   const page = await browser.newPage({ viewport: { width: 760, height: 900 } });
-  await page.goto(`http://localhost:${PORT}/?bake=off&ask=off`);
+  await page.goto(`http://localhost:${PORT}/?ask=off${baked ? '' : '&bake=off'}`);
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   // The panel and the level chips lie over the canvas: hidden, so the pictures show the mini alone.
   await page.addStyleTag({ content: '#panel, #levels { display: none }' });
+  // The presets are the page's: its buttons say which there are.
+  const presets = await page.$$eval('#look-presets button', (buttons) =>
+    buttons.map((button) => ({ id: button.dataset.preset, label: button.textContent })),
+  );
+  const LOOKS = [{ id: presets[0].id, label: 'plain', off: true }, ...presets];
 
   for (const file of files) {
     const name = basename(file, '.stl');
     await page.evaluate(() => (window.__mt.state.stats = null));
     await page.setInputFiles('#file', join('corpus', file));
     await page.waitForFunction(() => window.__mt.state.stats && !window.__mt.state.busy, null, {
-      timeout: 120_000,
+      timeout: baked ? 600_000 : 120_000,
     });
     const stats = await page.evaluate(() => window.__mt.state.stats);
     await page.evaluate((level) => window.__mt.showLevel(level), TABLE_LEVEL);
 
     const shots = [];
     for (const view of VIEWS) {
-      for (const { label, look } of LOOKS) {
+      for (const { id, label, off } of LOOKS) {
         await page.evaluate(
-          ([l, v]) => {
-            window.__mt.setLook(l);
+          ([preset, plain, v]) => {
+            window.__mt.setLookPreset(preset);
+            if (plain) window.__mt.setLook({ enabled: false });
             window.__mt.setCamera(v.azimuth, v.elevation, v.zoom);
           },
-          [look, view],
+          [id, off === true, view],
         );
         await page.waitForTimeout(350);
         const png = await page.locator('#viewport').screenshot();
@@ -69,7 +78,7 @@ try {
 
     const table = stats.lods[TABLE_LEVEL - 1];
     const sheet = await browser.newPage({
-      viewport: { width: 380 * LOOKS.length + 20, height: 100 },
+      viewport: { width: 300 * LOOKS.length + 20, height: 100 },
     });
     await sheet.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
       <h3 style="margin:0 0 8px">${name}: table level, ${table.triangles.toLocaleString()} triangles</h3>
