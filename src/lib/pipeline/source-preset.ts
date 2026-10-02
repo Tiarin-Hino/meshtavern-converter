@@ -32,7 +32,7 @@ export const SOURCE_PRESETS: readonly SourcePreset[] = [
     scale: 1,
     up: '+z',
     source:
-      'The convention of 3D printing: slicers read STL as millimetres and build along Z; files shared for printing follow it.',
+      'PrusaSlicer reads STL in millimetres ("The internal unit of PrusaSlicer is a millimeter", src/slic3r/GUI/Plater.cpp, 2.8.1) and Z is the height above its bed (the "Z offset" setting, src/libslic3r/PrintConfig.cpp).',
   },
   {
     id: 'scene-m-z',
@@ -41,7 +41,7 @@ export const SOURCE_PRESETS: readonly SourcePreset[] = [
     scale: 1,
     up: '+z',
     source:
-      'A Z-up modelling tool whose default scene unit is the metre, exported without a scale factor.',
+      'Blender exports STL at Scale 1.0, Scene Unit off, Up Z (source/blender/editors/io/io_stl_ops.cc, 4.2.0), and a new scene is metric at unit scale 1, a metre per unit (source/blender/blenkernel/intern/scene.cc).',
   },
   {
     id: 'scene-m-y',
@@ -49,7 +49,8 @@ export const SOURCE_PRESETS: readonly SourcePreset[] = [
     units: 'm',
     scale: 1,
     up: '+y',
-    source: 'The glTF 2.0 specification: units are metres and +Y is up.',
+    source:
+      'The glTF 2.0 specification, "Coordinate System and Units": "glTF defines +Y as up" and "The units for all linear distances are meters."',
   },
 ];
 
@@ -103,4 +104,17 @@ export function applyPreset(
     orientation: { ...orientationUnder(preset, orientation) },
     sizing: sizingUnder(preset, sizing),
   };
+}
+
+/** Whether two presets say the same, compared by value: an answer carries a copy. */
+export function samePreset(a: SourcePreset | undefined, b: SourcePreset | undefined): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.id === b.id &&
+    a.units === b.units &&
+    Object.is(a.scale, b.scale) &&
+    a.up === b.up &&
+    a.label === b.label &&
+    a.source === b.source
+  );
 }

@@ -107,6 +107,13 @@ import {
 import { shade } from './shade';
 import type { Vec3 } from './base';
 import { sizeMini, type BaseMeasurement, type Sizing, type SizingOptions } from './size';
+import {
+  checkSourcePreset,
+  orientationUnder,
+  samePreset,
+  sizingUnder,
+  type SourcePreset,
+} from './source-preset';
 import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
 import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
@@ -217,6 +224,8 @@ export interface UpChoices {
   parts?: PartsOptions;
   /** A pair placed by marks (#93): the meeting, in file coordinates. */
   placement?: PlacementOptions;
+  /** The source preset the conversion ended with (#100); the options above are what was chosen by hand. */
+  preset?: SourcePreset;
 }
 
 export type BakeSkipped =
@@ -275,6 +284,12 @@ export interface PipelineOptions {
   orientation?: OrientationOptions;
   /** Units, size, scale and plain base as the user chose them; the rest is guessed. */
   sizing?: SizingOptions;
+  /**
+   * A known export convention (#100): its up axis, units and scale lie under `orientation`,
+   * `baseOrientation` and `sizing`, field by field; what is chosen there wins. Its axis counts as
+   * a chosen one. Left out: everything is detected and guessed, the path of today.
+   */
+  preset?: SourcePreset;
   /**
    * Texture size for baked detail maps on the table level: 'auto' (the default) picks one
    * from the mini's surface area (see bake-policy.ts). A size in texels, or 0 to skip
@@ -907,6 +922,7 @@ export async function runPipeline(
     onProgress = () => {},
     orientation: orientationOptions = {},
     sizing: sizingOptions = {},
+    preset: presetOption,
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
     maxTextureSize,
@@ -921,6 +937,12 @@ export async function runPipeline(
     ask: askOptions = {},
   }: PipelineOptions = {},
 ): Promise<ConversionResult> {
+  if (presetOption) checkSourcePreset(presetOption);
+  /** The preset as it is now: an up answer may set or clear it (#100). */
+  let presetChoice = presetOption;
+  /** Orientation options as the steps see them: the preset's axis under what was chosen by hand. */
+  const under = (options: OrientationOptions): OrientationOptions =>
+    orientationUnder(presetChoice, options);
   const files = [stl, ...(secondStl ? [secondStl] : []), ...moreStl];
   if (files.length > MAX_PARTS)
     throw new ConversionProblem('too-many-files', `${files.length} files`);
@@ -1375,11 +1397,12 @@ export async function runPipeline(
   /** How an up question ended: confirmed, or the roles changed (a swap, or another base named). */
   type Answered<T> =
     | { standing: T; options: OrientationOptions; restart: null }
-    | { restart: { swap: true } | { baseFile: number | null } };
+    | { restart: { swap: true } | { baseFile: number | null } | { preset: true } };
   /**
    * Asks which way is up about one file, or a figure's parts together, until the answer confirms
    * (#92 design note §4): each answer is resolved from scratch by `resolve`, inside the orient
-   * step's time; waiting is in no step. Returns early when the answer changes the roles.
+   * step's time; waiting is in no step. Returns early when the answer changes the roles, or
+   * the preset when `presetRestarts` (a pair's figure: its base comes from the same tool).
    */
   const askAbout = async <T extends Standing>(
     ask: AskUp,
@@ -1390,6 +1413,7 @@ export async function runPipeline(
     proposal: T,
     options: OrientationOptions,
     resolve: (options: OrientationOptions) => T,
+    presetRestarts = false,
   ): Promise<Answered<T>> => {
     let start: number | undefined;
     let standing = proposal;
@@ -1416,7 +1440,15 @@ export async function runPipeline(
       if (answer.swap) return { restart: { swap: true } };
       if (answer.baseFile !== undefined && answer.baseFile !== (pairing?.baseFile ?? null))
         return { restart: { baseFile: answer.baseFile } };
-      if (!sameOrientationOptions(answer.orientation, options)) {
+      // Every answer is resolved under the preset as it is now (#100 design note §4).
+      const preset = answer.preset === undefined ? presetChoice : (answer.preset ?? undefined);
+      const presetChanged = !samePreset(preset, presetChoice);
+      if (presetChanged) {
+        if (preset) checkSourcePreset(preset);
+        presetChoice = preset;
+        if (presetRestarts) return { restart: { preset: true } };
+      }
+      if (presetChanged || !sameOrientationOptions(answer.orientation, options)) {
         standing = resume('orient', () => resolve(answer.orientation));
         options = answer.orientation;
       }
@@ -1457,7 +1489,7 @@ export async function runPipeline(
     const mesh = meshes[0]!;
     let one = run(
       'orient',
-      () => standOne(mesh, orientationOptions),
+      () => standOne(mesh, under(orientationOptions)),
       (o) => orientedBytes(o.figure, null),
     );
     if (askUp && askFigure) {
@@ -1470,7 +1502,7 @@ export async function runPipeline(
         null,
         one,
         orientationOptions,
-        (o) => standOne(mesh, o, pass),
+        (o) => standOne(mesh, under(o), pass),
       );
       if (answered.restart)
         throw new ConversionProblem('unexpected', 'the roles of a single file changed');
@@ -1505,7 +1537,7 @@ export async function runPipeline(
       const { source, pairing } = prepared;
       const one = run(
         'orient',
-        () => standOne(source.mesh, orientationOptions, source.pass),
+        () => standOne(source.mesh, under(orientationOptions), source.pass),
         (o) => orientedBytes(o.figure, null),
       );
       oriented = {
@@ -1524,7 +1556,13 @@ export async function runPipeline(
             prepared?.pairing ?? guessRoles(standing.shapes, pairingOptions, 'refuse');
           if (!hasBase(pairing)) throw new ConversionProblem('unexpected', 'roles without a base');
           const source = prepared?.source ?? figureSourceOf(standing, pairing, joints);
-          return orientFiles(standing, pairing, source, orientationOptions, baseOrientationOptions);
+          return orientFiles(
+            standing,
+            pairing,
+            source,
+            under(orientationOptions),
+            under(baseOrientationOptions),
+          );
         },
         (o) => orientedBytes(o.figure, o.base),
       );
@@ -1545,6 +1583,8 @@ export async function runPipeline(
     let baseChoice = baseOrientationOptions;
     let figureChoice = orientationOptions;
     let jointsChoice = joints;
+    /** The figure as its parts were put together, kept when only the preset changed. */
+    let keptSource: FigureSource | null = null;
     /** The roles changed at a question: everything chosen about the files starts again. */
     const restartWith = (pairing: PairingOptions): void => {
       pairingChoice = pairing;
@@ -1558,7 +1598,10 @@ export async function runPipeline(
       );
       const inParts = figureFiles(guessed).length > 1;
       let source: FigureSource;
-      if (inParts && askTheParts) {
+      if (keptSource) {
+        source = keptSource;
+        keptSource = null;
+      } else if (inParts && askTheParts) {
         const answered = await askParts(ask, standing, guessed, jointsChoice);
         source = answered.source;
         jointsChoice = answered.joints;
@@ -1576,7 +1619,7 @@ export async function runPipeline(
       };
       if (!hasBase(guessed)) {
         // Parts without a base file: asked about like one file, their union (#93); no meeting.
-        let one = within('orient', () => standOne(source.mesh, figureChoice, source.pass));
+        let one = within('orient', () => standOne(source.mesh, under(figureChoice), source.pass));
         if (askFigure) {
           const answered = await askAbout(
             ask,
@@ -1586,10 +1629,11 @@ export async function runPipeline(
             guessed,
             one,
             figureChoice,
-            (o) => standOne(source.mesh, o, source.pass),
+            (o) => standOne(source.mesh, under(o), source.pass),
           );
           if (answered.restart) {
-            restartWith('swap' in answered.restart ? {} : { baseFile: answered.restart.baseFile });
+            const { restart } = answered;
+            restartWith('baseFile' in restart ? { baseFile: restart.baseFile } : {});
             continue;
           }
           one = answered.standing;
@@ -1609,7 +1653,7 @@ export async function runPipeline(
         };
         break;
       }
-      let base = within('orient', () => standBase(standing, guessed, baseChoice));
+      let base = within('orient', () => standBase(standing, guessed, under(baseChoice)));
       const baseFile = base.pairing.baseFile;
       const { warnings } = base.pairing;
       if (askBase) {
@@ -1625,13 +1669,14 @@ export async function runPipeline(
           base.pairing,
           base,
           baseChoice,
-          (o) => standBase(standing, guessed, o),
+          (o) => standBase(standing, guessed, under(o)),
         );
         if (answered.restart) {
+          const { restart } = answered;
           restartWith(
-            'swap' in answered.restart
-              ? swapped(pairingChoice, proposal.pairing)
-              : { baseFile: answered.restart.baseFile },
+            'baseFile' in restart
+              ? { baseFile: restart.baseFile }
+              : swapped(pairingChoice, proposal.pairing),
           );
           continue;
         }
@@ -1644,7 +1689,9 @@ export async function runPipeline(
         }
       }
       const confirmedBase = base;
-      let figure = resume('orient', () => standFigure(source, confirmedBase, figureChoice, true));
+      let figure = resume('orient', () =>
+        standFigure(source, confirmedBase, under(figureChoice), true),
+      );
       if (askFigure) {
         const top = figure.decided?.top;
         const answered = await askAbout(
@@ -1655,13 +1702,22 @@ export async function runPipeline(
           confirmedBase.pairing,
           figure,
           figureChoice,
-          (o) => standFigure(source, confirmedBase, o, true, top),
+          (o) => standFigure(source, confirmedBase, under(o), true, top),
+          true,
         );
         if (answered.restart) {
+          const { restart } = answered;
+          if ('preset' in restart) {
+            // The base comes from the same tool: it is asked again under the new preset, the
+            // parts as they were put together.
+            keptSource = source;
+            figureChoice = {};
+            continue;
+          }
           restartWith(
-            'swap' in answered.restart
-              ? swapped(pairingChoice, confirmedBase.pairing)
-              : { baseFile: answered.restart.baseFile },
+            'baseFile' in restart
+              ? { baseFile: restart.baseFile }
+              : swapped(pairingChoice, confirmedBase.pairing),
           );
           continue;
         }
@@ -1763,6 +1819,7 @@ export async function runPipeline(
     };
   }
 
+  if (presetChoice) choices = { ...choices, preset: presetChoice };
   // The trees and patches of the questions are not needed any more.
   trees = null;
   for (const mesh of meshes) dropSurfaceIndex(mesh);
@@ -1770,7 +1827,10 @@ export async function runPipeline(
   const placed = run(
     'size',
     // A figure on its base file has its base: the plain one is never added.
-    () => sizeMini(toSize, oriented.base ? { ...sizingOptions, plainBase: false } : sizingOptions),
+    () => {
+      const sizing = sizingUnder(presetChoice, sizingOptions);
+      return sizeMini(toSize, oriented.base ? { ...sizing, plainBase: false } : sizing);
+    },
     // A scaled mesh is a copy; the oriented one is dropped once this step is done.
     (s) => fileBytes + meshBytes(toSize.mesh) + (s.mesh === toSize.mesh ? 0 : meshBytes(s.mesh)),
   );
