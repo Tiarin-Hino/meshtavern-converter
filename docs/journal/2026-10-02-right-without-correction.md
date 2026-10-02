@@ -3,7 +3,7 @@ title: How often a mini is right without a correction
 date: 2026-10-02
 phase: 2
 issues: [101]
-prs: []
+prs: [106]
 topics: [measurement, corpus, orientation, sizing]
 ---
 
