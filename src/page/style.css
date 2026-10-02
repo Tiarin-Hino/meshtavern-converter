@@ -460,6 +460,25 @@ body[data-state='asking'] #cancel {
   color: var(--muted);
 }
 
+#look-presets {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The stripe is the preset's base coat. */
+#look-presets button {
+  border-left: 10px solid var(--coat);
+  font-size: 0.85rem;
+}
+
+#look-presets button[aria-pressed='true'] {
+  border-color: var(--accent);
+  border-left-color: var(--coat);
+  background: var(--accent-soft);
+}
+
 #look input[type='range'] {
   width: 90px;
 }

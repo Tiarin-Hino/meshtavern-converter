@@ -3,7 +3,7 @@ import { MeshoptDecoder } from 'meshoptimizer';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { generateBumpySheet } from './generate';
 import { encodeGlb, glbEncoderReady } from './glb';
-import { DEFAULT_LOOK, vertexColours } from './look';
+import { DEFAULT_LOOK, LOOK_PRESETS, vertexColours, type Look } from './look';
 import { computeVertexNormals, weldVertices, type IndexedMesh } from './mesh';
 import { shade } from './shade';
 import type { Orientation } from './orient';
@@ -127,6 +127,7 @@ describe('encodeGlb, with the sizing', () => {
         baseDiameterMm: 50,
         units: 'in',
         scale: 25.4,
+        look: { preset: 'primer', ...DEFAULT_LOOK },
       });
       expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
     },
@@ -146,6 +147,15 @@ describe('encodeGlb, with the sizing', () => {
     expect(block.rotation).toEqual(orientation.rotation);
     expect(block).toMatchObject({ size: 'large', footprintSquares: 2 });
     expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+  });
+
+  it('records the look and the preset it is, or null for a look of its own', () => {
+    const steel = LOOK_PRESETS.find((preset) => preset.id === 'steel')!.look;
+    const block = (look: Look) =>
+      parse(encodeGlb(sheet, { ...options, compact: false, sizing, look })).json.extras.meshtavern!;
+    expect(block(steel).look).toEqual({ preset: 'steel', ...steel });
+    const own = { ...steel, base: '#335577' };
+    expect(block(own).look).toEqual({ preset: null, ...own });
   });
 
   it('writes no block without a sizing', () => {

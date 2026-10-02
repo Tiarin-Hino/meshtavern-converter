@@ -114,7 +114,15 @@ export {
 } from './pipeline/size';
 export { UNIT_FACTORS } from './pipeline/units';
 // The look: applied when drawing and exporting, never inside the conversion.
-export { DEFAULT_LOOK, vertexColours, type Look } from './pipeline/look';
+export {
+  DEFAULT_LOOK,
+  LOOK_PRESETS,
+  presetOf,
+  vertexColours,
+  type Look,
+  type LookPreset,
+  type LookPresetId,
+} from './pipeline/look';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';

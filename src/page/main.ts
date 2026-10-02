@@ -3,7 +3,10 @@ import {
   encodeGlb,
   glbEncoderReady,
   DEFAULT_LOOK,
+  LOOK_PRESETS,
+  presetOf,
   type Look,
+  type LookPresetId,
   type IndexedMesh,
   memoryBudgetBytes,
   UP_AXES,
@@ -127,6 +130,8 @@ interface AppState {
   /** Number of minis in the stress scene; 0 when a single mini is shown. */
   stressCount: number;
   look: Look;
+  /** The preset the look is; null once a control was moved away from all of them (#45). */
+  lookPreset: LookPresetId | null;
   /** Set after a GLB was opened: what the file contained. */
   imported: { triangles: number; sizeMm: [number, number, number] } | null;
   /** Figures of the baked table level. Null when the mini has the per-vertex look: see `stats.bakeSkipped`. */
@@ -197,6 +202,8 @@ declare global {
       setWireframe: (wireframe: boolean) => void;
       /** Changes some or all look settings and re-colours what is on screen. */
       setLook: (changes: Partial<Look>) => void;
+      /** Sets every look control to a preset's values, as its button does (#45). */
+      setLookPreset: (id: LookPresetId) => void;
       /** Shows the table level with baked maps (true) or with per-vertex data (false). */
       showBaked: (on: boolean) => void;
       /** Stops the running conversion. */
@@ -427,6 +434,7 @@ const state: AppState = {
   perf: null,
   stressCount: 0,
   look: { ...DEFAULT_LOOK },
+  lookPreset: presetOf(DEFAULT_LOOK),
   imported: null,
   baked: null,
   showingBaked: false,
@@ -751,6 +759,18 @@ const lookInputs = {
   edges: document.querySelector<HTMLInputElement>('#look-edges')!,
 };
 
+// The starting points (#45): a button per preset, pressed while the controls are at its values.
+const presetButtons = LOOK_PRESETS.map((preset) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = preset.label;
+  button.dataset.preset = preset.id;
+  button.style.setProperty('--coat', preset.look.base);
+  button.addEventListener('click', () => setLookPreset(preset.id));
+  return button;
+});
+document.querySelector<HTMLElement>('#look-presets')!.append(...presetButtons);
+
 function setLook(changes: Partial<Look>): void {
   Object.assign(state.look, changes);
   lookInputs.enabled.checked = state.look.enabled;
@@ -758,7 +778,17 @@ function setLook(changes: Partial<Look>): void {
   lookInputs.occlusion.value = String(state.look.occlusion);
   lookInputs.wash.value = String(state.look.wash);
   lookInputs.edges.value = String(state.look.edges);
+  state.lookPreset = presetOf(state.look);
+  for (const button of presetButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.preset === state.lookPreset));
+  }
   viewer.setLook(state.look);
+}
+
+function setLookPreset(id: LookPresetId): void {
+  const preset = LOOK_PRESETS.find((candidate) => candidate.id === id);
+  if (!preset) throw new Error(`No look preset "${id}"`);
+  setLook(preset.look);
 }
 
 for (const input of Object.values(lookInputs)) {
@@ -2281,6 +2311,7 @@ window.__mt = {
   setCamera: (azimuthDeg, elevationDeg, zoom) => viewer.setCamera(azimuthDeg, elevationDeg, zoom),
   setWireframe: (wireframe) => viewer.setWireframe(wireframe),
   setLook,
+  setLookPreset,
   showBaked: (on) => showLevel(TABLE_LEVEL, false, on),
   cancel: () => converter.cancel(),
   detailKtx2: () => detailKtx2,

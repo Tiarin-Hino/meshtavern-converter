@@ -330,6 +330,52 @@ test('applies the primed-and-washed look and lets the user adjust it', async ({
   expect(await page.evaluate(() => window.__mt.state.look.enabled)).toBe(false);
 });
 
+test('offers look presets, and the export says which one the mini has', async ({
+  page,
+}, testInfo) => {
+  await page.evaluate(() => window.__mt.loadGenerated(200));
+  const presets = page.getByRole('group', { name: 'Starting points' }).getByRole('button');
+  expect(await presets.count()).toBeGreaterThanOrEqual(4);
+  expect(await presets.count()).toBeLessThanOrEqual(6);
+  expect(await page.evaluate(() => window.__mt.state.lookPreset)).toBe('primer');
+  await expect(presets.filter({ hasText: 'Grey primer' })).toHaveAttribute('aria-pressed', 'true');
+
+  for (const name of await presets.allTextContents()) {
+    await presets.filter({ hasText: name }).click();
+    await page.waitForTimeout(300);
+    await testInfo.attach(`preset-${name}`, {
+      body: await page.locator('#viewport').screenshot(),
+      contentType: 'image/png',
+    });
+  }
+
+  // One click sets every control, and the export carries the choice.
+  await presets.filter({ hasText: 'Bone' }).click();
+  await expect(page.getByLabel('Base coat')).toHaveValue('#d8cdb0');
+  await expect(presets.filter({ hasText: 'Bone' })).toHaveAttribute('aria-pressed', 'true');
+  const lookIn = (level: number) =>
+    page.evaluate(async (exported) => {
+      const glb = await window.__mt.exportGlb(exported, false);
+      const jsonLength = new DataView(glb).getUint32(12, true);
+      const json = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, jsonLength)));
+      return json.extras.meshtavern.look as Record<string, unknown>;
+    }, level);
+  expect(await lookIn(2)).toEqual({
+    preset: 'bone',
+    enabled: true,
+    base: '#d8cdb0',
+    occlusion: 0.8,
+    wash: 0.75,
+    edges: 0.3,
+  });
+
+  // A control moved away from the preset: no preset, and the export says so with the values.
+  await page.getByRole('slider', { name: 'Wash' }).fill('0.2');
+  expect(await page.evaluate(() => window.__mt.state.lookPreset)).toBeNull();
+  await expect(presets.filter({ hasText: 'Bone' })).toHaveAttribute('aria-pressed', 'false');
+  expect(await lookIn(3)).toMatchObject({ preset: null, base: '#d8cdb0', wash: 0.2 });
+});
+
 test('exports a level as GLB and opens the file again', async ({ page }, testInfo) => {
   await page.evaluate(() => window.__mt.loadGenerated(200));
   const result = await page.evaluate(async () => {
@@ -357,6 +403,15 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     baseDiameterMm: 32,
     units: 'mm',
     scale: 1,
+    // The look the colours were made with: the default preset.
+    look: {
+      preset: 'primer',
+      enabled: true,
+      base: '#9aa0a8',
+      occlusion: 0.75,
+      wash: 0.6,
+      edges: 0.45,
+    },
     // The generated sheet is Y-up in its file: turned by nothing.
     rotation: [0, 0, 0, 1],
   });

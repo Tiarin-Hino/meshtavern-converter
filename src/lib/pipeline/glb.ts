@@ -1,5 +1,5 @@
 import { MeshoptEncoder } from 'meshoptimizer';
-import { vertexColours, type Look } from './look';
+import { presetOf, vertexColours, type Look } from './look';
 import { computeVertexNormals, type IndexedMesh } from './mesh';
 import { GRID_SQUARE_MM, type Sizing } from './size';
 import type { Orientation } from './orient';
@@ -27,7 +27,9 @@ export interface GlbOptions {
   /**
    * The mini's size on the table. When given, `extras.meshtavern` carries what the table
    * needs to place it: grid square, creature size, footprint in squares, base diameter,
-   * and the units and scale the file was read with.
+   * and the units and scale the file was read with, and the look the colours were made
+   * with (`look`: its values and the preset they are, or null), so the table can show the
+   * choice and offer it again.
    */
   sizing?: Sizing;
   /**
@@ -181,6 +183,7 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
           baseDiameterMm: Number(options.sizing.baseDiameterMm.toFixed(3)),
           units: options.sizing.units,
           scale: options.sizing.scale,
+          look: { preset: presetOf(options.look), ...options.look },
           // File coordinates → the vertex data's Y-up frame, x y z w: the vertices are
           // already turned by it.
           ...(options.orientation && { rotation: options.orientation.rotation }),
