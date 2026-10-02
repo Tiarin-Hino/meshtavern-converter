@@ -28,6 +28,8 @@ Issue #109, a release blocker found in the design pass of the table view (the ta
 
 - **Problem.** "Byte for byte as before" cannot be pinned by a permanent test without freezing the look, the test mesh and the codec's version in a hash. **Fix:** a one-off comparison while building: the encoder from `main` and the new one, on the generated sheet and the generated figure, with and without shading data, plain and compact: eight files, identical. Permanently, the baseline's per-level sizes (unchanged) and a test that a mesh without `uvs` still has five accessors and no `TEXCOORD_0`.
 - **Problem.** `npm run check` stops at the format check on the development PC when a large archive lies in the repo folder (Prettier cannot read it). **Cause:** a local, untracked file, nothing in the repo. **Fix:** none here; the steps were run one by one.
+- **Problem.** The first e2e check of the unwrapped file failed: the page had no baked mini. **Cause:** it was added to the GLB round-trip test, whose file opens the page with `?bake=off`. **Fix:** the check moved into the test that bakes a mini.
+- **Problem.** `npm run e2e` on the development PC ended with 10 of 48 tests timed out (16 in a first run, while other scripts ran beside it), a different set each time and none of them touched here. **Cause:** not found; the tests run in parallel and the ones that fail are conversions waiting for minutes. All ten pass when run one at a time (`--workers=1`, 2.2 minutes). **Fix:** none here; CI is the full parallel run that counts for this PR.
 
 ## Numbers
 
