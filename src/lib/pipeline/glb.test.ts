@@ -18,7 +18,15 @@ shade(sheet);
 const options = { name: 'test mini', look: DEFAULT_LOOK };
 
 interface Gltf {
-  accessors: { bufferView: number; byteOffset?: number; count: number; max?: number[] }[];
+  accessors: {
+    bufferView: number;
+    byteOffset?: number;
+    count: number;
+    max?: number[];
+    componentType: number;
+    type: string;
+    normalized?: boolean;
+  }[];
   bufferViews: {
     byteLength: number;
     byteStride?: number;
@@ -212,6 +220,109 @@ describe('encodeGlb, compact', () => {
     const stepMm = node.scale[0]! * 1000;
     decodedX.forEach((x, i) => expect(Math.abs(x - sourceX[i]!)).toBeLessThanOrEqual(stepMm));
     expect(Math.max(...indexData)).toBe(json.accessors[1]!.count - 1);
+  });
+});
+
+describe('encodeGlb, with texture coordinates', () => {
+  // Texture coordinates that follow from the position, so a vertex can be checked after the
+  // compact variant has renumbered it: u along x, v along the sheet's other long side.
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  sheet.positions.forEach((value, i) => {
+    low[i % 3] = Math.min(low[i % 3]!, value);
+    high[i % 3] = Math.max(high[i % 3]!, value);
+  });
+  const side = high[1]! - low[1]! > high[2]! - low[2]! ? 1 : 2;
+  const uvOf = (x: number, other: number): [number, number] => [
+    (x - low[0]!) / (high[0]! - low[0]!),
+    (other - low[side]!) / (high[side]! - low[side]!),
+  ];
+  const vertexCount = sheet.positions.length / 3;
+  const uvs = new Float32Array(vertexCount * 2);
+  for (let v = 0; v < vertexCount; v++) {
+    uvs.set(uvOf(sheet.positions[v * 3]!, sheet.positions[v * 3 + side]!), v * 2);
+  }
+  const unwrapped: IndexedMesh = { ...sheet, uvs };
+
+  it.each([false, true])(
+    'writes TEXCOORD_0 after the other attributes and passes the validator (compact: %s)',
+    async (compact) => {
+      const glb = encodeGlb(unwrapped, { ...options, compact });
+      expect(parse(glb).json.meshes[0]!.primitives[0]!.attributes).toEqual({
+        POSITION: 1,
+        NORMAL: 2,
+        COLOR_0: 3,
+        _SHADING: 4,
+        TEXCOORD_0: 5,
+      });
+      expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+    },
+  );
+
+  it('stores them as floats in the plain variant, unchanged', () => {
+    const { json, bin } = parse(encodeGlb(unwrapped, { ...options, compact: false }));
+    const accessor = json.accessors[5]!;
+    expect(accessor).toMatchObject({ componentType: 5126, type: 'VEC2', count: vertexCount });
+    const view = json.bufferViews[accessor.bufferView]!;
+    const stored = new Float32Array(
+      bin.slice(view.byteOffset, view.byteOffset + view.byteLength).buffer,
+    );
+    expect(Array.from(stored)).toEqual(Array.from(uvs));
+  });
+
+  it('stores them as normalised 16-bit in the compact variant, each with its vertex', () => {
+    const { json, bin } = parse(encodeGlb(unwrapped, { ...options, compact: true }));
+    const decode = (accessorIndex: number): DataView => {
+      const extension =
+        json.bufferViews[json.accessors[accessorIndex]!.bufferView]!.extensions!
+          .EXT_meshopt_compression;
+      const out = new Uint8Array(extension.count * extension.byteStride);
+      MeshoptDecoder.decodeGltfBuffer(
+        out,
+        extension.count,
+        extension.byteStride,
+        bin.subarray(extension.byteOffset, extension.byteOffset + extension.byteLength),
+        extension.mode,
+      );
+      return new DataView(out.buffer);
+    };
+    expect(json.accessors[5]).toMatchObject({
+      componentType: 5123,
+      normalized: true,
+      type: 'VEC2',
+      count: vertexCount,
+    });
+    const node = json.nodes[0]!;
+    const positions = decode(1);
+    const coordinates = decode(5);
+    const mm = (v: number, axis: number): number =>
+      (positions.getUint16(v * 8 + axis * 2, true) * node.scale[axis]! + node.translation![axis]!) *
+      1000;
+    // The position is quantised too: allow its step, as a share of the sheet's side, and the
+    // texture coordinate's own.
+    const tolerance = (node.scale[0]! * 1000) / (high[0]! - low[0]!) + 1 / 65535;
+    for (let v = 0; v < vertexCount; v++) {
+      const [u, w] = uvOf(mm(v, 0), mm(v, side));
+      expect(Math.abs(coordinates.getUint16(v * 4, true) / 65535 - u)).toBeLessThan(tolerance);
+      expect(Math.abs(coordinates.getUint16(v * 4 + 2, true) / 65535 - w)).toBeLessThan(tolerance);
+    }
+  });
+
+  it('takes the place of the shading data when the mesh has none', async () => {
+    const bare = { positions: sheet.positions, indices: sheet.indices, uvs };
+    for (const compact of [false, true]) {
+      const glb = encodeGlb(bare, { ...options, compact });
+      expect(parse(glb).json.meshes[0]!.primitives[0]!.attributes.TEXCOORD_0).toBe(4);
+      expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+    }
+  });
+
+  it('leaves a mesh without them as it was', () => {
+    for (const compact of [false, true]) {
+      const json = parse(encodeGlb(sheet, { ...options, compact })).json;
+      expect(json.accessors).toHaveLength(5);
+      expect(json.meshes[0]!.primitives[0]!.attributes).not.toHaveProperty('TEXCOORD_0');
+    }
   });
 });
 

@@ -18,6 +18,11 @@ import type { Orientation } from './orient';
  * mini without the source mesh. glTF wants vertex data on 4-byte boundaries, hence one
  * padded two-component attribute instead of two single bytes. glTF is in metres and
  * our meshes are in millimetres; the node's scale converts, the vertex data stays in mm.
+ *
+ * An unwrapped mesh (`uvs`, the baked table level) also carries its texture coordinates as
+ * `TEXCOORD_0`, exactly as the unwrap made them, so the KTX2 detail texture baked for it can
+ * be applied to the loaded file (issue #109): floats in the plain variant, normalised 16-bit
+ * in the compact one. The texture itself is not in the file and no material refers to it.
  */
 export interface GlbOptions {
   /** Shown as the node and mesh name in other tools. */
@@ -85,6 +90,7 @@ const asBytes = (array: ArrayBufferView): Uint8Array =>
 
 const toByte = (value: number): number => Math.round(Math.max(0, Math.min(1, value)) * 255);
 const toSignedByte = (value: number): number => Math.round(Math.max(-1, Math.min(1, value)) * 127);
+const toShort = (value: number): number => Math.round(Math.max(0, Math.min(1, value)) * 65535);
 
 function bounds(positions: Float32Array): { min: number[]; max: number[] } {
   const min = [Infinity, Infinity, Infinity];
@@ -132,6 +138,7 @@ function reordered(mesh: IndexedMesh, remap: Uint32Array, vertexCount: number): 
     normals: move(mesh.normals, 3),
     cavity: move(mesh.cavity, 1),
     occlusion: move(mesh.occlusion, 1),
+    uvs: move(mesh.uvs, 2),
   };
 }
 
@@ -194,12 +201,14 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
   };
 }
 
-const primitive = (hasShading: boolean): Json => ({
+/** The accessors follow in this order; texture coordinates come last, after the shading if any. */
+const primitive = (hasShading: boolean, hasUvs: boolean): Json => ({
   attributes: {
     POSITION: 1,
     NORMAL: 2,
     COLOR_0: 3,
     ...(hasShading ? { _SHADING: 4 } : {}),
+    ...(hasUvs ? { TEXCOORD_0: hasShading ? 5 : 4 } : {}),
   },
   indices: 0,
   material: 0,
@@ -233,6 +242,7 @@ function colourBytes(mesh: IndexedMesh, look: Look): Uint8Array {
 function encodePlain(mesh: IndexedMesh, options: GlbOptions): ArrayBuffer {
   const vertexCount = mesh.positions.length / 3;
   const hasShading = Boolean(mesh.occlusion && mesh.cavity);
+  const hasUvs = Boolean(mesh.uvs);
   const bin = new Bin();
   const small = vertexCount <= 65535;
 
@@ -285,13 +295,21 @@ function encodePlain(mesh: IndexedMesh, options: GlbOptions): ArrayBuffer {
       type: 'VEC2',
     });
   }
+  if (mesh.uvs) {
+    accessors.push({
+      bufferView: view(asBytes(mesh.uvs), ARRAY_BUFFER),
+      componentType: FLOAT,
+      count: vertexCount,
+      type: 'VEC2',
+    });
+  }
 
   const json = document(
     options,
     mesh,
     { scale: [MM_TO_M, MM_TO_M, MM_TO_M] },
     {
-      meshes: [{ name: options.name, primitives: [primitive(hasShading)] }],
+      meshes: [{ name: options.name, primitives: [primitive(hasShading, hasUvs)] }],
       accessors,
       bufferViews: views,
       buffers: [{ byteLength: bin.length }],
@@ -306,6 +324,7 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
   const [remap, vertexCount] = MeshoptEncoder.reorderMesh(indices, true, true);
   const mesh = reordered({ ...source, indices }, remap, vertexCount);
   const hasShading = Boolean(mesh.occlusion && mesh.cavity);
+  const hasUvs = Boolean(mesh.uvs);
 
   // Positions as 16-bit steps of the largest extent; the node transform undoes it.
   const { min, max } = bounds(mesh.positions);
@@ -398,6 +417,19 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
       type: 'VEC2',
     });
   }
+  if (mesh.uvs) {
+    // 4 bytes per vertex: u and v as normalised u16, which KHR_mesh_quantization allows. The
+    // unwrap keeps both inside 0..1; one step is a small fraction of a texel at any texture size.
+    const uv = new Uint16Array(vertexCount * 2);
+    for (let i = 0; i < uv.length; i++) uv[i] = toShort(mesh.uvs[i]!);
+    accessors.push({
+      bufferView: view(asBytes(uv), vertexCount, 4, 'ATTRIBUTES'),
+      componentType: UNSIGNED_SHORT,
+      normalized: true,
+      count: vertexCount,
+      type: 'VEC2',
+    });
+  }
 
   const extensions = ['KHR_mesh_quantization', 'EXT_meshopt_compression'];
   const json = document(
@@ -410,7 +442,7 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
     {
       extensionsUsed: extensions,
       extensionsRequired: extensions,
-      meshes: [{ name: options.name, primitives: [primitive(hasShading)] }],
+      meshes: [{ name: options.name, primitives: [primitive(hasShading, hasUvs)] }],
       accessors,
       bufferViews: views,
       buffers: [

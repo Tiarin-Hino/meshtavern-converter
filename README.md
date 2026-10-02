@@ -68,8 +68,10 @@ export async function addMini(files: File[]) {
           ? { kind: 'up', orientation: await askPerson(question), confirm: true }
           : { kind: 'meet', ...(await markPerson(question)), confirm: true },
     );
-    const table = result.lods[BAKED_LEVEL]!; // the level the table shows; result.baked has its texture
-    const glb = encodeGlb(table.mesh, {
+    // The level the table shows. When it was baked, result.baked has its unwrapped mesh, whose
+    // texture coordinates go into the GLB as TEXCOORD_0, and the detail texture (ktx2) they are for.
+    const table = result.baked?.mesh ?? result.lods[BAKED_LEVEL]!.mesh;
+    const glb = encodeGlb(table, {
       name: file!.name,
       look: DEFAULT_LOOK,
       compact: false,

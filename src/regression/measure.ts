@@ -3,6 +3,7 @@ import {
   glbEncoderReady,
   DEFAULT_LOOK,
   type ConversionStats,
+  type IndexedMesh,
   type LodStats,
   type PlacementOptions,
   type SpotKind,
@@ -143,6 +144,9 @@ export interface CaseFigures extends Pick<
     utilisation: number;
     coverage: number;
     fallback: number;
+    /** Size of the baked level's file, with its texture coordinates (#109), plain and compressed. */
+    glbBytes: number;
+    compactGlbBytes: number;
   };
 }
 
@@ -158,8 +162,9 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
     placement: testCase.pair?.placement,
     moreStl: testCase.moreParts?.().map((soup) => encodeBinaryStl(soup)),
   });
-  const glb = (level: number, compact: boolean): number =>
-    encodeGlb(lods[level]!.mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;
+  const bytes = (mesh: IndexedMesh, compact: boolean): number =>
+    encodeGlb(mesh, { name: testCase.name, look: DEFAULT_LOOK, compact }).byteLength;
+  const glb = (level: number, compact: boolean): number => bytes(lods[level]!.mesh, compact);
   return {
     sourceTriangles: stats.sourceTriangles,
     triangles: stats.triangles,
@@ -193,6 +198,8 @@ export async function measureCase(testCase: RegressionCase): Promise<CaseFigures
       utilisation: baked.utilisation,
       coverage: baked.maps.coverage,
       fallback: baked.maps.fallback,
+      glbBytes: bytes(baked.mesh, false),
+      compactGlbBytes: bytes(baked.mesh, true),
     },
   };
 }
