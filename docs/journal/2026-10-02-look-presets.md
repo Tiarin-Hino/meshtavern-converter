@@ -3,7 +3,7 @@ title: Five starting points for the look
 date: 2026-10-02
 phase: 1
 issues: [45]
-prs: []
+prs: [102]
 topics: [look, export, ui]
 ---
 
@@ -33,7 +33,7 @@ None in the code. The export first seemed to need its own block for the look, wr
 
 ## Numbers
 
-Development PC, Chromium via Playwright: all 46 end-to-end tests have passed on this branch, 45 in the one-worker run (6.1 min) and the last on its own. `npm run check`: 503 unit tests pass. No pipeline times changed; none were measured.
+Development PC, Chromium via Playwright: all 46 end-to-end tests have passed on this branch, 45 in the one-worker run (6.1 min) and the last on its own. `npm run check`: 500 unit tests pass. No pipeline times changed; none were measured.
 
 ## Still open
 
