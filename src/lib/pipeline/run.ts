@@ -1709,8 +1709,9 @@ export async function runPipeline(
           const { restart } = answered;
           if ('preset' in restart) {
             // The base comes from the same tool: it is asked again under the new preset, the
-            // parts as they were put together.
+            // parts as they were put together. Picking a preset drops the axes it replaces.
             keptSource = source;
+            baseChoice = {};
             figureChoice = {};
             continue;
           }
