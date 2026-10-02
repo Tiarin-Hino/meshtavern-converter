@@ -6,6 +6,7 @@ import type { PlacementOptions } from '../pipeline/place';
 import type { ProblemCode } from '../pipeline/problems';
 import type { ConversionResult, Progress } from '../pipeline/run';
 import type { SizingOptions } from '../pipeline/size';
+import type { SourcePreset } from '../pipeline/source-preset';
 
 /** What the page may ask for. Everything is optional: the defaults give a baked, compressed mini. */
 export interface ConvertOptions {
@@ -13,6 +14,12 @@ export interface ConvertOptions {
   orientation?: OrientationOptions;
   /** Units, creature size, scale to a base diameter and a plain base; left out, they are guessed. */
   sizing?: SizingOptions;
+  /**
+   * A known export convention (#100): its up axis, units and scale where `orientation`,
+   * `baseOrientation` and `sizing` choose nothing; null or left out: none. A plain object,
+   * cloned to the worker.
+   */
+  preset?: SourcePreset | null;
   /** Development only: a fixed texture size for the baked detail maps, or 0 for none. Default: the size policy. */
   bake?: number | 'auto';
   /** Development only: UASTC effort, or null to keep the raw texture. Default: see compress.ts. */

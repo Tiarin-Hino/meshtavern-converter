@@ -150,6 +150,11 @@ export function sizeLabel(size: CreatureSize): string {
 export interface SizingOptions {
   /** Overrides the units guess. */
   units?: Units;
+  /**
+   * A factor on top of the units, default 1: for a tool whose unit is a multiple of one of ours
+   * (source presets, #100). `scaleToBaseMm` replaces it as it replaces the units.
+   */
+  scale?: number;
   /** Overrides the size suggestion. */
   size?: CreatureSize;
   /** Scale so the (measured or plain) base has this diameter in mm. */
@@ -171,13 +176,16 @@ export interface SizedMini {
  * plain base when asked and there is none, and works out the warnings. Only the options
  * scale anything; with none, a mm file keeps its measured size. `scaleToBaseMm` replaces
  * the units: it sets the base (or, without one, the figure's wider side) to that diameter
- * in mm, and a plain base added with it gets that diameter. The input is left untouched.
+ * in mm, and a plain base added with it gets that diameter. `scale` multiplies the units. The
+ * input is left untouched.
  *
  * @param placed What `orientAndPlace` returns, still in file units.
  */
 export function sizeMini(placed: PlacedMesh, options: SizingOptions = {}): SizedMini {
   const units = options.units ?? guessUnits(placed.sizeMm[1]);
-  const unitScale = UNIT_FACTORS[units];
+  const extra = options.scale ?? 1;
+  if (!(extra > 0 && Number.isFinite(extra))) throw new RangeError(`Cannot scale by ${extra}`);
+  const unitScale = extra === 1 ? UNIT_FACTORS[units] : UNIT_FACTORS[units] * extra;
 
   // Scaling to a base diameter measures the base, or the figure's wider side without one.
   const measuredInFile = placed.base?.diameterMm ?? Math.max(placed.sizeMm[0], placed.sizeMm[2]);

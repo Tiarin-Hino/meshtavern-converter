@@ -10,7 +10,6 @@ import {
   type IndexedMesh,
   memoryBudgetBytes,
   UP_AXES,
-  type Orientation,
   type OrientationOptions,
   type UpAxis,
   fromAxisAngle,
@@ -29,7 +28,9 @@ import {
   type Sizing,
   type SizingOptions,
   type Units,
-  UNIT_FACTORS,
+  SOURCE_PRESETS,
+  findSourcePreset,
+  type SourcePreset,
   readStlFile,
   ConversionCancelled,
   Converter,
@@ -62,6 +63,7 @@ import {
   describeAskedFile,
   describeAskPending,
   describeMini,
+  describeOrientation,
   describePairs,
   describeProgress,
   describePairWarning,
@@ -71,6 +73,7 @@ import {
   describePlacement,
   describeReady,
   describeTooManyFiles,
+  describeUnits,
   describeUp,
   describeWrongFile,
   LEVEL_LABELS,
@@ -132,6 +135,8 @@ interface AppState {
   look: Look;
   /** The preset the look is; null once a control was moved away from all of them (#45). */
   lookPreset: LookPresetId | null;
+  /** The id of the source preset in force (#100): at a question, what the select set; null for none. */
+  preset: string | null;
   /** Set after a GLB was opened: what the file contained. */
   imported: { triangles: number; sizeMm: [number, number, number] } | null;
   /** Figures of the baked table level. Null when the mini has the per-vertex look: see `stats.bakeSkipped`. */
@@ -219,6 +224,12 @@ declare global {
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
       /** Converts the last file again with a fixed up axis. */
       setUp: (up: UpAxis) => Promise<void>;
+      /**
+       * Picks a source preset by id, or none (#100): at an up question the question comes again
+       * standing the preset's way; after a conversion it converts again with it, asking nothing.
+       * Resolves when the question or the mini is back.
+       */
+      setPreset: (id: string | null) => Promise<void>;
       /**
        * At a question (#92): shows how the file stands with these options (left out: the
        * proposal). Resolves when the question that comes back is on screen.
@@ -357,7 +368,10 @@ const askInputs = {
   confirm: document.querySelector<HTMLButtonElement>('#ask-confirm')!,
   baseChoice: document.querySelector<HTMLElement>('#ask-base-choice')!,
   base: document.querySelector<HTMLSelectElement>('#ask-base')!,
+  source: document.querySelector<HTMLSelectElement>('#ask-source')!,
 };
+/** The source preset's select in Adjust; the question's is `askInputs.source` (#100). */
+const sourceSelect = document.querySelector<HTMLSelectElement>('#source')!;
 const meetInputs = {
   question: document.querySelector<HTMLElement>('#meet-question')!,
   parts: document.querySelector<HTMLElement>('#meet-parts')!,
@@ -435,6 +449,7 @@ const state: AppState = {
   stressCount: 0,
   look: { ...DEFAULT_LOOK },
   lookPreset: presetOf(DEFAULT_LOOK),
+  preset: null,
   imported: null,
   baked: null,
   showingBaked: false,
@@ -474,8 +489,11 @@ interface Choices {
   placement: PlacementOptions;
   /** A figure in parts (#93): the joints of the parts that lie apart in their files. */
   parts: PartsOptions;
+  /** The source preset (#100): laid under the choices above by the converter; null for none. */
+  preset: SourcePreset | null;
 }
 const noChoices = (): Choices => ({
+  preset: null,
   orientation: {},
   baseOrientation: {},
   sizing: {},
@@ -483,6 +501,12 @@ const noChoices = (): Choices => ({
   placement: {},
   parts: { joints: [] },
 });
+/** Whether the axis comes from the source preset: one is set, and these options choose no axis or turn. */
+const upFromPreset = (options: OrientationOptions): boolean =>
+  state.preset !== null && options.up === undefined && options.rotation === undefined;
+/** Whether the units come from the source preset: one is set, and no units were chosen by hand. */
+const unitsFromPreset = (): boolean =>
+  choices.preset !== null && choices.sizing.units === undefined;
 /** Whether an axis or turn was chosen, rather than left to the detection. */
 const chosen = (options: OrientationOptions): boolean =>
   options.up !== undefined || options.rotation !== undefined || options.setDown === true;
@@ -541,6 +565,7 @@ function render(): void {
           ? (importedName ?? name.replace(/\.stl(?=$| \+ )/gi, ''))
           : name;
   fileNameLine.textContent = name;
+  for (const select of [askInputs.source, sourceSelect]) select.value = state.preset ?? '';
   chooseAgain.textContent = state.page === 'error' ? COPY.chooseAnother : COPY.chooseFile;
   chooseButton.disabled = state.busy;
 }
@@ -549,9 +574,9 @@ const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)
 
 function showStats(stats: ConversionStats): void {
   const rows: [string, string][] = [
-    ['Up', describeOrientation(stats.orientation)],
+    ['Up', describeOrientation(stats.orientation, upFromPreset(choices.orientation))],
     ['Size', describeSize(stats.sizing)],
-    ['Units', describeUnits(stats.sizing)],
+    ['Units', describeUnits(stats.sizing, unitsFromPreset())],
     ...describePairRows(stats.pair),
     ['Dimensions', `${stats.sizeMm.map((mm) => mm.toFixed(1)).join(' × ')} mm`],
     ['Triangles', stats.triangles.toLocaleString()],
@@ -622,8 +647,6 @@ function describePairRows(pair: PairResult | null): [string, string][] {
   ];
 }
 
-const UNIT_NAMES: Record<Units, string> = { mm: 'mm', in: 'inches', m: 'metres' };
-
 /** "Medium (1×1) (suggested), base 32.0 mm round (measured)", for the figures. */
 function describeSize(sizing: Sizing): string {
   const method = sizing.sizeMethod === 'manual' ? 'chosen' : 'suggested';
@@ -635,14 +658,6 @@ function describeSize(sizing: Sizing): string {
   if (sizing.plainBase)
     return `${size}, plain base ${sizing.plainBase.diameterMm.toFixed(1)} mm (added)`;
   return `${size}, no base`;
-}
-
-/** "mm (guessed)", with the scale when the mini was scaled to a base diameter. */
-function describeUnits(sizing: Sizing): string {
-  const method = sizing.unitsMethod === 'manual' ? 'chosen' : 'guessed';
-  const units = `${UNIT_NAMES[sizing.units]} (${method})`;
-  const extra = sizing.scale / UNIT_FACTORS[sizing.units];
-  return Math.abs(extra - 1) < 1e-6 ? units : `${units}, scaled ×${extra.toFixed(3)}`;
 }
 
 /** The base diameter a warning offers to scale to; null when it offers none. */
@@ -810,6 +825,41 @@ async function setUp(up: UpAxis): Promise<void> {
   await reconvert();
 }
 
+/**
+ * Picks a source preset, or none (#100 design note §5). At an up question it answers: the
+ * question comes again, the file standing the preset's way. After a conversion it converts
+ * again asking nothing, without the choices the preset replaces: that is what picking it means.
+ */
+async function setPreset(id: string | null): Promise<void> {
+  const preset = id === null ? null : findSourcePreset(id);
+  if (id !== null && !preset) throw new Error(`No source preset "${id}"`);
+  const question = upQuestion();
+  if (question) {
+    // At a pair's figure the base is asked again under the preset: both start from it.
+    if (question.role === 'figure') asking.swapped = true;
+    state.preset = id;
+    return answerAndWait({ kind: 'up', orientation: {}, confirm: false, preset });
+  }
+  if (sources.length === 0 || state.busy || !state.stats) return;
+  const sizing = { ...choices.sizing };
+  delete sizing.units;
+  delete sizing.scale;
+  delete sizing.scaleToBaseMm;
+  choices = preset
+    ? { ...choices, orientation: {}, baseOrientation: {}, sizing, preset }
+    : { ...choices, preset: null };
+  await reconvert();
+}
+
+const presetOptions = (): HTMLOptionElement[] => [
+  new Option(COPY.noPreset, ''),
+  ...SOURCE_PRESETS.map((preset) => new Option(preset.label, preset.id)),
+];
+askInputs.source.replaceChildren(...presetOptions());
+sourceSelect.replaceChildren(...presetOptions());
+for (const select of [askInputs.source, sourceSelect])
+  select.addEventListener('change', () => void setPreset(select.value || null));
+
 /** The steps of the turn buttons. _(proposal, #72)_ */
 const TURN_STEP_DEG = 15;
 type TurnAxis = 'pitch' | 'roll';
@@ -818,15 +868,6 @@ const TURN_AXES: Record<TurnAxis, [number, number, number]> = {
   pitch: [1, 0, 0],
   roll: [0, 0, 1],
 };
-
-/** "+z (manual, set down 4°)": the six-way axis, how it was decided, and any turn beyond it. */
-function describeOrientation(orientation: Orientation): string {
-  const parts: string[] = [orientation.method];
-  if (orientation.method === 'base') parts.push(orientation.confidence.toFixed(2));
-  if (orientation.tiltDeg > 0) parts.push(`tilted ${Math.round(orientation.tiltDeg)}°`);
-  if (orientation.setDownDeg > 0) parts.push(`set down ${Math.round(orientation.setDownDeg)}°`);
-  return `${orientation.up} (${parts.join(', ')})`;
-}
 
 /** Shows a turn being tried out, in the viewer and in words; null drops it. */
 function showTurn(turn: Rotation | null): void {
@@ -1114,7 +1155,7 @@ function showQuestion(): void {
     const file = describeAskedFile(question.role, question.name);
     askInputs.file.hidden = file === null;
     askInputs.file.textContent = file ?? '';
-    askInputs.found.textContent = describeUp(question);
+    askInputs.found.textContent = describeUp(question, upFromPreset(asking.options));
     // The base's question is where the roles are confirmed: the warning of the guess goes there.
     const warning =
       question.role === 'base' ? describePairWarning(question.warnings, 'question') : null;
@@ -1506,6 +1547,7 @@ async function convert(
   });
   Object.assign(state, {
     busy: true,
+    preset: choices.preset?.id ?? null,
     question: null,
     meet: meetUi(),
     questionMs: null,
@@ -1535,6 +1577,7 @@ async function convert(
       {
         orientation: choices.orientation,
         sizing: choices.sizing,
+        preset: choices.preset,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
@@ -1556,6 +1599,7 @@ async function convert(
     const stats = result.stats;
     // What was confirmed at the questions is kept: a later conversion of these files repeats it.
     choices.orientation = result.choices.orientation;
+    choices.preset = result.choices.preset ?? null;
     if (secondStl) {
       choices.baseOrientation = result.choices.baseOrientation ?? {};
       choices.pairing = result.choices.pairing ?? {};
@@ -1647,6 +1691,8 @@ async function convert(
       viewer.setTurnGizmo(null);
     }
     for (const waiter of asking.waiters.splice(0)) waiter();
+    // A preset tried at a question that was then cancelled is not the mini's.
+    state.preset = choices.preset?.id ?? null;
     render();
   }
 }
@@ -1793,7 +1839,7 @@ async function addBase(base: Source): Promise<void> {
   // The figure's orientation stays; the size is measured from the base now. The new base is
   // asked about, and the figure too unless its up was chosen: the pair may stand it another way.
   // Where they meet is shown before the conversion, as for every pair (PM decision 2026-09-30).
-  choices = { ...noChoices(), orientation: choices.orientation, parts };
+  choices = { ...noChoices(), orientation: choices.orientation, parts, preset: choices.preset };
   await reconvert({ up: !chosen(choices.orientation), baseUp: true, parts: false, meet: true });
 }
 
@@ -1821,6 +1867,7 @@ async function removeBase(): Promise<void> {
     orientation: turned ? {} : choices.orientation,
     parts: { joints },
     pairing: figure.length > 1 ? { baseFile: null } : {},
+    preset: choices.preset,
   };
   await reconvert({ up: !chosen(choices.orientation), parts: false });
 }
@@ -1834,7 +1881,7 @@ async function swapPair(): Promise<void> {
     baseFile === undefined
       ? { swap: !choices.pairing.swap }
       : { baseFile: baseFile === 0 ? (1 as const) : (0 as const) };
-  choices = { ...noChoices(), pairing, sizing: choices.sizing };
+  choices = { ...noChoices(), pairing, sizing: choices.sizing, preset: choices.preset };
   await reconvert({ up: true, baseUp: true, parts: false, meet: true });
 }
 
@@ -2263,6 +2310,7 @@ window.__mt = {
   removeBase,
   figurePlacement,
   setUp,
+  setPreset,
   answerUp: (options = {}) => answerAndWait({ kind: 'up', orientation: options, confirm: false }),
   confirmUp: (options) => {
     confirmUp(options);

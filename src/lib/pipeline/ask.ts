@@ -13,6 +13,7 @@ import type { FileOrientation, PairWarning } from './pair';
 import type { Placement } from './place';
 import { apply, multiply, toMatrix, type Rotation } from './rotation';
 import type { BaseMeasurement } from './size';
+import type { SourcePreset } from './source-preset';
 
 /** Which file a question is about: the only file, or for a pair the base first, then the figure. */
 export type UpRole = 'mini' | 'base' | 'figure';
@@ -133,6 +134,12 @@ export interface UpAnswer {
   swap?: boolean;
   /** This file is the base, or null: no base, the parts of one figure. The questions start again with the parts (#93). */
   baseFile?: number | null;
+  /**
+   * Sets the source preset for the rest of this conversion, or clears it (null); left out, it
+   * stays (#100). `orientation` is resolved under it: empty is the preset's axis. Changed at a
+   * pair's figure question, the questions start again with the base, the parts as they are.
+   */
+  preset?: SourcePreset | null;
 }
 
 /** Where a finger is: a ray in the coordinates `shown` (or `apart.shown`) is drawn in, or a point on a file. */

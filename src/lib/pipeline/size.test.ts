@@ -209,4 +209,26 @@ describe('sizeMini', () => {
         RangeError,
       );
   });
+
+  it('multiplies an extra scale into the units (#100)', () => {
+    const tenfold = sizeMini(placedMini([3, 4, 3], 2.5), { units: 'mm', scale: 10 });
+    expect(tenfold.sizing.scale).toBe(10);
+    expect(tenfold.sizeMm).toEqual([30, 40, 30]);
+    expect(tenfold.sizing.baseDiameterMm).toBeCloseTo(25, 9);
+    const inches = sizeMini(placedMini([1, 1.5, 1], 1), { units: 'in', scale: 10 });
+    expect(inches.sizing.scale).toBeCloseTo(254, 9);
+    expect(inches.sizeMm[1]).toBeCloseTo(381, 9);
+  });
+
+  it('lets a base diameter replace the extra scale, and keeps a scale of 1 as no scale', () => {
+    const placed = placedMini([30, 40, 30], 25);
+    const fitted = sizeMini(placed, { scale: 10, scaleToBaseMm: 32 });
+    expect(fitted.sizing.scale).toBeCloseTo(1.28, 9);
+    expect(sizeMini(placed, { scale: 1 }).mesh).toBe(placed.mesh);
+  });
+
+  it('refuses an extra scale that is not a positive number', () => {
+    for (const bad of [0, -2, Number.NaN, Number.POSITIVE_INFINITY])
+      expect(() => sizeMini(placedMini([30, 40, 30], 25), { scale: bad })).toThrow(RangeError);
+  });
 });

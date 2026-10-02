@@ -15,7 +15,9 @@ import type { Vec3 } from './base';
 import type { Meeting, PartJoint } from './marks';
 import type { OrientationOptions } from './orient';
 import { BAKE_STEPS, runPipeline, STEPS, type ConversionResult, type Progress } from './run';
-import { AXIS_ROTATION, fromAxisAngle, multiply, type Rotation } from './rotation';
+import { apply, AXIS_ROTATION, fromAxisAngle, invert, multiply, type Rotation } from './rotation';
+import { SOURCE_PRESETS, type SourcePreset } from './source-preset';
+import { UNIT_FACTORS } from './units';
 import { PLAIN_BASE_HEIGHT_MM } from './base';
 import { encodeBinaryStl } from './stl';
 import {
@@ -1152,4 +1154,156 @@ describe('runPipeline asking where the parts meet (#93)', () => {
     // The parts confirmed before the roles changed stay in the record, as a confirmed base does (#92).
     expect(result.stats.asked.map((a) => a.role)).toEqual(['parts', 'parts', 'mini']);
   }, 120_000);
+});
+
+describe('runPipeline with a source preset (#100)', () => {
+  /** The generated figure on its base, written the way the preset's tool writes it. */
+  function writtenBy(preset: SourcePreset): ArrayBuffer {
+    const soup = generateFigure(true);
+    const toFile = multiply(invert(AXIS_ROTATION[preset.up]), AXIS_ROTATION['+z']);
+    const factor = UNIT_FACTORS[preset.units] * preset.scale;
+    const out = new Float32Array(soup.length);
+    for (let i = 0; i < soup.length; i += 3) {
+      const p = apply(toFile, [soup[i]!, soup[i + 1]!, soup[i + 2]!]);
+      out[i] = p[0] / factor;
+      out[i + 1] = p[1] / factor;
+      out[i + 2] = p[2] / factor;
+    }
+    return encodeBinaryStl(out);
+  }
+  /** A preset of the test's own: millimetres, up along the file's +x. */
+  const sideways: SourcePreset = {
+    id: 'test-mm-x',
+    label: 'Test: millimetres, X up',
+    units: 'mm',
+    scale: 1,
+    up: '+x',
+    source: 'A preset made up for a test.',
+  };
+  const choose = (preset: SourcePreset | null, orientation: OrientationOptions = {}): UpAnswer => ({
+    kind: 'up',
+    orientation,
+    confirm: false,
+    preset,
+  });
+
+  let heightMm = 0;
+  it('measures the figure without a preset first', async () => {
+    const plain = await runPipeline(encodeBinaryStl(generateFigure(true)), { bake: 0 });
+    heightMm = plain.stats.sizeMm[1];
+    expect(heightMm).toBeGreaterThan(25);
+  }, 60_000);
+
+  it.each(SOURCE_PRESETS.map((preset) => [preset.id, preset] as const))(
+    'stands and sizes a figure written by %s by the preset',
+    async (_, preset) => {
+      const result = await runPipeline(writtenBy(preset), { bake: 0, preset });
+      expect(result.stats.up).toBe(preset.up);
+      expect(result.stats.upMethod).toBe('manual');
+      expect(result.stats.sizeMm[1]).toBeCloseTo(heightMm, 4);
+      expect(result.sizing).toMatchObject({ units: preset.units, unitsMethod: 'manual' });
+      expect(result.sizing.scale).toBeCloseTo(UNIT_FACTORS[preset.units] * preset.scale, 9);
+      expect(result.sizing.baseDiameterMm).toBeCloseTo(25, 1);
+      expect(result.choices).toEqual({ orientation: {}, preset });
+    },
+    60_000,
+  );
+
+  it('lets an axis and units chosen by hand win over the preset', async () => {
+    const figure = encodeBinaryStl(generateFigure(true));
+    const metres = SOURCE_PRESETS.find((preset) => preset.units === 'm')!;
+    const result = await runPipeline(figure, {
+      bake: 0,
+      preset: { ...metres, up: '+x' },
+      orientation: { up: '+z' },
+      sizing: { units: 'mm' },
+    });
+    expect(result.orientation).toMatchObject({ up: '+z', method: 'manual' });
+    expect(result.sizing).toMatchObject({ units: 'mm', scale: 1 });
+    expect(result.stats.sizeMm[1]).toBeCloseTo(heightMm, 4);
+    expect(result.choices).toEqual({ orientation: { up: '+z' }, preset: { ...metres, up: '+x' } });
+  }, 60_000);
+
+  it('converts the same mini again from its choices', async () => {
+    const preset = SOURCE_PRESETS[0]!;
+    const first = await runPipeline(writtenBy(preset), { bake: 0, preset });
+    const again = await runPipeline(writtenBy(preset), { bake: 0, ...first.choices });
+    expectSameMini(again, first);
+  }, 60_000);
+
+  it('at the question: a preset brings the question again on its axis; confirming converts with it', async () => {
+    const ask = answering(choose(sideways), confirm());
+    const result = await runPipeline(lyingFigure(), { bake: 0, askUp: ask });
+    const [first, second] = ask.questions;
+    expect(first).toMatchObject({ reason: 'tallest', orientation: { up: '+z' } });
+    expect(second).toMatchObject({ reason: 'chosen', orientation: { up: '+x', method: 'manual' } });
+    expect(result.orientation).toMatchObject({ up: '+x', method: 'manual' });
+    expect(result.choices).toEqual({ orientation: {}, preset: sideways });
+    expect(result.stats.asked).toEqual([{ role: 'mini', tries: 1, waitedMs: expect.any(Number) }]);
+    expect(result.stats.timings.map((t) => t.step)).toEqual([...ONE_FILE_STEPS]);
+  }, 60_000);
+
+  it('at the question: an axis tried wins over the preset, and none goes back to the detection', async () => {
+    const ask = answering(tryOut({ up: '-x' }), choose(null), confirm());
+    const result = await runPipeline(lyingFigure(), { bake: 0, preset: sideways, askUp: ask });
+    expect(ask.questions.map((q) => [q.reason, q.orientation.up])).toEqual([
+      ['chosen', '+x'],
+      ['chosen', '-x'],
+      ['tallest', '+z'],
+    ]);
+    expect(result.orientation).toMatchObject({ up: '+z', method: 'tallest' });
+    expect(result.choices).toEqual({ orientation: {} });
+  }, 60_000);
+
+  describe('with a base file', () => {
+    const figure = (): ArrayBuffer => encodeBinaryStl(generatePuddleFigure(12));
+    const base = (): ArrayBuffer => encodeBinaryStl(generateRecessBase());
+    const zUp = SOURCE_PRESETS.find((preset) => preset.up === '+z' && preset.units === 'mm')!;
+
+    it('stands the base on the preset axis too', async () => {
+      const ask = answering(confirm(), confirm());
+      const result = await runPipeline(figure(), {
+        bake: 0,
+        secondStl: base(),
+        preset: zUp,
+        askUp: ask,
+      });
+      expect(ask.questions[0]).toMatchObject({
+        role: 'base',
+        reason: 'chosen',
+        orientation: { up: '+z', method: 'manual' },
+      });
+      expect(ask.questions[1]).toMatchObject({ role: 'figure', reason: 'chosen' });
+      expect(result.pair!.baseOrientation).toMatchObject({ up: '+z', method: 'manual' });
+      expect(result.choices).toMatchObject({
+        orientation: {},
+        baseOrientation: {},
+        preset: zUp,
+      });
+    }, 60_000);
+
+    it('asks about the base again when the preset changes at the figure', async () => {
+      const ask = answering(confirm(), choose(zUp), confirm(), confirm());
+      const result = await runPipeline(figure(), { bake: 0, secondStl: base(), askUp: ask });
+      expect(ask.questions.map((q) => [q.role, q.reason])).toEqual([
+        ['base', 'underside'],
+        ['figure', 'base'],
+        ['base', 'chosen'],
+        ['figure', 'chosen'],
+      ]);
+      expect(result.choices.preset).toEqual(zUp);
+      expect(result.orientation).toMatchObject({ up: '+z', method: 'manual' });
+    }, 60_000);
+  });
+
+  it('refuses a preset that is not one', async () => {
+    const bad = { ...sideways, scale: 0 };
+    await expect(runPipeline(sheet(), { bake: 0, preset: bad })).rejects.toThrow(RangeError);
+    await expect(
+      runPipeline(sheet(), {
+        bake: 0,
+        askUp: answering(choose({ ...sideways, up: 'up' } as never)),
+      }),
+    ).rejects.toThrow(RangeError);
+  }, 60_000);
 });

@@ -1,5 +1,6 @@
 import {
   turnAngleDeg,
+  UNIT_FACTORS,
   type ConversionStats,
   type Fit,
   type MeetQuestion,
@@ -10,6 +11,8 @@ import {
   type Progress,
   type StepName,
   type CreatureSize,
+  type Orientation,
+  type Sizing,
   type Units,
   type UpQuestion,
   type UpRole,
@@ -98,6 +101,9 @@ export const COPY = {
     'Right-click a spot, or hold a finger on it, to turn the view about it. The wheel zooms to the pointer.',
   letTilt: 'Let it tilt to fit',
   keepUpright: 'Keep it upright',
+  // #100: source presets.
+  source: 'Source',
+  noPreset: 'None (guess)',
 } as const;
 
 /** How far one press of Turn turns a part at the final view. _(proposal, #93)_ */
@@ -349,7 +355,13 @@ export function describeAskedFile(role: UpRole, name: string): string | null {
 }
 
 /** Why the file stands as the question shows it (#92). */
-export function describeUp(question: Pick<UpQuestion, 'reason' | 'base' | 'orientation'>): string {
+export function describeUp(
+  question: Pick<UpQuestion, 'reason' | 'base' | 'orientation'>,
+  /** True when the axis is the source preset's, not one chosen by hand (#100). */
+  preset = false,
+): string {
+  if (question.reason === 'chosen' && preset && question.orientation.setDownDeg === 0)
+    return 'Standing as its source says.';
   switch (question.reason) {
     case 'base':
       return question.base
@@ -378,4 +390,30 @@ export function describeUp(question: Pick<UpQuestion, 'reason' | 'base' | 'orien
 export function describeAskPending(turnDeg: number): string | null {
   const degrees = Math.round(turnDeg);
   return degrees === 0 ? null : `Turned ${degrees}°`;
+}
+
+const UNIT_NAMES: Record<Units, string> = { mm: 'mm', in: 'inches', m: 'metres' };
+
+/**
+ * "mm (guessed)", with the scale when the mini was scaled to a base diameter or by a preset.
+ * `preset`: the units are the source preset's, none were chosen by hand (#100).
+ */
+export function describeUnits(sizing: Sizing, preset = false): string {
+  const method = sizing.unitsMethod === 'guessed' ? 'guessed' : preset ? 'preset' : 'chosen';
+  const units = `${UNIT_NAMES[sizing.units]} (${method})`;
+  const extra = sizing.scale / UNIT_FACTORS[sizing.units];
+  return Math.abs(extra - 1) < 1e-6 ? units : `${units}, scaled ×${extra.toFixed(3)}`;
+}
+
+/**
+ * "+z (manual, set down 4°)": the six-way axis, how it was decided, and any turn beyond it.
+ * `preset`: the axis is the source preset's, none was chosen by hand (#100).
+ */
+export function describeOrientation(orientation: Orientation, preset = false): string {
+  const method = orientation.method === 'manual' && preset ? 'preset' : orientation.method;
+  const parts: string[] = [method];
+  if (orientation.method === 'base') parts.push(orientation.confidence.toFixed(2));
+  if (orientation.tiltDeg > 0) parts.push(`tilted ${Math.round(orientation.tiltDeg)}°`);
+  if (orientation.setDownDeg > 0) parts.push(`set down ${Math.round(orientation.setDownDeg)}°`);
+  return `${orientation.up} (${parts.join(', ')})`;
 }

@@ -5,6 +5,7 @@ import { BAKE_STEPS, STEPS } from '../pipeline/run';
 import { encodeBinaryStl } from '../pipeline/stl';
 import { generatePuddleFigure, generateRecessBase } from '../../regression/shapes';
 import type { UpAnswer } from '../pipeline/ask';
+import { findSourcePreset } from '../pipeline/source-preset';
 import { handleRequest } from './handle';
 import type { ConvertOptions, WorkerResponse } from './protocol';
 
@@ -62,6 +63,20 @@ describe('handleRequest', () => {
     const { orientation, stats } = last.response.result;
     expect(orientation).toMatchObject({ up: '+y', method: 'manual', setDownDeg: 0 });
     expect(stats.orientation).toEqual(orientation);
+  });
+
+  it('passes a source preset to the pipeline and returns it in the choices (#100)', async () => {
+    const preset = findSourcePreset('scene-m-y')!;
+    // The sheet written in metres: 50 mm across is 0.05.
+    const soup = generateBumpySheet(4);
+    for (let i = 0; i < soup.length; i++) soup[i] = soup[i]! / 1000;
+    const last = (await collect(encodeBinaryStl(soup), 7, { bake: 0, preset })).at(-1)!;
+    if (last.response.type !== 'done') throw new Error('expected done');
+    const { sizing, orientation, choices, stats } = last.response.result;
+    expect(orientation).toMatchObject({ up: '+y', method: 'manual' });
+    expect(sizing).toMatchObject({ units: 'm', unitsMethod: 'manual', scale: 1000 });
+    expect(stats.sizeMm[0]).toBeCloseTo(50, 3);
+    expect(choices.preset).toEqual(preset);
   });
 
   it('echoes the job id on every message', async () => {

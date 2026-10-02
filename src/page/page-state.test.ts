@@ -4,6 +4,7 @@ import {
   describeAskPending,
   describePairs,
   describeMini,
+  describeOrientation,
   describePairWarning,
   describePart,
   describeParts,
@@ -12,6 +13,7 @@ import {
   describeProgress,
   describeReady,
   describeTooManyFiles,
+  describeUnits,
   describeUp,
   describeWrongFile,
   pageStateOf,
@@ -421,5 +423,42 @@ describe('the up question (#92)', () => {
       askSetDown: 'Set down',
       askReset: 'Reset',
     });
+  });
+});
+
+describe('source presets in the words (#100)', () => {
+  const orientation: Orientation = {
+    up: '+y',
+    method: 'manual',
+    confidence: 1,
+    rotation: [0, 0, 0, 1],
+    tiltDeg: 0,
+    setDownDeg: 0,
+  };
+
+  it('says "preset" where the units come from one, "chosen" or "guessed" otherwise', () => {
+    const metres = sizing({ units: 'm', unitsMethod: 'manual', scale: 1000 });
+    expect(describeUnits(metres, true)).toBe('metres (preset)');
+    expect(describeUnits(metres)).toBe('metres (chosen)');
+    expect(describeUnits(sizing({ units: 'm', scale: 1000 }), true)).toBe('metres (guessed)');
+    expect(describeUnits(sizing({ units: 'mm', unitsMethod: 'manual', scale: 10 }), true)).toBe(
+      'mm (preset), scaled ×10.000',
+    );
+  });
+
+  it('says "preset" for an axis that comes from one', () => {
+    expect(describeOrientation(orientation, true)).toBe('+y (preset)');
+    expect(describeOrientation(orientation)).toBe('+y (manual)');
+    expect(describeOrientation({ ...orientation, method: 'base', confidence: 0.9 }, true)).toBe(
+      '+y (base, 0.90)',
+    );
+    expect(describeUp({ reason: 'chosen', base: null, orientation }, true)).toBe(
+      'Standing as its source says.',
+    );
+    expect(describeUp({ reason: 'chosen', base: null, orientation })).toBe('As you turned it.');
+  });
+
+  it('names the select and its first entry', () => {
+    expect([COPY.source, COPY.noPreset]).toEqual(['Source', 'None (guess)']);
   });
 });

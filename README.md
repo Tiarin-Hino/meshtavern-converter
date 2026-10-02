@@ -36,6 +36,7 @@ import {
   encodeGlb,
   DEFAULT_LOOK,
   BAKED_LEVEL,
+  findSourcePreset,
 } from 'meshtavern-converter';
 
 const converter = new Converter();
@@ -53,8 +54,13 @@ export async function addMini(files: File[]) {
     const result = await converter.convert(
       stl!,
       (p) => console.log(p.step, p.percent),
-      // sizing: or leave it out, suggested from the base; the other files are transferred too.
-      { sizing: { size: 'medium' }, ...(secondStl && { secondStl, moreStl }) },
+      // sizing: or leave it out, suggested from the base; preset: the files' known export
+      // convention, or leave it out, guessed; the other files are transferred too.
+      {
+        sizing: { size: 'medium' },
+        preset: findSourcePreset('scene-m-y'),
+        ...(secondStl && { secondStl, moreStl }),
+      },
       // Optional: stop and ask on the full-detail meshes. askPerson and markPerson are your own
       // dialogs; answer with confirm: false to show a change first.
       async (question) =>
@@ -81,6 +87,7 @@ export async function addMini(files: File[]) {
 
 - The fourth argument of `convert` is optional. With it, the worker stops on the full-detail meshes and asks. Every `Question` carries the welded meshes the callback has not had yet (`meshes`, each file once, in file coordinates) and where to draw each file (`shown`: a rotation and a translation per file, and the `box` of it all). An `UpQuestion` (`kind: 'up'`) asks which way is up: the `role` (`mini`, or `base` then `figure` for several files), the proposed `orientation` and why (`reason`). The answer is an `UpAnswer`: `orientation` as in the options (`{}` is the proposal), `confirm`, and `swap` or `baseFile` (another file as the base, or `null`: no base, the files are parts of one figure). A `MeetQuestion` (`kind: 'meet'`) asks how a figure's parts go together (`about: 'parts'`, first) or where the figure meets its base (`about: 'base'`, last, for every pair), in two stages: `pairs` (the parts apart, with the pairs of patches where they meet: the converter's proposal, `proposed`, or the person's) and `fitted` (put together, `placement`). A patch is an area of a part's surface made by strokes (`Stroke`: a tap, a brush or an eraser dab at a point in its file's coordinates); a pair is a patch on the part in place (`on`) and one on the part that goes there (`of`). The answer is a `MeetAnswer` with one `action`: `tap` and `brush` (at a `Target`: a ray in the coordinates `shown` is drawn in, or a point on a file), `clear`, `undo`, `set` (a whole `Meeting` or the parts' joints at once), `fit` (put them together), `back`, `nudge` (`liftMm`, `turnDeg`, `turn: 'keep' | 'free'`), `pick` (what is there) and `confirm`. The question that comes back holds the marks (`marks`) and what to draw (`pairs`, each side's `triangles`). Without the callback nothing is asked, and the options say how the files stand and meet (`orientation`, `baseOrientation`, `pairing`, `parts`, `placement.marks`). `result.choices` holds what was confirmed: converting the same files with those options gives the same mini without asking.
 
+- A source preset (`SOURCE_PRESETS`, `findSourcePreset(id)`, or a `SourcePreset` of your own) says what a tool's files are: `units`, an extra `scale` and the `up` axis. It lies under the options field by field: an `orientation`, `baseOrientation` or `sizing` given wins over it, and the converter guesses only what neither says. Its axis counts as chosen, so the up question still comes, standing the file the preset's way; an `UpAnswer` may set (`preset`) or clear (`preset: null`) it. `result.choices.preset` is the preset the conversion ended with.
 - The look is chosen when a mini is drawn and exported (`look` above, `vertexColours`, the `three` entry), not when it is converted: changing the colour does not need a new conversion. `LOOK_PRESETS` are named starting points (grey primer, bone, black drybrushed, steel, bronze), `presetOf(look)` says which one a look is, and a GLB written with a `sizing` records both in `extras.meshtavern.look`.
 - `createBakedMaterial` and `transcodeDetail` from `meshtavern-converter/three` draw the baked table level with its KTX2 texture. `transcodeDetail` needs three.js's `basis_transcoder.js` and `.wasm` served; pass their folder as its third argument (this page serves them under `basis/`, see `vite.config.ts`).
 - Linked with `file:../meshtavern-converter` instead, Vite's dev server refuses to serve the worker from outside the project until the folder is allowed: `server: { fs: { allow: ['.', '../meshtavern-converter'] } }`.
@@ -94,6 +101,8 @@ export async function addMini(files: File[]) {
 The unwrap runs [xatlas](https://github.com/jpcy/xatlas) (MIT, Copyright 2018-2020 Jonathan Young), compiled by this project to WebAssembly from upstream commit `f700c779` (`wasm/xatlas/`, licence in [`wasm/xatlas/LICENSE`](wasm/xatlas/LICENSE)).
 
 The detail texture is encoded with [Basis Universal](https://github.com/BinomialLLC/basis_universal) (Apache-2.0, Copyright 2016–2026 Binomial LLC; "Basis Universal" is a trademark of Binomial LLC), compiled by this project to WebAssembly from upstream commit `1b33fd50` (`wasm/basis-encoder/`, licence and notice in [`wasm/basis-encoder/LICENSE`](wasm/basis-encoder/LICENSE) and [`wasm/basis-encoder/NOTICE`](wasm/basis-encoder/NOTICE)). The build includes [Zstandard](https://github.com/facebook/zstd) (BSD-3-Clause, Copyright Meta Platforms, Inc., [`wasm/basis-encoder/LICENSE-zstd`](wasm/basis-encoder/LICENSE-zstd)) and the QOI and DDS readers upstream bundles (MIT, [`wasm/basis-encoder/LICENSE-mit`](wasm/basis-encoder/LICENSE-mit)).
+
+The source presets (`src/lib/pipeline/source-preset.ts`) cite where each convention is documented: PrusaSlicer's [source](https://github.com/prusa3d/PrusaSlicer/tree/version_2.8.1) for millimetres and Z (PrusaSlicer is a trademark of Prusa Research a.s.), Blender's [source](https://github.com/blender/blender/tree/v4.2.0) for its STL export defaults and scene units (Blender is a trademark of the Blender Foundation), and the [glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#coordinate-system-and-units) for metres and +Y up (glTF is a trademark of The Khronos Group Inc.). The presets' labels name the convention, not the tool; no tool endorses this project.
 
 The creature size names (Tiny, Small, Medium, Large, Huge, Gargantuan, in `src/lib/pipeline/size.ts`) come from the SRD 5.1. The footprint in squares, the 32 mm grid and the plain-base diameters are this project's own.
 
