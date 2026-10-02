@@ -3,8 +3,8 @@
 //   results.json     triangles, error, sizes and times per level for every mini
 //   results.md       the same as tables, the corpus coverage, the size suggestions, the
 //                    up directions and the spots of figures on their base files (#70)
-//                    checked against scripts/corpus-index.json, and what
-//                    changed since the last run
+//                    checked against scripts/corpus-index.json, how many minis are right
+//                    without a correction (#101), and what changed since the last run
 //   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels
 // Sort the corpus into folders named after the kind of mini (see KINDS); files directly in
 // corpus/ count as "unsorted".
@@ -24,6 +24,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { chromium } from '@playwright/test';
 import { createServer, runnerImport } from 'vite';
 import { asDetected, convertAnswering, fromChoices } from './lib/answer-up.mjs';
+import { automaticRate, automaticReport } from './lib/automatic.mjs';
 import { baseFileFor, CORPUS, corpusFiles, partFilesFor } from './lib/corpus-files.mjs';
 import { loadRecords, scoreAll, scoreReport } from './lib/placements.mjs';
 
@@ -31,7 +32,8 @@ const PORT = 4179;
 /**
  * The expected creature size (issue #44), up direction in the file (issue #72) and, for a
  * figure with a base file, the kind of spot it belongs in (`spot`: hole, recess or flat, with
- * an optional `placementNote`; issue #70) per corpus mini, keyed like results.json.
+ * an optional `placementNote`; issue #70) per corpus mini, keyed like results.json. `units`
+ * for a file that is not in mm (issue #101).
  * Committed; the corpus itself is not. The script only reads it.
  */
 const INDEX = 'scripts/corpus-index.json';
@@ -398,6 +400,9 @@ const results = {
     cpu: cpus()[0]?.model.trim() ?? 'unknown',
     memoryGb: round(totalmem() / 2 ** 30),
   },
+  // How many minis are right without a correction (#101): only a run that confirms every
+  // detection can say; answered from the index, the minis stand as the index says.
+  automatic: up === 'detected' ? automaticRate(minis, expected) : null,
   minis,
 };
 
@@ -578,6 +583,16 @@ function orientationReport() {
     table(head, converted.map(row)),
   ].join('\n\n');
 }
+/** Up, scale and base size without a correction (#101), against the last run that measured it. */
+function rightReport() {
+  if (!existsSync(INDEX)) return `No ${INDEX}: nothing to check the minis against.`;
+  if (results.automatic === null)
+    return 'Not measured: the questions were answered as the index says. Run without `--up index`.';
+  const notes = Object.fromEntries(
+    Object.entries(expected).map(([key, entry]) => [key, entry.note]),
+  );
+  return automaticReport(results.automatic, previous?.automatic ?? null, notes);
+}
 const missing = KINDS.filter((kind) => !kinds.includes(kind));
 
 const md = `# Corpus results
@@ -592,6 +607,10 @@ ${results.machine.gpu} · ${results.machine.cpu} · ${results.machine.memoryGb} 
 - Kinds still missing: ${missing.join(', ') || 'none'}.
 - Up direction taken from the file: ${count(converted.map(([, mini]) => mini.up))}.
 - Flat base found: ${count(converted.map(([, mini]) => (mini.upMethod === 'base' ? 'yes' : 'no')))}.
+
+## Right without correction
+
+${rightReport()}
 
 ## Orientation
 
@@ -686,6 +705,10 @@ ${table(
 )}
 ${failed.length === 0 ? '' : `\n## Could not be converted\n\n${failed.map(([key, mini]) => `- ${key}: ${mini.error}`).join('\n')}\n`}`;
 writeFileSync(join(OUT, 'results.md'), md);
+if (results.automatic)
+  console.log(
+    `Right without correction: ${results.automatic.right} of ${results.automatic.counted} minis.`,
+  );
 console.log(
   `\n${basename(OUT)}: ${converted.length} converted, ${failed.length} failed${changes?.length ? `, ${changes.length} figures changed since the last run` : ''}. See ${join(OUT, 'results.md')}`,
 );
