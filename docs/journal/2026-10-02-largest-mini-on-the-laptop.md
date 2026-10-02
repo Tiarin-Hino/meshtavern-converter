@@ -3,7 +3,7 @@ title: The largest corpus mini on the reference laptop
 date: 2026-10-02
 phase: 2
 issues: [103]
-prs: []
+prs: [107]
 topics: [devices, performance]
 ---
 
