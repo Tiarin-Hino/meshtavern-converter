@@ -32,9 +32,7 @@ export interface SourcePreset {
 }
 
 /** The presets the page offers, in this order; the first entry of the select is "None (guess)". */
-export const SOURCE_PRESETS: readonly SourcePreset[] = [
-  /* §6 */
-];
+export const SOURCE_PRESETS: readonly SourcePreset[] = [/* §6 */];
 
 /** The preset with this id, or null. The page and the scripts resolve an id with it. */
 export function findSourcePreset(id: string): SourcePreset | null;
