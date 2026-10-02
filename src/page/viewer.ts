@@ -607,7 +607,7 @@ export class Viewer {
    */
   async showGlb(
     glb: ArrayBuffer,
-  ): Promise<{ triangles: number; sizeMm: [number, number, number] }> {
+  ): Promise<{ triangles: number; sizeMm: [number, number, number]; textureCoordinates: boolean }> {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loader.parseAsync(glb, '');
@@ -618,14 +618,19 @@ export class Viewer {
     this.scene.add(this.imported);
 
     let triangles = 0;
+    // An unwrapped level carries texture coordinates for its detail texture (#109); the file
+    // has no texture, so it is drawn with its vertex colours like any other.
+    let textureCoordinates = false;
     this.imported.traverse((object) => {
       const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
-      if (geometry) triangles += (geometry.index?.count ?? geometry.attributes.position!.count) / 3;
+      if (!geometry) return;
+      triangles += (geometry.index?.count ?? geometry.attributes.position!.count) / 3;
+      if (geometry.attributes.uv) textureCoordinates = true;
     });
     const size = new THREE.Box3().setFromObject(this.imported).getSize(new THREE.Vector3());
     this.size.copy(size);
     this.setCamera(34, 22, 1);
-    return { triangles, sizeMm: [size.x, size.y, size.z] };
+    return { triangles, sizeMm: [size.x, size.y, size.z], textureCoordinates };
   }
 
   perf(): Perf {

@@ -393,6 +393,7 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
       error: window.__mt.state.error,
     };
   });
+  expect(result.imported?.textureCoordinates).toBe(false);
 
   expect(result.error).toBeNull();
   // What the table needs to place the mini travels in the file.
@@ -425,6 +426,36 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
     body: await page.locator('#viewport').screenshot(),
     contentType: 'image/png',
   });
+
+  // The unwrapped table level, the file the table application stores (#109): its texture
+  // coordinates arrive as the geometry's `uv`, and it is drawn with its vertex colours as before.
+  for (const compact of [false, true]) {
+    const unwrapped = await page.evaluate(async (compressed) => {
+      const glb = await window.__mt.exportGlb(2, compressed, true);
+      const jsonLength = new DataView(glb).getUint32(12, true);
+      const json = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, jsonLength)));
+      await window.__mt.loadGlb(glb, 'unwrapped.glb');
+      return {
+        attributes: json.meshes[0].primitives[0].attributes as Record<string, number>,
+        vertices: json.accessors[1].count as number,
+        baked: window.__mt.state.baked,
+        imported: window.__mt.state.imported,
+        error: window.__mt.state.error,
+      };
+    }, compact);
+    expect(unwrapped.error).toBeNull();
+    expect(unwrapped.baked).not.toBeNull();
+    expect(unwrapped.attributes.TEXCOORD_0).toBe(5);
+    // The unwrap splits vertices along its seams.
+    expect(unwrapped.vertices).toBeGreaterThan(result.table.vertices);
+    expect(unwrapped.imported?.textureCoordinates).toBe(true);
+    expect(unwrapped.imported?.triangles).toBe(result.table.triangles);
+    await page.waitForTimeout(300);
+    await testInfo.attach(`reopened-unwrapped-glb-${compact ? 'compact' : 'plain'}`, {
+      body: await page.locator('#viewport').screenshot(),
+      contentType: 'image/png',
+    });
+  }
 
   // The two download buttons offer files named after the mini and their own level, whatever
   // level is on screen; the close level is shown but never offered (PM decision, 2026-09-20).

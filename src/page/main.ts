@@ -138,7 +138,12 @@ interface AppState {
   /** The id of the source preset in force (#100): at a question, what the select set; null for none. */
   preset: string | null;
   /** Set after a GLB was opened: what the file contained. */
-  imported: { triangles: number; sizeMm: [number, number, number] } | null;
+  imported: {
+    triangles: number;
+    sizeMm: [number, number, number];
+    /** The file carries texture coordinates: an unwrapped table level (#109). */
+    textureCoordinates: boolean;
+  } | null;
   /** Figures of the baked table level. Null when the mini has the per-vertex look: see `stats.bakeSkipped`. */
   baked: {
     charts: number;
@@ -217,8 +222,12 @@ declare global {
       detailKtx2: () => Uint8Array | null;
       /** Runs the device benchmark and resolves with its Markdown result. */
       runBenchmark: (size: BenchmarkSize) => Promise<string>;
-      /** Encodes a level (1 = close, 2 = table, 3 = far) with the current look. */
-      exportGlb: (level: number, compact: boolean) => Promise<ArrayBuffer>;
+      /**
+       * Encodes a level (1 = close, 2 = table, 3 = far) with the current look. `unwrapped`
+       * takes the table level's baked mesh, with its texture coordinates: the file the table
+       * application stores next to the detail texture (#109).
+       */
+      exportGlb: (level: number, compact: boolean, unwrapped?: boolean) => Promise<ArrayBuffer>;
       /** Opens a GLB in the viewer, as dropping the file would. */
       loadGlb: (glb: ArrayBuffer, name?: string) => Promise<void>;
       /** Fills the table with copies of the converted mini. `forcedLod` pins every copy to one LOD (0 = 50k). */
@@ -1715,8 +1724,8 @@ function demoStl(): ArrayBuffer {
 
 const compactBox = document.querySelector<HTMLInputElement>('#compact')!;
 
-async function exportGlb(level: number, compact: boolean): Promise<ArrayBuffer> {
-  const mesh = levels[level];
+async function exportGlb(level: number, compact: boolean, unwrapped = false): Promise<ArrayBuffer> {
+  const mesh = unwrapped && level === TABLE_LEVEL && baked ? baked.mesh : levels[level];
   if (!mesh || level === 0 || !state.fileName) throw new Error('No converted level to export');
   if (compact) await glbEncoderReady();
   return encodeGlb(mesh, {

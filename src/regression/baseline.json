@@ -98,7 +98,9 @@
       "charts": 1895,
       "utilisation": 0.837189,
       "coverage": 0.442955,
-      "fallback": 0
+      "fallback": 0,
+      "glbBytes": 1440512,
+      "compactGlbBytes": 514060
     }
   },
   "figure-y-up": {
