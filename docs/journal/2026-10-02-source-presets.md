@@ -35,7 +35,7 @@ None in the code.
 
 ## Numbers
 
-Cloud container (no GPU, software rendering): `npm run check` passes with 534 unit tests; the regression baseline did not move, as expected, since nothing changes without a preset. The new pipeline tests convert the generated figure written by each preset's convention: it stands on the preset's axis and measures the same height in millimetres as without a preset, to 4 decimals. No timings were measured; the preset adds no work to any step.
+Cloud container (no GPU, software rendering): `npm run check` passes with 534 unit tests and `npm run e2e` with 48 of 48 (3.9 min); the regression baseline did not move, as expected, since nothing changes without a preset. The new pipeline tests convert the generated figure written by each preset's convention: it stands on the preset's axis and measures the same height in millimetres as without a preset, to 4 decimals. No timings were measured; the preset adds no work to any step.
 
 ## Still open
 
