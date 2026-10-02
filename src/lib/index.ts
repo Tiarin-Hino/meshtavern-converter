@@ -113,6 +113,8 @@ export {
   type BaseMeasurement,
 } from './pipeline/size';
 export { UNIT_FACTORS } from './pipeline/units';
+// Source presets: units, scale and up axis of a known export convention (issue #100).
+export { SOURCE_PRESETS, findSourcePreset, type SourcePreset } from './pipeline/source-preset';
 // The look: applied when drawing and exporting, never inside the conversion.
 export {
   DEFAULT_LOOK,

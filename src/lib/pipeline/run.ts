@@ -287,9 +287,9 @@ export interface PipelineOptions {
   /**
    * A known export convention (#100): its up axis, units and scale lie under `orientation`,
    * `baseOrientation` and `sizing`, field by field; what is chosen there wins. Its axis counts as
-   * a chosen one. Left out: everything is detected and guessed, the path of today.
+   * a chosen one. Null or left out: everything is detected and guessed, the path of today.
    */
-  preset?: SourcePreset;
+  preset?: SourcePreset | null;
   /**
    * Texture size for baked detail maps on the table level: 'auto' (the default) picks one
    * from the mini's surface area (see bake-policy.ts). A size in texels, or 0 to skip
@@ -939,7 +939,7 @@ export async function runPipeline(
 ): Promise<ConversionResult> {
   if (presetOption) checkSourcePreset(presetOption);
   /** The preset as it is now: an up answer may set or clear it (#100). */
-  let presetChoice = presetOption;
+  let presetChoice = presetOption ?? undefined;
   /** Orientation options as the steps see them: the preset's axis under what was chosen by hand. */
   const under = (options: OrientationOptions): OrientationOptions =>
     orientationUnder(presetChoice, options);
