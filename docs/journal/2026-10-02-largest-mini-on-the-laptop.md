@@ -50,7 +50,7 @@ Reference laptop: i7-1265U, Intel Iris Xe, 32 GB, Ubuntu 24.04, Chrome 149, on t
 
 ## Still open
 
-- **The stall is over the limit.** 168–203 ms against the 100 ms limit the corpus run reports against; the two smaller minis measured on the laptop earlier stalled 17 and 33 ms. Which moment stalls (showing 5.6 million triangles at the question is the first suspect) was not located. Needs its own issue.
+- **The stall is over the limit.** 168–203 ms against the 100 ms limit the corpus run reports against; the two smaller minis measured on the laptop earlier stalled 17 and 33 ms. Which moment stalls (showing 5.6 million triangles at the question is the first suspect) was not located: #108.
 - The "too large for this device" refusal was not seen on the laptop, because no corpus file comes near 16 GB. It is covered by unit and e2e tests only.
 - A laptop with 8 GB would be allowed 4 GB and would also convert this file (2.1 GB measured); a 4 GB device would refuse it (2,774 MB needed, 2,048 MB allowed). Neither was measured.
 - The 3-minute limit is still marked as a proposal in the spec.

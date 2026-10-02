@@ -72,7 +72,7 @@ Order rationale _(proposal)_: first the net that catches regressions, then the s
      | estimate of #43 (`memory.ts`)     | 2,774 MB (+31 %)         | 3,229 MB (+32 %)       |
      | KTX2 texture                      | 4.9 MB                   | 4.7 MB                 |
 
-     Chrome 149 reports `navigator.deviceMemory` = 32 on this laptop (earlier Chrome versions reported 8 at most), so the budget is 16 GB and the "too large for this device" refusal does not come for this file. The estimate stays above the measured peak, by a little more than the 5–30 % it was fitted to on the development PC. **Over the limit:** the longest stall is 168–203 ms against the 100 ms the corpus run reports against (17 and 33 ms for the two smaller minis above); which moment of the conversion stalls was not located in this run.
+     Chrome 149 reports `navigator.deviceMemory` = 32 on this laptop (earlier Chrome versions reported 8 at most), so the budget is 16 GB and the "too large for this device" refusal does not come for this file. The estimate stays above the measured peak, by a little more than the 5–30 % it was fitted to on the development PC. **Over the limit:** the longest stall is 168–203 ms against the 100 ms the corpus run reports against (17 and 33 ms for the two smaller minis above); which moment of the conversion stalls was not located in this run (#108).
 
    - **Runs on battery come out at about half speed:** two of them did (2026-09-22 and 2026-09-23). Measure on the power cord, window in front, and check that the untouched steps agree before comparing figures.
 
