@@ -3,7 +3,7 @@ title: Texture coordinates in the table level's GLB
 date: 2026-10-02
 phase: 2
 issues: [109]
-prs: []
+prs: [110]
 topics: [export, glb, bake, library]
 ---
 
