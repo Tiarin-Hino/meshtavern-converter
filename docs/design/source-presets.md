@@ -118,6 +118,16 @@ Not proposed: a centimetre preset (no tool found whose STL export is centimetres
 
 Three of the five only make the guess explicit (`guessUnits` reads 0.032 as metres already): their value is the up axis and the certainty. That is what the issue asks for.
 
+**As shipped** (build on PR #105, 2026-10-02): three of the five, each cited from the tool's own source or the specification; the full sentence is the preset's `source`.
+
+| id           | label                         | units | scale | up   | Citation                                                                                                                                                                                           |
+| ------------ | ----------------------------- | ----- | ----- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `print-mm-z` | Print file: millimetres, Z up | mm    | 1     | `+z` | PrusaSlicer 2.8.1, `src/slic3r/GUI/Plater.cpp`: "The internal unit of PrusaSlicer is a millimeter"; `src/libslic3r/PrintConfig.cpp`, "Z offset": Z is the nozzle's height above the bed.           |
+| `scene-m-z`  | Scene units: metres, Z up     | m     | 1     | `+z` | Blender 4.2.0, `source/blender/editors/io/io_stl_ops.cc`: STL export defaults Scale 1.0, Scene Unit off, Up Z; `source/blender/blenkernel/intern/scene.cc`: a new scene is metric at unit scale 1. |
+| `scene-m-y`  | Scene units: metres, Y up     | m     | 1     | `+y` | glTF 2.0 specification, "Coordinate System and Units": "glTF defines +Y as up" and "The units for all linear distances are meters."                                                                |
+
+Left out (§9): `sculpt-mm-y`, because no sculpting tool's documentation found states both Y up and millimetres for its STL export (one lets the person pick millimetres or inches, and says STL carries no units); `cad-in-z`, because the CAD tools found make the STL unit a setting of the export dialog, not a default that follows an imperial template.
+
 ## 7. Build order, one commit each, with the test that proves it
 
 `npm run check` green after each; the regression baseline must not move (no preset, no change: `applyPreset` runs only when a preset is given).
