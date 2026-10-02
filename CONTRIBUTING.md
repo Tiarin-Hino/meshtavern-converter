@@ -9,6 +9,8 @@ This project is built by a small team together with the Claude Code agent. Human
 - Labels: `type:*`, `area:*`, `priority:*`.
   - `ready-for-agent` — the PM has reviewed the issue; the agent (or a human) may pick it up.
   - `needs-human` — blocked on a decision or on something the agent cannot judge (usually visuals).
+  - `release-blocker` — must be done before the converter is published.
+  - `cloud-ok` — can be finished in a Claude Code cloud session: no GPU, no reference device, no file from `corpus/`, no locally built WebAssembly.
 
 ## Doing work
 
@@ -16,7 +18,7 @@ This project is built by a small team together with the Claude Code agent. Human
 2. Commit with Conventional Commits.
 3. Add an entry to `docs/journal/` (see its `README.md`): what you did, why, what went wrong and how you solved it, with numbers.
 4. Open a PR with `Closes #<issue>` and fill in the checklist.
-5. CI must be green. A human reviews and squash-merges. Nobody pushes to `main`.
+5. CI must be green. A human reviews; only the PM squash-merges. Nobody pushes to `main`.
 
 ## WebAssembly we build ourselves
 
