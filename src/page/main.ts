@@ -1118,10 +1118,15 @@ function askUp(question: Question): Promise<Answer> {
     const started = asking.startedAt;
     if (started !== null) {
       asking.startedAt = null;
-      // Two frames, so that handing the mesh to the GPU counts.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => (state.questionMs = performance.now() - started)),
-      );
+      // Once the meshes have all their chunks, one per frame (#108), and two frames more, so that
+      // drawing them counts.
+      void viewer
+        .chunksAdded()
+        .then(() =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => (state.questionMs = performance.now() - started)),
+          ),
+        );
     }
     for (const waiter of asking.waiters.splice(0)) waiter();
     // Dabs painted while the worker answered go now.
