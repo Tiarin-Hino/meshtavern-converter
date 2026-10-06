@@ -18,6 +18,7 @@ describe('the library entries', () => {
       'ConversionProblem',
       'Converter',
       'DEFAULT_LOOK',
+      'DISC_HEIGHT_MAX_MM',
       'GRID_SQUARE_MM',
       'IDENTITY',
       'LOD_SPECS',
@@ -29,6 +30,8 @@ describe('the library entries', () => {
       'SNIFF_BYTES',
       'SOURCE_PRESETS',
       'STEPS',
+      'TOP_CONE_DEG',
+      'TOP_SHARE',
       'UNIT_FACTORS',
       'UP_AXES',
       'checkFits',
@@ -72,6 +75,14 @@ describe('the library entries', () => {
 
   it('three.ts exports exactly the helpers for drawing a baked mini', () => {
     expect(Object.keys(three).sort()).toEqual([
+      'MINI_METALNESS',
+      'MINI_ROUGHNESS',
+      'THUMBNAIL_AZIMUTH_DEG',
+      'THUMBNAIL_ELEVATION_DEG',
+      'THUMBNAIL_FOV_DEG',
+      'THUMBNAIL_MARGIN',
+      'THUMBNAIL_SIZE',
+      'addTableLights',
       'bakedTextureBytes',
       'compressedTextureBytes',
       'createBakedGeometry',
@@ -80,6 +91,7 @@ describe('the library entries', () => {
       'createLookUniforms',
       'disposeBakedMaterial',
       'ownCopy',
+      'renderThumbnail',
       'transcodeDetail',
       'updateLookUniforms',
     ]);

@@ -1,6 +1,7 @@
 import type { PartsOptions } from '../pipeline/assemble';
 import type { Answer, AskOptions, Question } from '../pipeline/ask';
 import type { OrientationOptions } from '../pipeline/orient';
+import type { MiniKind } from '../pipeline/kind';
 import type { PairingOptions } from '../pipeline/pair';
 import type { PlacementOptions } from '../pipeline/place';
 import type { ProblemCode } from '../pipeline/problems';
@@ -14,6 +15,8 @@ export interface ConvertOptions {
   orientation?: OrientationOptions;
   /** Units, creature size, scale to a base diameter and a plain base; left out, they are guessed. */
   sizing?: SizingOptions;
+  /** Character or prop as chosen (#99); left out, it is guessed from the base. */
+  kind?: MiniKind;
   /**
    * A known export convention (#100): its up axis, units and scale where `orientation`,
    * `baseOrientation` and `sizing` choose nothing; null or left out: none. A plain object,

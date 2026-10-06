@@ -48,9 +48,12 @@ describe('Converter', () => {
   it('sends the options along and resolves with the result', async () => {
     const { converter, workers } = setUp();
     const seen: string[] = [];
-    const job = converter.convert(new ArrayBuffer(84), (p) => seen.push(p.step), { bake: 512 });
+    const job = converter.convert(new ArrayBuffer(84), (p) => seen.push(p.step), {
+      bake: 512,
+      kind: 'prop',
+    });
     const request = workers[0]!.converts[0]!;
-    expect(request.options).toEqual({ bake: 512 });
+    expect(request.options).toEqual({ bake: 512, kind: 'prop' });
 
     workers[0]!.reply({ type: 'progress', id: request.id, progress: { step: 'read', percent: 0 } });
     workers[0]!.reply({ type: 'done', id: request.id, result });

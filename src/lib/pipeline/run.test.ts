@@ -178,6 +178,24 @@ describe('runPipeline', () => {
     expect(stats.sizing).toBe(sizing);
   }, 60_000);
 
+  it('guesses a figure on its base a character in the size step, and takes a chosen kind (#99)', async () => {
+    const stl = encodeBinaryStl(generateFigure(true));
+    const guessed = await runPipeline(stl, { bake: 0 });
+    expect(guessed.kind).toMatchObject({
+      kind: 'character',
+      method: 'guessed',
+      reason: 'base-top',
+    });
+    expect(guessed.stats.kind).toBe(guessed.kind);
+    expect(guessed.choices.kind).toBeUndefined();
+    expect(guessed.stats.timings.map((timing) => timing.step)).toEqual(ONE_FILE_STEPS);
+
+    const chosen = await runPipeline(stl, { bake: 0, kind: 'prop' });
+    expect(chosen.kind).toMatchObject({ kind: 'prop', method: 'manual', reason: 'manual' });
+    expect(chosen.kind.topShare).toBe(guessed.kind.topShare);
+    expect(chosen.choices.kind).toBe('prop');
+  }, 60_000);
+
   it('records the orientation: a quarter turn for a mini on a base', async () => {
     const { orientation, stats } = await runPipeline(encodeBinaryStl(generateFigure(true)), {
       bake: 0,

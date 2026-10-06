@@ -132,21 +132,25 @@
     "up": "+y"
   },
   "terrain/T-001": {
+    "kind": "prop",
     "size": "huge",
     "note": "terrain: by footprint only",
     "up": "+z"
   },
   "terrain/terrain-01": {
+    "kind": "prop",
     "size": "huge",
     "note": "terrain: by footprint only",
     "up": "+y"
   },
   "terrain/terrain-02": {
+    "kind": "prop",
     "size": "large",
     "note": "terrain: by footprint only",
     "up": "+y"
   },
   "terrain/terrain-03": {
+    "kind": "prop",
     "size": "medium",
     "note": "terrain: by footprint only",
     "up": "+y"

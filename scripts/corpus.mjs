@@ -4,8 +4,11 @@
 //   results.md       the same as tables, the corpus coverage, the size suggestions, the
 //                    up directions and the spots of figures on their base files (#70)
 //                    checked against scripts/corpus-index.json, how many minis are right
-//                    without a correction (#101), and what changed since the last run
-//   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels
+//                    without a correction (#101, with the character-or-prop guess of #99),
+//                    and what changed since the last run
+//   <kind>/<name>.png  one comparison sheet per mini: rows = whole mini and close-up, columns = levels,
+//                    under the mini's thumbnail
+//   thumbs/<kind>/<name>.png  the thumbnail of every mini (#99), 512 px, transparent
 // Sort the corpus into folders named after the kind of mini (see KINDS); files directly in
 // corpus/ count as "unsorted".
 // Every file stops at the question after the orient step (#92), which is answered as detected,
@@ -17,6 +20,7 @@
 // record's choices: put together and placed as the PM marked it.
 // Usage: npm run corpus -- [--no-bake] [--up detected|index] [--options "?ktx=1"] [--out <folder under out/>]
 // Nothing from corpus/ or out/ is ever committed.
+import { Buffer } from 'node:buffer';
 import { execSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
@@ -171,6 +175,14 @@ try {
       continue;
     }
 
+    // The thumbnail the table would list the mini with (#99), saved on its own and shown first:
+    // taken before the exports are opened again, which leave the page showing a GLB.
+    const thumbnail = Buffer.from(
+      await page.evaluate(async () => Array.from(new Uint8Array(await window.__mt.thumbnail()))),
+    );
+    mkdirSync(dirname(join(OUT, 'thumbs', `${key}.png`)), { recursive: true });
+    writeFileSync(join(OUT, 'thumbs', `${key}.png`), thumbnail);
+
     // Exports every level, then opens each compressed file again to prove that it loads.
     const exported = await page.evaluate(async (count) => {
       const out = [];
@@ -218,6 +230,12 @@ try {
         baseDiameterMm: round(stats.sizing.baseDiameterMm, 2),
         suggestedFrom: stats.sizing.suggestedFrom,
         warnings: stats.sizing.warnings.map((warning) => warning.kind),
+      },
+      // Character or prop (#99); `kind` is the corpus folder, so the figure is named `guess`.
+      guess: {
+        kind: stats.kind.kind,
+        reason: stats.kind.reason,
+        topShare: stats.kind.topShare === null ? null : round(stats.kind.topShare, 3),
       },
       bakeSkipped: stats.bakeSkipped ?? null,
       ...(stats.pair && { pair: pairFigures(stats.pair) }),
@@ -286,6 +304,7 @@ try {
     });
     await sheet.setContent(`<body style="margin:10px;background:#111;color:#ddd;font:14px system-ui">
       <h3 style="margin:0 0 8px">${key}${mini.pair ? ` on ${basename(mini.baseFile, '.stl')}, ${spotWords(mini.pair.spot)}` : ''}: ${stats.triangles.toLocaleString()} triangles, ${mini.sizeMm.join(' × ')} mm, up ${stats.up} (${stats.upMethod}${stats.orientation.tiltDeg > 0 ? `, tilted ${round(stats.orientation.tiltDeg, 1)}°` : ''}), ${stats.sizing.size} (${stats.sizing.footprintSquares}×${stats.sizing.footprintSquares})</h3>
+      <figure style="margin:0 0 8px"><img src="data:image/png;base64,${thumbnail.toString('base64')}" width="256" height="256" style="display:block;background:#3a3d44"><figcaption>thumbnail, 512 px · ${mini.guess.kind} (${mini.guess.reason}${mini.guess.topShare === null ? '' : `, ${mini.guess.topShare}`})</figcaption></figure>
       <div style="display:grid;grid-template-columns:repeat(${columns.length},1fr);gap:6px">
       ${shots.map((s) => `<figure style="margin:0"><img src="data:image/png;base64,${s.data}" style="width:100%;display:block"><figcaption>${s.caption}</figcaption></figure>`).join('')}
       </div></body>`);
