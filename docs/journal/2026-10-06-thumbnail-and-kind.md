@@ -32,7 +32,7 @@ Issue #99, for the table's import step and its list of minis (its spec 04). The 
 
 Corpus run of 2026-10-06, baked, questions confirmed as detected, development PC (i7-11700F, RTX 3060, Chrome 154):
 
-- **Character or prop: 28 of 32 right (88 %).** Props 4 of 4 (shares 0.04 to 0.24, threshold 0.5). Characters 24 of 28: 15 by their base file, 5 without a flat underside, 4 by the bare top (shares 0.56 to 0.74). The four misses, all read as props: `humanoid/MINI-014` 0.48 (a robe and candles cover the small base), `flying/flying-03` 0.39 (a 15 mm base), `quadruped/B-001` 0.37 and `large-creature/M-100` 0.35 (a rock or scenery on a busy base whose leaves and roots tilt more than 30°).
+- **Character or prop: 28 of 32 right (88 %).** Props 4 of 4 (shares 0.04 to 0.24, threshold 0.5). Characters 24 of 28: 15 by their base file, 5 without a flat underside, 4 by the bare top (shares 0.56 to 0.74). The four misses, all read as props: `humanoid/MINI-014` 0.48 (a robe and candles cover the small base), `flying/flying-03` 0.39 (reeds fill a 15 mm base), `quadruped/B-001` 0.37 (a bear on a rock among leaves and roots) and `large-creature/M-100` 0.35 (a creature sprawled over a base strewn with coins). Two patterns: the figure or what it stands on covers half the base, and busy scenic tops whose parts are steeper than the 30° cone.
 - **Right without correction: 18 of 29 (62 %)**, from 21 of 29 (72 %): the three minis that now fail, fail only on the guess.
 - The tree on a 50 mm disc the design expected to miss reads as a prop: only 0.11 of its base reads as bare top.
 - The size step's pass: 14 ms on 1.25 M triangles, 17 ms on 0.88 M (development PC). The largest corpus file (6.1 M triangles) comes with a base file, so the pass does not run for it.
