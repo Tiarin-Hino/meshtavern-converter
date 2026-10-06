@@ -39,7 +39,7 @@ Corpus run of 2026-10-06, baked, questions confirmed as detected, development PC
 
 ## Still open
 
-- The characters' rate is below the design note's stop line (24 of 27); the PM decides whether the rule, the threshold or the corpus changes (asked on PR #117). The constants were not tuned to the corpus.
+- The characters' rate is below the design note's stop line (24 of 27). The PM kept the rule and its constants as they are (2026-10-06, PR #117): 32 minis are too few to tune against. Before release the guess is measured on a much bigger corpus, the PM's own library, and the numbers adjusted there if needed (#118).
 - `kind` is not written into the GLB (design note §3.5).
 - A tree on a bare disc would read as a character; the table's switch covers it.
 

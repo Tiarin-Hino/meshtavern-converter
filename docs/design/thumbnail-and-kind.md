@@ -183,6 +183,7 @@ On the PR, and label the issue `needs-human` when the answer is the PM's:
 
 - The regression baseline moves, a GLB's bytes change, or a unit or e2e test outside the new ones needs a change.
 - The corpus rate for the kind is below 3 of the 4 props or below 24 of the 27 characters. Report the per-mini shares; do not tune the three constants to the corpus, which is too small to tune against. The PM decides whether the rule, the threshold or the corpus changes.
+  - **PM decision, 2026-10-06** (PR #117, comment 6007985746): the build measured 4 of 4 props and 24 of 28 characters. The rule and its constants stay as they are for now; the guess is measured on a much bigger corpus, the PM's own library, before release, and the numbers are adjusted there if needed (#118).
 - The thumbnail's colours still differ from the viewer's after the three corrections of §4.3, or the edge fringe remains after un-premultiplying.
 - The page would need a second WebGL context, or the viewer's detail texture cannot be reached without changing the `three` entry's API.
 - A decision in this note turns out wrong. Record the PM's answer in this note with the date, nothing else.
