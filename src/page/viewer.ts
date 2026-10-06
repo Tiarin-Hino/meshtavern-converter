@@ -21,6 +21,9 @@ import {
   updateLookUniforms,
   compressedTextureBytes,
   ownCopy,
+  addTableLights,
+  MINI_METALNESS,
+  MINI_ROUGHNESS,
 } from '../lib/three';
 import { chunkRanges } from './mesh-chunks';
 
@@ -124,8 +127,8 @@ export class Viewer {
   private readonly questionMaterial = new THREE.MeshStandardMaterial({
     color: new THREE.Color(DEFAULT_LOOK.base),
     flatShading: true,
-    roughness: 0.75,
-    metalness: 0,
+    roughness: MINI_ROUGHNESS,
+    metalness: MINI_METALNESS,
   });
   private look: Look = { ...DEFAULT_LOOK };
   private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
@@ -133,8 +136,8 @@ export class Viewer {
   private readonly material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
-    roughness: 0.75,
-    metalness: 0,
+    roughness: MINI_ROUGHNESS,
+    metalness: MINI_METALNESS,
   });
 
   private readonly frameTimes = new Float32Array(PERF_WINDOW);
@@ -147,10 +150,8 @@ export class Viewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.scene.background = new THREE.Color(0x1b1d22);
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 1.2));
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(60, 120, 80);
-    this.scene.add(key);
+    // The thumbnail (#99) draws in the same light.
+    addTableLights(this.scene);
     this.grid = new THREE.GridHelper(
       GRID_SQUARE_MM * GRID_SQUARES,
       GRID_SQUARES,

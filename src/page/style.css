@@ -699,6 +699,20 @@ body[data-dragging] #drop-frame {
   margin: 0;
 }
 
+/* The thumbnail (#99) on a light chequer, so its transparency and edges can be judged. */
+#dev-thumbnail-figure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+#dev-thumbnail {
+  flex: none;
+  background: repeating-conic-gradient(#e8e8e8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px;
+}
+
 #stress {
   display: flex;
   flex-wrap: wrap;

@@ -53,8 +53,10 @@ import {
   type ShownPatch,
   type Target,
   type UpQuestion,
+  type KindGuess,
 } from '../lib';
-import { transcodeDetail } from '../lib/three';
+import type { Texture } from 'three';
+import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { parsePageOptions } from './options';
@@ -111,6 +113,8 @@ interface AppState {
   /** Every progress message of the last conversion, for tests. */
   progressLog: Progress[];
   stats: ConversionStats | null;
+  /** Character or prop, as the last conversion guessed or was told (#99). */
+  kind: KindGuess | null;
   /** Why the last file did not become a mini, as the user reads it. */
   error: string | null;
   /** The same as a code, and what happened technically, for tests and developers. */
@@ -220,6 +224,11 @@ declare global {
       cancel: () => void;
       /** The converted mini's detail texture as a KTX2 file, or null when it has none. */
       detailKtx2: () => Uint8Array | null;
+      /**
+       * The thumbnail of the converted mini's table level as a PNG (#99): baked when it was, in the
+       * current look, drawn with the viewer's renderer. Rejects for an opened GLB.
+       */
+      thumbnail: (size?: number) => Promise<ArrayBuffer>;
       /** Runs the device benchmark and resolves with its Markdown result. */
       runBenchmark: (size: BenchmarkSize) => Promise<string>;
       /**
@@ -446,6 +455,7 @@ const state: AppState = {
   progress: null,
   progressLog: [],
   stats: null,
+  kind: null,
   error: null,
   errorCode: null,
   errorDetail: null,
@@ -1654,6 +1664,7 @@ async function convert(
     }
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = stats;
+    state.kind = result.kind;
     // The heading names the figure first once the conversion said which file is the base.
     state.fileName = sourcesName(stats.pair);
     showLevelButtons(stats);
@@ -1680,6 +1691,7 @@ async function convert(
     status.textContent = describeReady(stats);
     miniSize.textContent = describeMini(stats);
     showStats(stats);
+    if (pageOptions.dev) void showDevThumbnail();
   } catch (error) {
     if (error instanceof ConversionCancelled) {
       state.cancelled = true;
@@ -1740,6 +1752,51 @@ async function exportGlb(level: number, compact: boolean, unwrapped = false): Pr
     sizing: state.stats?.sizing,
     orientation: state.stats?.orientation,
   });
+}
+
+/**
+ * The thumbnail of the converted mini (#99): what `renderThumbnail` makes of the table level, baked
+ * when it was, in the current look, with the viewer's renderer (no second WebGL context).
+ */
+async function thumbnail(size?: number): Promise<ArrayBuffer> {
+  const mesh = baked ? baked.mesh : levels[TABLE_LEVEL];
+  if (!mesh || !state.stats || state.imported) throw new Error('No converted mini to draw');
+  // Uncompressed (?ktx=off) the page keeps texels: a texture is made for the picture and released.
+  const made =
+    baked && baked.texture instanceof Uint8Array
+      ? createDetailTexture(baked.texture, baked.resolution)
+      : null;
+  const texture: Texture | null = made ?? (baked?.texture as Texture | undefined) ?? null;
+  try {
+    const png = await renderThumbnail(mesh, {
+      size,
+      look: state.look,
+      texture,
+      renderer: viewer.webglRenderer,
+    });
+    return await png.arrayBuffer();
+  } finally {
+    made?.dispose();
+  }
+}
+
+const devThumbnail = document.querySelector<HTMLImageElement>('#dev-thumbnail');
+const devKind = document.querySelector<HTMLElement>('#dev-kind');
+
+/** Under ?dev: the thumbnail next to the viewer and the kind under it, for verify-3d. */
+async function showDevThumbnail(): Promise<void> {
+  if (!devThumbnail || !devKind) return;
+  const kind = state.kind;
+  devKind.textContent = kind
+    ? `Kind: ${kind.kind} (${kind.method}, ${kind.reason}${kind.topShare === null ? '' : `, ${kind.topShare.toFixed(2)}`})`
+    : '';
+  try {
+    const png = new Blob([await thumbnail()], { type: 'image/png' });
+    if (devThumbnail.src) URL.revokeObjectURL(devThumbnail.src);
+    devThumbnail.src = URL.createObjectURL(png);
+  } catch (error) {
+    devKind.textContent += ` · no thumbnail: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
@@ -2377,6 +2434,7 @@ window.__mt = {
   showBaked: (on) => showLevel(TABLE_LEVEL, false, on),
   cancel: () => converter.cancel(),
   detailKtx2: () => detailKtx2,
+  thumbnail,
   runBenchmark: benchmark,
   exportGlb,
   loadGlb,
