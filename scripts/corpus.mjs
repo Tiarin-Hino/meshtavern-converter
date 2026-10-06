@@ -175,6 +175,14 @@ try {
       continue;
     }
 
+    // The thumbnail the table would list the mini with (#99), saved on its own and shown first:
+    // taken before the exports are opened again, which leave the page showing a GLB.
+    const thumbnail = Buffer.from(
+      await page.evaluate(async () => Array.from(new Uint8Array(await window.__mt.thumbnail()))),
+    );
+    mkdirSync(dirname(join(OUT, 'thumbs', `${key}.png`)), { recursive: true });
+    writeFileSync(join(OUT, 'thumbs', `${key}.png`), thumbnail);
+
     // Exports every level, then opens each compressed file again to prove that it loads.
     const exported = await page.evaluate(async (count) => {
       const out = [];
@@ -263,13 +271,6 @@ try {
         peakBufferMb: round(stats.peakBufferBytes / 1048576),
       },
     });
-
-    // The thumbnail the table would list the mini with (#99), saved on its own and shown first.
-    const thumbnail = Buffer.from(
-      await page.evaluate(async () => Array.from(new Uint8Array(await window.__mt.thumbnail()))),
-    );
-    mkdirSync(dirname(join(OUT, 'thumbs', `${key}.png`)), { recursive: true });
-    writeFileSync(join(OUT, 'thumbs', `${key}.png`), thumbnail);
 
     // The comparison sheet. Column 0 is the full sculpt; a baked table level gets its own column.
     const columns = [{ label: 'Full', level: 0 }];
