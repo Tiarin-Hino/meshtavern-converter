@@ -113,6 +113,14 @@ export {
   type BaseMeasurement,
 } from './pipeline/size';
 export { UNIT_FACTORS } from './pipeline/units';
+// Character or prop: guessed from the base, or chosen (issue #99).
+export {
+  DISC_HEIGHT_MAX_MM,
+  TOP_CONE_DEG,
+  TOP_SHARE,
+  type KindGuess,
+  type MiniKind,
+} from './pipeline/kind';
 // Source presets: units, scale and up axis of a known export convention (issue #100).
 export { SOURCE_PRESETS, findSourcePreset, type SourcePreset } from './pipeline/source-preset';
 // The look: applied when drawing and exporting, never inside the conversion.

@@ -104,6 +104,7 @@ import {
   type PairResult,
   type PlacementOptions,
 } from './place';
+import { guessKind, type KindGuess, type MiniKind } from './kind';
 import { shade } from './shade';
 import type { Vec3 } from './base';
 import { sizeMini, type BaseMeasurement, type Sizing, type SizingOptions } from './size';
@@ -191,6 +192,8 @@ export interface ConversionStats {
   sizeMm: [number, number, number];
   /** Units, base, creature size and footprint: what the table needs to place the mini. */
   sizing: Sizing;
+  /** Character or prop: guessed from the base, or as chosen (#99). */
+  kind: KindGuess;
   /** Which way was taken as up in the file, and how that was decided: `orientation.up` and `.method`. */
   up: UpAxis;
   upMethod: Orientation['method'];
@@ -226,6 +229,8 @@ export interface UpChoices {
   placement?: PlacementOptions;
   /** The source preset the conversion ended with (#100); the options above are what was chosen by hand. */
   preset?: SourcePreset;
+  /** Character or prop, only when it was chosen (#99). */
+  kind?: MiniKind;
 }
 
 export type BakeSkipped =
@@ -260,6 +265,8 @@ export interface ConversionResult {
   baked?: Baked;
   /** The same object as `stats.sizing`. */
   sizing: Sizing;
+  /** The same object as `stats.kind`: character or prop (#99). */
+  kind: KindGuess;
   /** The same object as `stats.orientation`: the figure's, for a pair. */
   orientation: Orientation;
   /** The same object as `stats.pair`. */
@@ -284,6 +291,8 @@ export interface PipelineOptions {
   orientation?: OrientationOptions;
   /** Units, size, scale and plain base as the user chose them; the rest is guessed. */
   sizing?: SizingOptions;
+  /** Character or prop as the user chose it (#99). Left out, it is guessed from the base. */
+  kind?: MiniKind;
   /**
    * A known export convention (#100): its up axis, units and scale lie under `orientation`,
    * `baseOrientation` and `sizing`, field by field; what is chosen there wins. Its axis counts as
@@ -922,6 +931,7 @@ export async function runPipeline(
     onProgress = () => {},
     orientation: orientationOptions = {},
     sizing: sizingOptions = {},
+    kind: kindOption,
     preset: presetOption,
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
@@ -1821,16 +1831,18 @@ export async function runPipeline(
   }
 
   if (presetChoice) choices = { ...choices, preset: presetChoice };
+  if (kindOption) choices = { ...choices, kind: kindOption };
   // The trees and patches of the questions are not needed any more.
   trees = null;
   for (const mesh of meshes) dropSurfaceIndex(mesh);
   patches.clear();
-  const placed = run(
+  const { kind, ...placed } = run(
     'size',
     // A figure on its base file has its base: the plain one is never added.
     () => {
       const sizing = sizingUnder(presetChoice, sizingOptions);
-      return sizeMini(toSize, oriented.base ? { ...sizing, plainBase: false } : sizing);
+      const sized = sizeMini(toSize, oriented.base ? { ...sizing, plainBase: false } : sizing);
+      return { ...sized, kind: guessKind(sized.mesh, sized.sizing.base, pair, kindOption) };
     },
     // A scaled mesh is a copy; the oriented one is dropped once this step is done.
     (s) => fileBytes + meshBytes(toSize.mesh) + (s.mesh === toSize.mesh ? 0 : meshBytes(s.mesh)),
@@ -1919,6 +1931,7 @@ export async function runPipeline(
     lods,
     baked,
     sizing: placed.sizing,
+    kind,
     orientation,
     pair,
     choices,
@@ -1932,6 +1945,7 @@ export async function runPipeline(
       invalidTriangles,
       sizeMm: placed.sizeMm,
       sizing: placed.sizing,
+      kind,
       up: orientation.up,
       upMethod: orientation.method,
       orientation,
