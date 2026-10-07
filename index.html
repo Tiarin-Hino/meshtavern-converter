@@ -10,7 +10,8 @@
     render() in main.ts; elements say in which states they show with data-in. Elements with
     data-dev are the team's tools and are removed from the page unless the address has ?dev.
     The product's wording lives in COPY in src/page/page-state.ts: data-copy names the key that
-    start-up writes into an element, and render() fills the heading and the panel's button.
+    start-up writes into an element, and render() fills the heading and the panel's button. The
+    questions' elements are the question view's, made by mountQuestions (src/lib/questions/mount.ts).
   -->
   <body data-state="empty">
     <header id="top">
@@ -31,6 +32,7 @@
     <main id="stage">
       <div id="view">
         <canvas id="viewport"></canvas>
+        <div id="question-view" data-in="asking"></div>
         <div id="levels" role="group" aria-label="Detail level" data-in="done" data-mini></div>
       </div>
       <section id="panel" aria-labelledby="heading">
@@ -39,76 +41,11 @@
         <p id="status" role="status" data-copy="dropHint"></p>
         <progress id="progress" max="100" value="0" data-in="converting"></progress>
         <button id="cancel" type="button" data-in="converting asking" data-copy="cancel"></button>
-        <!-- Which way is up, asked after the orient step (#92): the full-detail mesh is on screen. -->
-        <section id="ask" aria-labelledby="ask-question" data-in="asking">
-          <p id="ask-file" hidden></p>
-          <p id="ask-question" data-copy="askUp"></p>
-          <p id="ask-found"></p>
-          <p id="ask-warning" hidden></p>
-          <label id="ask-base-choice" hidden
-            >Base
-            <select id="ask-base"></select
-          ></label>
-          <label
-            ><span data-copy="source"></span>
-            <select id="ask-source"></select
-          ></label>
-          <label
-            >Up axis in file
-            <select id="ask-up"></select
-          ></label>
-          <div id="ask-turn" role="group" aria-label="Turn">
-            <button type="button" data-turn="pitch" data-deg="-15">Pitch −15°</button>
-            <button type="button" data-turn="pitch" data-deg="15">Pitch +15°</button>
-            <button type="button" data-turn="roll" data-deg="-15">Roll −15°</button>
-            <button type="button" data-turn="roll" data-deg="15">Roll +15°</button>
-            <label class="check"
-              ><input id="ask-turn-by-hand" type="checkbox" /> Turn by hand</label
-            >
-            <span id="ask-pending" hidden></span>
-            <button id="ask-set-down" type="button" data-copy="askSetDown"></button>
-            <button id="ask-reset" type="button" data-copy="askReset"></button>
-          </div>
-          <button id="ask-swap" type="button" data-copy="swapPair" hidden></button>
-          <button id="ask-confirm" class="primary" type="button"></button>
-        </section>
-        <!-- Where the parts meet (#93): the pairs of patches, then the parts put together. -->
-        <section id="meet" aria-labelledby="meet-question" data-in="asking">
-          <p id="meet-question"></p>
-          <ul id="meet-parts" hidden></ul>
-          <!-- The pairs stop: one chip per pair, in its colour. -->
-          <div id="meet-marking" data-stage="pairs">
-            <ul id="meet-pairs" aria-label="Pairs"></ul>
-            <p id="meet-hint"></p>
-            <div id="meet-tools" role="group" aria-label="Marks">
-              <button id="meet-add" type="button" data-copy="addPair"></button>
-              <button id="meet-brush" type="button" aria-pressed="false" data-copy="brush"></button>
-              <button id="meet-erase" type="button" aria-pressed="false" data-copy="erase"></button>
-              <button id="meet-undo" type="button" data-copy="undo"></button>
-              <button id="meet-clear" type="button" data-copy="startOver"></button>
-              <button id="meet-apart" type="button" data-copy="pullApart" hidden></button>
-            </div>
-          </div>
-          <!-- The final view: the parts put together. -->
-          <div id="meet-final" data-stage="fitted">
-            <p id="meet-placement"></p>
-            <div id="meet-adjust" role="group" aria-label="Adjust where they meet">
-              <button type="button" data-meet-lift="1">Raise 0.5 mm</button>
-              <button type="button" data-meet-lift="-1">Lower 0.5 mm</button>
-              <button type="button" data-meet-turn="-15">Turn −15°</button>
-              <button type="button" data-meet-turn="15">Turn +15°</button>
-              <button id="meet-tilt" type="button" hidden></button>
-            </div>
-            <button id="meet-back" type="button" data-copy="backToMarking"></button>
-          </div>
-          <!-- Moving around while marking: a part, or all of them (#93). -->
-          <div id="meet-look">
-            <span data-copy="lookAt"></span>
-            <div id="meet-view" role="group" aria-label="Look at"></div>
-            <p id="meet-view-hint" data-copy="viewHint"></p>
-          </div>
-          <button id="meet-confirm" class="primary" type="button"></button>
-        </section>
+        <!--
+          The questions a conversion asks (#92, #93): the library's question view (#119) puts its
+          controls here and its canvas into #question-view, over the viewport.
+        -->
+        <div id="questions" data-in="asking"></div>
         <button id="choose-again" class="primary" type="button" data-in="empty error"></button>
         <p class="promise" data-in="empty error" data-copy="promise"></p>
         <p id="pair-hint" class="promise" data-in="empty" data-copy="pairHint"></p>
