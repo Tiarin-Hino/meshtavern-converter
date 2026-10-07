@@ -61,27 +61,30 @@ import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { parsePageOptions } from './options';
 import {
-  COPY,
   describeAskedFile,
   describeAskPending,
-  describeMini,
-  describeOrientation,
   describePairs,
-  describeProgress,
   describePairWarning,
   describePart,
   describeParts,
-  describePendingPlacement,
   describePlacement,
+  describeUp,
+  LIFT_STEP_MM,
+  partName,
+  TURN_STEP_DEG,
+} from '../lib/questions';
+import {
+  COPY,
+  describeMini,
+  describeOrientation,
+  describeProgress,
+  describePendingPlacement,
   describeReady,
   describeTooManyFiles,
   describeUnits,
-  describeUp,
   describeWrongFile,
   LEVEL_LABELS,
-  LIFT_STEP_MM,
   pageStateOf,
-  partName,
   type PageState,
 } from './page-state';
 import { Viewer, type BakedMini, type Perf } from './viewer';
@@ -879,8 +882,6 @@ sourceSelect.replaceChildren(...presetOptions());
 for (const select of [askInputs.source, sourceSelect])
   select.addEventListener('change', () => void setPreset(select.value || null));
 
-/** The steps of the turn buttons. _(proposal, #72)_ */
-const TURN_STEP_DEG = 15;
 type TurnAxis = 'pitch' | 'roll';
 /** Pitch tips the mini towards the camera's default view (about scene x), roll to the side (about z). */
 const TURN_AXES: Record<TurnAxis, [number, number, number]> = {
