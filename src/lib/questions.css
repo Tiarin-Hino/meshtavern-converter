@@ -76,6 +76,15 @@
   position: relative;
 }
 
+/*
+ * The controls on the panel's colour, so the light text reads in a light dialog too (found by the
+ * consumer check, #119). No specificity: a consumer's own background wins; on the page the panel
+ * behind is the same colour.
+ */
+:where(.mt-questions-controls) {
+  background: var(--q-panel);
+}
+
 /* The view's own panel over the scene's right edge, when no controls element was given (PANEL_WIDTH_PX). */
 .mt-questions-panel {
   position: absolute;
