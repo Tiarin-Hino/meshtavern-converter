@@ -8,7 +8,8 @@
     ".": "./src/lib/index.ts",
     "./three": "./src/lib/three.ts",
     "./dev": "./src/lib/dev.ts",
-    "./questions": "./src/lib/questions.ts"
+    "./questions": "./src/lib/questions.ts",
+    "./questions.css": "./src/lib/questions.css"
   },
   "engines": {
     "node": ">=20.19"

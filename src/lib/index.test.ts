@@ -100,9 +100,17 @@ describe('the library entries', () => {
 
   it('questions.ts exports exactly the question view and its words (#119)', () => {
     expect(Object.keys(questions).sort()).toEqual([
+      'BRUSH_RADIUS_MM',
+      'BRUSH_STEP_PX',
+      'FOCUS_HOLD_MS',
       'LIFT_STEP_MM',
+      'PAIR_COLOURS',
+      'PANEL_WIDTH_PX',
       'QUESTION_COPY',
+      'TAP_MAX_MS',
+      'TAP_MAX_PX',
       'TURN_STEP_DEG',
+      'UPLOAD_BYTES_PER_FRAME',
       'describeAskPending',
       'describeAskedFile',
       'describePairWarning',
@@ -111,6 +119,7 @@ describe('the library entries', () => {
       'describeParts',
       'describePlacement',
       'describeUp',
+      'mountQuestions',
       'partName',
     ]);
   });

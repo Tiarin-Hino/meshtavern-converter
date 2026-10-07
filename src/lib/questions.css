@@ -1,0 +1,250 @@
+/*
+ * The question view (#119, docs/design/questions-view.md §6.2): every rule under .mt-questions,
+ * the class mountQuestions puts on the elements it was given. Moved from the page's style.css,
+ * with the page's control rules copied at the same values, so the view looks the same on the page
+ * and in a consumer that has no rules of its own. The colours are the page's custom properties
+ * (--panel, --control, --line, --text, --muted, --accent, --warn) with the page's values as
+ * fallbacks; the pairs' colours (--pair-1 … --pair-4) are set on the hosts by the view.
+ */
+
+.mt-questions {
+  --q-panel: var(--panel, #22252b);
+  --q-control: var(--control, #252830);
+  --q-line: var(--line, #3a3f49);
+  --q-text: var(--text, #e6e8eb);
+  --q-muted: var(--muted, #a9afb8);
+  --q-accent: var(--accent, #7aa2f7);
+  --q-warn: var(--warn, #f0b35e);
+  color: var(--q-text);
+}
+
+.mt-questions [hidden] {
+  display: none !important;
+}
+
+/* The controls, as the page draws its own. */
+
+.mt-questions button,
+.mt-questions select {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--q-line);
+  border-radius: 6px;
+  background: var(--q-control);
+  color: inherit;
+  font: inherit;
+}
+
+.mt-questions button {
+  cursor: pointer;
+}
+
+.mt-questions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mt-questions button.primary {
+  border-color: var(--q-accent);
+  background: var(--q-accent);
+  color: #10131a;
+  font-weight: 600;
+}
+
+.mt-questions :focus-visible {
+  outline: 2px solid var(--q-accent);
+  outline-offset: 2px;
+}
+
+.mt-questions .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+/* The scene: the canvas fills the element it was given; the element's size is the consumer's. */
+
+.mt-questions-scene canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* No specificity: a consumer's own position for the element wins. */
+:where(.mt-questions-scene) {
+  position: relative;
+}
+
+/* The view's own panel over the scene's right edge, when no controls element was given (PANEL_WIDTH_PX). */
+.mt-questions-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  width: var(--q-panel-width, 360px);
+  overflow-y: auto;
+  padding: 20px;
+  border-left: 1px solid var(--q-line);
+  background: var(--q-panel);
+}
+
+/* The up question (#92). */
+
+.mt-questions #ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.mt-questions #ask p {
+  margin: 0;
+}
+
+.mt-questions #ask-file,
+.mt-questions #ask-found {
+  color: var(--q-muted);
+}
+
+.mt-questions #ask-question {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.mt-questions #ask-warning {
+  color: var(--q-warn);
+}
+
+.mt-questions #ask label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mt-questions #ask-turn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mt-questions #ask-pending {
+  flex-basis: 100%;
+  color: var(--q-muted);
+}
+
+/* Where the parts meet (#93): the pairs stop, then the final view. */
+
+.mt-questions #meet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.mt-questions #meet p {
+  margin: 0;
+}
+
+.mt-questions #meet-question {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.mt-questions #meet-hint,
+.mt-questions #meet-placement,
+.mt-questions #meet-parts {
+  color: var(--q-muted);
+}
+
+.mt-questions #meet-parts {
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+/* At the final view of the parts a marked part's line selects what Raise, Lower and Turn move. */
+.mt-questions #meet-parts li[data-part] {
+  cursor: pointer;
+}
+
+.mt-questions #meet-parts li[data-selected] {
+  color: var(--q-text);
+  font-weight: 600;
+}
+
+.mt-questions #meet-marking,
+.mt-questions #meet-final {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.mt-questions #meet-look {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mt-questions #meet-view-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--q-muted);
+}
+
+.mt-questions #meet-adjust,
+.mt-questions #meet-view,
+.mt-questions #meet-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mt-questions #meet-tools button[aria-pressed='true'] {
+  border-color: var(--q-accent);
+  color: var(--q-accent);
+}
+
+/* One chip per pair, both sides of a pair in its colour (#93, patches §7.1). */
+.mt-questions #meet-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mt-questions #meet-pairs li {
+  display: flex;
+  gap: 4px;
+}
+
+.mt-questions #meet-pairs .chip {
+  border-left: 6px solid var(--chip);
+  white-space: pre;
+}
+
+.mt-questions #meet-pairs .chip[aria-pressed='true'] {
+  outline: 2px solid var(--chip);
+}
+
+/* A phone: every control a touch target, as the page's (PHONE_MAX_WIDTH_PX, --touch-target). */
+@media (max-width: 600px) {
+  .mt-questions button,
+  .mt-questions select,
+  .mt-questions #ask label,
+  .mt-questions .check {
+    min-height: 44px;
+  }
+
+  .mt-questions input[type='checkbox'] {
+    width: 20px;
+    height: 20px;
+  }
+}
