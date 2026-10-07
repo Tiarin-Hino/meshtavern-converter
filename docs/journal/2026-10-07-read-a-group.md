@@ -3,7 +3,7 @@ title: Reading a group of files with the run's own memory estimate
 date: 2026-10-07
 phase: 2
 issues: [122]
-prs: []
+prs: [123]
 topics: [stl-import, tooling]
 ---
 
