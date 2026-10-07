@@ -53,6 +53,7 @@ export {
 export type { Fit } from './pipeline/fit';
 export {
   MAX_PAIRS,
+  MAX_STROKES,
   pairsAllowed,
   type Hit,
   type Meeting,
@@ -71,7 +72,7 @@ export {
   type ProblemCode,
 } from './pipeline/problems';
 // Refusing a file before all of it is read: what the page does in its drop handler.
-export { readStlFile } from './read-file';
+export { readStlFile, readStlFiles } from './read-file';
 export { SNIFF_BYTES, sniffStl, type StlFormat } from './pipeline/stl';
 export { checkFits, memoryBudgetBytes, estimateConversionBytes } from './pipeline/memory';
 // The mesh the levels are made of.
