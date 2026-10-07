@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { generateBumpySheet } from './pipeline/generate';
-import { estimateConversionBytes } from './pipeline/memory';
+import {
+  estimateAssemblyBytes,
+  estimateConversionBytes,
+  estimatePairBytes,
+} from './pipeline/memory';
 import { ConversionProblem } from './pipeline/problems';
 import { encodeBinaryStl } from './pipeline/stl';
-import { readStlFile } from './read-file';
+import { readStlFile, readStlFiles } from './read-file';
 
 async function refusal(promise: Promise<unknown>): Promise<string> {
   const error = await promise.then(
@@ -44,5 +48,69 @@ describe('readStlFile', () => {
       const buffer = await readStlFile(new Blob([stl]), budget);
       expect(new Uint8Array(buffer)).toEqual(new Uint8Array(stl));
     }
+  });
+});
+
+describe('readStlFiles', () => {
+  const stl = encodeBinaryStl(generateBumpySheet(20));
+  /** A blob that counts how often it is read in full. */
+  function counted(): { blob: Blob; fullReads: () => number } {
+    const blob = new Blob([stl]);
+    let reads = 0;
+    const read = blob.arrayBuffer.bind(blob);
+    blob.arrayBuffer = () => {
+      reads++;
+      return read();
+    };
+    return { blob, fullReads: () => reads };
+  }
+  const sized = { byteLength: stl.byteLength, format: 'binary' as const };
+
+  it('refuses a pair over the budget by the pair estimate, before reading either file', async () => {
+    const needed = estimatePairBytes(stl.byteLength, 'binary', stl.byteLength, 'binary');
+    const files = [counted(), counted()];
+    expect(
+      await refusal(
+        readStlFiles(
+          files.map((f) => f.blob),
+          needed - 1,
+        ),
+      ),
+    ).toBe('too-large');
+    expect(files.map((f) => f.fullReads())).toEqual([0, 0]);
+    expect(
+      await readStlFiles(
+        files.map((f) => f.blob),
+        needed,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('refuses parts over the budget by the assembly estimate, before reading any file', async () => {
+    const needed = estimateAssemblyBytes([sized, sized, sized]);
+    const files = [counted(), counted(), counted()];
+    expect(
+      await refusal(
+        readStlFiles(
+          files.map((f) => f.blob),
+          needed - 1,
+        ),
+      ),
+    ).toBe('too-large');
+    expect(files.map((f) => f.fullReads())).toEqual([0, 0, 0]);
+    expect(
+      await readStlFiles(
+        files.map((f) => f.blob),
+        needed,
+      ),
+    ).toHaveLength(3);
+  });
+
+  it('refuses a group with one file that is not an STL, before reading any', async () => {
+    const good = counted();
+    expect(await refusal(readStlFiles([good.blob, new Blob([new Uint8Array(4096)])]))).toBe(
+      'not-stl',
+    );
+    expect(good.fullReads()).toBe(0);
   });
 });
