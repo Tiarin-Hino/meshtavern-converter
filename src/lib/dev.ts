@@ -11,6 +11,8 @@ export {
   type PipelineOptions,
   type PairPlacement,
 } from './pipeline/run';
+// A paint on the table level's islands where a test wants it (#125).
+export { paintWhere } from './pipeline/paint';
 export { DETAIL_EFFORT, DETAIL_EFFORTS } from './pipeline/compress';
 export { meshBuffers, computeVertexNormals, weldVertices } from './pipeline/mesh';
 // The regression net's stand-in minis.

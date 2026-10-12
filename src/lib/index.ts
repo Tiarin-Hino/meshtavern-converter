@@ -134,6 +134,8 @@ export {
   type LookPreset,
   type LookPresetId,
 } from './pipeline/look';
+// Paint (issue #125): the far and close levels take the table level's paint per vertex.
+export { PAINT_REACH_MM, paintAtVertices, type Albedo } from './pipeline/paint';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';

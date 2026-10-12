@@ -44,6 +44,13 @@ export interface ThumbnailOptions {
    * was skipped. The texture is not disposed.
    */
   texture?: THREE.Texture | null;
+  /**
+   * The paint (issue #125): a colour texture on the table level's texture coordinates, as
+   * `createBakedMaterial`'s `map` takes it. It needs `texture` and `result.baked.mesh`: without
+   * the detail texture the mesh has no texture coordinates to put it on (a RangeError); the paint
+   * per vertex of another level is `paintAtVertices`. Not disposed.
+   */
+  albedo?: THREE.Texture | null;
   /** Draw with this renderer, into a render target: the screen is not touched. Without one a private renderer is made and disposed. */
   renderer?: THREE.WebGLRenderer;
 }
@@ -272,13 +279,16 @@ export async function renderThumbnail(
     throw new RangeError(`A thumbnail is 1 to ${THUMBNAIL_SIZE} px, not ${size}`);
   const look = options.look ?? DEFAULT_LOOK;
   const texture = options.texture ?? null;
+  const albedo = options.albedo ?? null;
+  if (albedo && !texture)
+    throw new RangeError('A paint is drawn on the baked table level: pass its detail texture');
 
   const scene = new THREE.Scene();
   addTableLights(scene);
   const mini = texture
     ? new THREE.Mesh(
         createBakedGeometry(mesh),
-        createBakedMaterial(texture, createLookUniforms(look)),
+        createBakedMaterial(texture, createLookUniforms(look), { map: albedo }),
       )
     : vertexColoured(mesh, look);
   scene.add(mini);

@@ -11,6 +11,7 @@ export {
   updateLookUniforms,
   disposeBakedMaterial,
   bakedTextureBytes,
+  type BakedMaterialOptions,
   type LookUniforms,
 } from './three/baked-material';
 export { transcodeDetail, ownCopy, compressedTextureBytes } from './three/compressed-texture';

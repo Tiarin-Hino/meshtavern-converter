@@ -490,7 +490,11 @@ test('bakes and compresses a mini without being asked to, and shows it that way'
   // What is on screen is the baked table level, drawn from the compressed texture.
   expect(state.shownLevel).toBe(2);
   expect(state.showingBaked).toBe(true);
-  await page.waitForTimeout(600);
+  // state.perf is refreshed every 500 ms by a timer, which a busy runner fires late: wait for the
+  // refresh that sees the baked mini rather than a fixed time (it read 0 once on CI, on #129).
+  await page.waitForFunction(() => window.__mt.state.perf?.bakedMinis === 1, undefined, {
+    timeout: 10_000,
+  });
   const perf = await page.evaluate(() => window.__mt.state.perf!);
   expect(perf.bakedMinis).toBe(1);
   expect(perf.textureBytes).toBe(Math.round((1024 * 1024 * 4) / 3));
