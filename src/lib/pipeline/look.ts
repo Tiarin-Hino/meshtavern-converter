@@ -97,35 +97,82 @@ export function parseHexColour(hex: string): [number, number, number] {
   ) as [number, number, number];
 }
 
-/** One surface point: linear RGB for the given occlusion (0..1) and raw cavity (about -0.25..0.25). */
+/**
+ * The coat under the look at one point (issue #125): the base coat, or the paint where there is
+ * some. `paint` is linear RGB and alpha, 0–1: alpha 1 replaces the base coat, 0 leaves it, and
+ * in between (a texel at a painted area's edge, filtered) mixes the two by alpha.
+ */
+export function paintedBase(
+  base: readonly number[],
+  paint: readonly number[] | null = null,
+): [number, number, number] {
+  const alpha = paint ? paint[3]! : 0;
+  return [0, 1, 2].map(
+    (channel) => base[channel]! + (paint ? paint[channel]! - base[channel]! : 0) * alpha,
+  ) as [number, number, number];
+}
+
+/**
+ * One surface point: linear RGB for the given occlusion (0..1) and raw cavity (about -0.25..0.25).
+ * With `paint` (linear RGB and alpha, see `paintedBase`) the paint is the coat the wash and the
+ * edges work on: the look is the same, only the colour under it changes.
+ */
 export function pointColour(
   base: readonly number[],
   look: Look,
   occlusion: number,
   rawCavity: number,
+  paint: readonly number[] | null = null,
 ): [number, number, number] {
+  const coat = paintedBase(base, paint);
   const cavity = Math.max(-1, Math.min(1, rawCavity * CAVITY_GAIN));
   let shadow = (1 - look.occlusion * (1 - occlusion)) * (1 - look.wash * Math.max(0, -cavity));
   shadow = DARKEST + (1 - DARKEST) * shadow;
   const highlight = look.edges * Math.max(0, cavity) * HIGHLIGHT;
   return [0, 1, 2].map((channel) => {
-    const coat = base[channel]! * shadow;
-    return coat + (1 - coat) * highlight;
+    const shaded = coat[channel]! * shadow;
+    return shaded + (1 - shaded) * highlight;
   }) as [number, number, number];
+}
+
+/** sRGB bytes (a paint texture's texels) as linear 0–1, alpha as it is: what the GPU samples from an sRGB texture. */
+export function paintFromBytes(
+  rgba: ArrayLike<number>,
+  offset = 0,
+): [number, number, number, number] {
+  return [
+    srgbToLinear(rgba[offset]! / 255),
+    srgbToLinear(rgba[offset + 1]! / 255),
+    srgbToLinear(rgba[offset + 2]! / 255),
+    rgba[offset + 3]! / 255,
+  ];
 }
 
 /**
  * Linear RGB per vertex, 0–1, three numbers each. Meshes without shading data, and a
- * disabled look, get the flat base coat.
+ * disabled look, get the flat coat. `paint` is a colour per vertex, RGBA bytes with the colour in
+ * sRGB (`paintAtVertices` in paint.ts): where its alpha is above zero it is the coat instead of
+ * the base coat, under the same look (`pointColour`).
  */
-export function vertexColours(mesh: IndexedMesh, look: Look): Float32Array {
+export function vertexColours(
+  mesh: IndexedMesh,
+  look: Look,
+  paint: Uint8Array | null = null,
+): Float32Array {
   const vertexCount = mesh.positions.length / 3;
+  if (paint && paint.length !== vertexCount * 4)
+    throw new RangeError(`A paint per vertex is ${vertexCount * 4} bytes, not ${paint.length}`);
   const colours = new Float32Array(vertexCount * 3);
   const base = parseHexColour(look.base);
   const shaded = look.enabled && mesh.occlusion && mesh.cavity;
   for (let v = 0; v < vertexCount; v++) {
+    const painted = paint && paint[v * 4 + 3]! > 0 ? paintFromBytes(paint, v * 4) : null;
     colours.set(
-      shaded ? pointColour(base, look, mesh.occlusion![v]!, mesh.cavity![v]!) : base,
+      shaded
+        ? pointColour(base, look, mesh.occlusion![v]!, mesh.cavity![v]!, painted)
+        : painted
+          ? paintedBase(base, painted)
+          : base,
       v * 3,
     );
   }
