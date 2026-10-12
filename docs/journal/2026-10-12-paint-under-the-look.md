@@ -3,7 +3,7 @@ title: A paint under the look
 date: 2026-10-12
 phase: 2
 issues: [125]
-prs: []
+prs: [129]
 topics: [look, textures, testing]
 ---
 
@@ -18,7 +18,7 @@ Painting is part of the table application's plans (its spec 10). The table paint
 ## How
 
 - **One rule, in two places.** `pointColour` in `src/lib/pipeline/look.ts` gained an optional paint (linear RGB and alpha) and `paintedBase`, the coat under the look: `base + (paint - base) × alpha`. The baked material's GLSL does the same with `mix(uBase, paint.rgb, paint.a)` and then runs the unchanged look on that coat. Without a paint the arithmetic is the same as before, bit for bit (`base + 0`), so the GLB colours and the regression baseline did not move.
-- **Alpha between 0 and 1 mixes.** The issue says the paint replaces the base coat where its alpha is above zero. A texture's alpha is filtered, so at a painted area's edge it is 0.5 or 0.2. A hard "above zero" there would put the full paint colour on the edge, and that colour has been filtered with the bare texels' black, so the edge would get a dark rim. Mixing by alpha gives exactly the issue's rule at 0 and 1 and a soft edge in between. This is put to the PM in the PR.
+- **Alpha between 0 and 1 mixes.** The issue says the paint replaces the base coat where its alpha is above zero. A texture's alpha is filtered, so at a painted area's edge it is 0.5 or 0.2. A hard "above zero" there would put the full paint colour on the edge, and that colour has been filtered with the bare texels' black, so the edge would get a dark rim. Mixing by alpha gives exactly the issue's rule at 0 and 1 and a soft edge in between. The PM kept the mix (PM decision, 2026-10-12, on PR #129).
 - **The look is per material.** It already was in three.js: a material asks `onBeforeCompile` for its uniforms once per program it compiles, and it keeps its own list even when the program is shared with other materials (`WebGLRenderer.getProgram`, three.js 0.186). So a mini with its own `createLookUniforms` set has its own look, and passing one set to every material keeps the page's "change one, change all". `baked-material.test.ts` proves both with three.js's own standard shaders. A painted material compiles a second program (`meshtavern-baked-painted`): two programs in all, not one per mini.
 - **Per-vertex paint through the closest point.** The issue offered "nearest vertex" or "shared vertex order". Neither holds well: the close level has more vertices than the table level, and the unwrap splits vertices at seams. `paintAtVertices` (`src/lib/pipeline/paint.ts`) instead takes, for each vertex, the closest point on the table level's surface with the search tree the bake already uses (`TriangleBvh`), facing the vertex's way, within `PAINT_REACH_MM` = 1 mm _(proposal)_, and reads the texel under that point's texture coordinates. It reads one texel, no blend, so the bare gutter around an island never mixes in. The point is moved one texel toward its triangle's middle, so a vertex on an island's corner reads its own island.
 - **A test brush.** `paintWhere` (dev.ts) paints a texture on the table level's islands where a condition on the surface point holds. The unit test paints the generated figure's +x half red and checks every vertex more than 0.5 mm from the line, on the far and close levels: red on that side, bare on the other.
@@ -40,7 +40,6 @@ Painting is part of the table application's plans (its spec 10). The table paint
 
 ## Still open
 
-- Alpha between 0 and 1 mixes the paint and the base coat; the issue said "replaces". The PM decides.
 - The GLSL and `pointColour` are compared in the tests by their rule (`look.test.ts`) and by the paint's shader text (`baked-material.test.ts`), not by running the shader against `pointColour`.
 - A table that paints with mipmaps needs to spread each island's paint, or to blend the seams; the converter does not do it for the table.
 
