@@ -3,7 +3,7 @@ title: A paint under the look
 date: 2026-10-12
 phase: 2
 issues: [125]
-prs: [129]
+prs: [129, 130]
 topics: [look, textures, testing]
 ---
 
