@@ -122,6 +122,8 @@ test('refuses a mini opened from a GLB, which has no result', async ({ page }) =
 const NEAR_THE_LINE_PX = 4;
 
 test('draws a paint under the look where it is painted, and only there', async ({ page }) => {
+  // A full baked conversion of the generated figure and four thumbnails: slow on CI runners.
+  test.setTimeout(240_000);
   await page.goto('/?dev&ask=off');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.setInputFiles('#file', {

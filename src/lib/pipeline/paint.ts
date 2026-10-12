@@ -1,3 +1,4 @@
+import { dilate, forEachIslandTexel, MIN_NORMAL_AGREEMENT } from './bake';
 import { TriangleBvh, type SurfaceHit } from './bvh';
 import type { IndexedMesh } from './mesh';
 
@@ -27,8 +28,6 @@ export interface Albedo {
  * far. _(proposal)_
  */
 export const PAINT_REACH_MM = 1;
-/** A vertex facing away from the surface found belongs to another layer (the inside of a cloak). */
-const MIN_NORMAL_AGREEMENT = 0.2;
 /** How far a sample is moved from a triangle's corner toward its middle, in texels. */
 const SAMPLE_INSET = 1;
 
@@ -88,16 +87,18 @@ export function paintAtVertices(mesh: IndexedMesh, table: IndexedMesh, albedo: A
   return paint;
 }
 
-/** Rings of texels a test paint is spread into around every island, as the bake does. */
-const PAINT_DILATION = 2;
-const EMPTY = 0;
-const NEAR = 1;
-const INSIDE = 2;
+/**
+ * Rings of texels a test paint is spread into around every island (`dilate`: a ring reaches the
+ * four neighbours). Three reach the tip of a sliver whose own texels the walk misses; the bake's
+ * four let islands packed close together take each other's paint (#125's journal entry).
+ */
+const PAINT_DILATION = 3;
 
 /**
  * A paint texture for tests and tooling: `colour` (RGBA bytes) on every texel of `table`'s islands
  * whose point on the surface passes `where`, bare elsewhere, spread PAINT_DILATION texels past
- * each island's edge. The table application paints its own; this one proves the paths.
+ * each island's edge. It fills the texels the bake fills (`forEachIslandTexel`). The table
+ * application paints its own; this one proves the paths.
  */
 export function paintWhere(
   table: IndexedMesh,
@@ -105,70 +106,17 @@ export function paintWhere(
   where: (x: number, y: number, z: number) => boolean,
   colour: readonly [number, number, number, number],
 ): Albedo {
-  const uvs = table.uvs;
-  if (!uvs) throw new Error('Painting needs the table level’s texture coordinates');
+  if (!table.uvs) throw new Error('Painting needs the table level’s texture coordinates');
   const data = new Uint8Array(size * size * 4);
-  /** EMPTY outside every island, else whether a triangle holds the texel's centre (painted or not). */
-  const written = new Uint8Array(size * size);
-  const { positions, indices } = table;
-  for (let t = 0; t < indices.length; t += 3) {
-    const corners = [indices[t]!, indices[t + 1]!, indices[t + 2]!];
-    const [ax, ay, bx, by, cx, cy] = corners.flatMap((i) => [
-      uvs[i * 2]! * size,
-      uvs[i * 2 + 1]! * size,
-    ]) as [number, number, number, number, number, number];
-    const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
-    if (area === 0) continue;
-    const x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx) - 0.5));
-    const x1 = Math.min(size - 1, Math.ceil(Math.max(ax, bx, cx) + 0.5));
-    const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy) - 0.5));
-    const y1 = Math.min(size - 1, Math.ceil(Math.max(ay, by, cy) + 0.5));
-    // As the bake: texels whose centre is just outside are painted too, so a sliver that covers
-    // no texel centre still gets its texels; one inside a triangle is not taken by a neighbour.
-    const slack = 0.75 / Math.sqrt(Math.abs(area));
-    for (let y = y0; y <= y1; y++)
-      for (let x = x0; x <= x1; x++) {
-        const px = x + 0.5;
-        const py = y + 0.5;
-        let wb = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / area;
-        let wc = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / area;
-        let wa = 1 - wb - wc;
-        if (wa < -slack || wb < -slack || wc < -slack) continue;
-        const texel = y * size + x;
-        const inside = wa >= 0 && wb >= 0 && wc >= 0;
-        if (written[texel] === INSIDE || (written[texel] === NEAR && !inside)) continue;
-        written[texel] = inside ? INSIDE : NEAR;
-        wa = Math.max(0, wa);
-        wb = Math.max(0, wb);
-        wc = Math.max(0, wc);
-        const sum = wa + wb + wc;
-        const at = (axis: number): number =>
-          (positions[corners[0]! * 3 + axis]! * wa +
-            positions[corners[1]! * 3 + axis]! * wb +
-            positions[corners[2]! * 3 + axis]! * wc) /
-          sum;
-        if (where(at(0), at(1), at(2))) data.set(colour, texel * 4);
-        else data.fill(0, texel * 4, texel * 4 + 4);
-      }
-  }
-  // Spread each island outward, so a texel that a vertex or a filter reads at the edge is the island's.
-  for (let ring = 0; ring < PAINT_DILATION; ring++) {
-    const before = written.slice();
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const texel = y * size + x;
-        if (before[texel] !== EMPTY) continue;
-        search: for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const sx = x + dx;
-            const sy = y + dy;
-            if (sx < 0 || sy < 0 || sx >= size || sy >= size || before[sy * size + sx] === EMPTY)
-              continue;
-            data.copyWithin(texel * 4, (sy * size + sx) * 4, (sy * size + sx) * 4 + 4);
-            written[texel] = NEAR;
-            break search;
-          }
-      }
-  }
+  const { positions } = table;
+  const { written } = forEachIslandTexel(table, size, (texel, ia, ib, ic, wa, wb, wc) => {
+    const at = (axis: number): number =>
+      positions[ia * 3 + axis]! * wa +
+      positions[ib * 3 + axis]! * wb +
+      positions[ic * 3 + axis]! * wc;
+    if (where(at(0), at(1), at(2))) data.set(colour, texel * 4);
+    else data.fill(0, texel * 4, texel * 4 + 4);
+  });
+  dilate(size, data, written, PAINT_DILATION);
   return { width: size, height: size, data };
 }

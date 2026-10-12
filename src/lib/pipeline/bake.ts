@@ -32,7 +32,7 @@ export interface BakedMaps {
 /** Neighbour-averaging passes on the sculpt's cavity before it is baked. */
 const SCULPT_CAVITY_SMOOTHING = 3;
 /** Sculpt vertices facing away from the reduced surface belong to another layer (inside of a cloak). */
-const MIN_NORMAL_AGREEMENT = 0.2;
+export const MIN_NORMAL_AGREEMENT = 0.2;
 /**
  * How far from the reduced surface the sculpt is searched, in mm. The reduced levels stay
  * within about 0.35 mm of the sculpt; more reach only invites answers from a neighbouring part.
@@ -58,9 +58,6 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
     detail[texel * 4 + 2] = 255;
     detail[texel * 4 + 3] = cavityToByte(0);
   }
-  /** 0 = empty, 1 = written. */
-  const written = new Uint8Array(texels);
-
   const sculptCavity = computeCavity(sculpt, SCULPT_CAVITY_SMOOTHING);
   const bvhStart = performance.now();
   const bvh = new TriangleBvh(sculpt);
@@ -71,11 +68,105 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
   // last answer first gives the search a tight bound from the start.
   let hint = -1;
 
-  const { positions, indices, uvs } = reduced;
+  const { positions } = reduced;
   const normals = reduced.normals;
-  let covered = 0;
+  // Narrowed here: the walk's callback does not keep the checks above.
+  const sculptNormals = sculpt.normals;
   let fallback = 0;
 
+  const { written, covered } = forEachIslandTexel(
+    reduced,
+    resolution,
+    (texel, ia, ib, ic, wa, wb, wc) => {
+      const sx = positions[ia * 3]! * wa + positions[ib * 3]! * wb + positions[ic * 3]! * wc;
+      const sy =
+        positions[ia * 3 + 1]! * wa + positions[ib * 3 + 1]! * wb + positions[ic * 3 + 1]! * wc;
+      const sz =
+        positions[ia * 3 + 2]! * wa + positions[ib * 3 + 2]! * wb + positions[ic * 3 + 2]! * wc;
+      const nx = normals[ia * 3]! * wa + normals[ib * 3]! * wb + normals[ic * 3]! * wc;
+      const ny = normals[ia * 3 + 1]! * wa + normals[ib * 3 + 1]! * wb + normals[ic * 3 + 1]! * wc;
+      const nz = normals[ia * 3 + 2]! * wa + normals[ib * 3 + 2]! * wb + normals[ic * 3 + 2]! * wc;
+
+      facing.nx = nx;
+      facing.ny = ny;
+      facing.nz = nz;
+      bvh.closest(hit, sx, sy, sz, SEARCH_MM * SEARCH_MM, facing, hint);
+
+      let ox = nx;
+      let oy = ny;
+      let oz = nz;
+      if (hit.triangle < 0) {
+        // No sculpt surface within reach: keep the reduced mesh's own normal.
+        fallback++;
+      } else {
+        hint = hit.triangle;
+        const sa = sculpt.indices[hit.triangle * 3]!;
+        const sb = sculpt.indices[hit.triangle * 3 + 1]!;
+        const sc = sculpt.indices[hit.triangle * 3 + 2]!;
+        ox =
+          sculptNormals[sa * 3]! * hit.u +
+          sculptNormals[sb * 3]! * hit.v +
+          sculptNormals[sc * 3]! * hit.w;
+        oy =
+          sculptNormals[sa * 3 + 1]! * hit.u +
+          sculptNormals[sb * 3 + 1]! * hit.v +
+          sculptNormals[sc * 3 + 1]! * hit.w;
+        oz =
+          sculptNormals[sa * 3 + 2]! * hit.u +
+          sculptNormals[sb * 3 + 2]! * hit.v +
+          sculptNormals[sc * 3 + 2]! * hit.w;
+        detail[texel * 4 + 3] = cavityToByte(
+          sculptCavity[sa]! * hit.u + sculptCavity[sb]! * hit.v + sculptCavity[sc]! * hit.w,
+        );
+      }
+      const length = Math.hypot(ox, oy, oz) || 1;
+      detail[texel * 4] = Math.round((ox / length / 2 + 0.5) * 255);
+      detail[texel * 4 + 1] = Math.round((oy / length / 2 + 0.5) * 255);
+      detail[texel * 4 + 2] = Math.round((oz / length / 2 + 0.5) * 255);
+    },
+  );
+
+  dilate(resolution, detail, written);
+  return {
+    resolution,
+    detail,
+    coverage: covered / texels,
+    fallback: covered > 0 ? fallback / covered : 0,
+    bvhBuildMs,
+    bvhBytes: bvh.byteLength,
+  };
+}
+
+/** What `forEachIslandTexel` calls per texel: the triangle's corners and the texel centre's weights, clamped and summing to 1. */
+export type TexelVisit = (
+  texel: number,
+  ia: number,
+  ib: number,
+  ic: number,
+  wa: number,
+  wb: number,
+  wc: number,
+) => void;
+
+/**
+ * Walks every texel of a mesh's UV islands at `resolution`, triangle by triangle, and calls
+ * `visit` with the point of the triangle at the texel's centre. Texels whose centre is just
+ * outside a triangle are visited too (half a texel of slack, in barycentric units), so a sliver
+ * that covers no texel centre still gets its texels; a texel already owned by the triangle it
+ * truly lies in is not visited again for a neighbour's slack. The bake and the test brush
+ * (`paintWhere` in paint.ts) fill the same texels this way. `written` is 1 for every texel
+ * visited, `covered` how many there are.
+ */
+export function forEachIslandTexel(
+  mesh: IndexedMesh,
+  resolution: number,
+  visit: TexelVisit,
+): { written: Uint8Array; covered: number } {
+  const { indices, uvs } = mesh;
+  if (!uvs) throw new Error('Walking the texels needs the mesh’s texture coordinates');
+  /** 0 = empty, 1 = written. */
+  const written = new Uint8Array(resolution * resolution);
+  let covered = 0;
   for (let t = 0; t < indices.length; t += 3) {
     const ia = indices[t]!;
     const ib = indices[t + 1]!;
@@ -117,73 +208,25 @@ export function bake(reduced: IndexedMesh, sculpt: IndexedMesh, resolution: numb
         wa /= sum;
         wb /= sum;
         wc /= sum;
-
-        const sx = positions[ia * 3]! * wa + positions[ib * 3]! * wb + positions[ic * 3]! * wc;
-        const sy =
-          positions[ia * 3 + 1]! * wa + positions[ib * 3 + 1]! * wb + positions[ic * 3 + 1]! * wc;
-        const sz =
-          positions[ia * 3 + 2]! * wa + positions[ib * 3 + 2]! * wb + positions[ic * 3 + 2]! * wc;
-        const nx = normals[ia * 3]! * wa + normals[ib * 3]! * wb + normals[ic * 3]! * wc;
-        const ny =
-          normals[ia * 3 + 1]! * wa + normals[ib * 3 + 1]! * wb + normals[ic * 3 + 1]! * wc;
-        const nz =
-          normals[ia * 3 + 2]! * wa + normals[ib * 3 + 2]! * wb + normals[ic * 3 + 2]! * wc;
-
-        facing.nx = nx;
-        facing.ny = ny;
-        facing.nz = nz;
-        bvh.closest(hit, sx, sy, sz, SEARCH_MM * SEARCH_MM, facing, hint);
-
-        let ox = nx;
-        let oy = ny;
-        let oz = nz;
-        if (hit.triangle < 0) {
-          // No sculpt surface within reach: keep the reduced mesh's own normal.
-          fallback++;
-        } else {
-          hint = hit.triangle;
-          const sa = sculpt.indices[hit.triangle * 3]!;
-          const sb = sculpt.indices[hit.triangle * 3 + 1]!;
-          const sc = sculpt.indices[hit.triangle * 3 + 2]!;
-          ox =
-            sculpt.normals[sa * 3]! * hit.u +
-            sculpt.normals[sb * 3]! * hit.v +
-            sculpt.normals[sc * 3]! * hit.w;
-          oy =
-            sculpt.normals[sa * 3 + 1]! * hit.u +
-            sculpt.normals[sb * 3 + 1]! * hit.v +
-            sculpt.normals[sc * 3 + 1]! * hit.w;
-          oz =
-            sculpt.normals[sa * 3 + 2]! * hit.u +
-            sculpt.normals[sb * 3 + 2]! * hit.v +
-            sculpt.normals[sc * 3 + 2]! * hit.w;
-          detail[texel * 4 + 3] = cavityToByte(
-            sculptCavity[sa]! * hit.u + sculptCavity[sb]! * hit.v + sculptCavity[sc]! * hit.w,
-          );
-        }
-        const length = Math.hypot(ox, oy, oz) || 1;
-        detail[texel * 4] = Math.round((ox / length / 2 + 0.5) * 255);
-        detail[texel * 4 + 1] = Math.round((oy / length / 2 + 0.5) * 255);
-        detail[texel * 4 + 2] = Math.round((oz / length / 2 + 0.5) * 255);
+        visit(texel, ia, ib, ic, wa, wb, wc);
       }
     }
   }
-
-  dilate(resolution, detail, written);
-  return {
-    resolution,
-    detail,
-    coverage: covered / texels,
-    fallback: covered > 0 ? fallback / covered : 0,
-    bvhBuildMs,
-    bvhBytes: bvh.byteLength,
-  };
+  return { written, covered };
 }
 
-/** Grows every island outwards by copying border texels into empty neighbours. */
-function dilate(resolution: number, detail: Uint8Array, written: Uint8Array): void {
+/**
+ * Grows every island outwards by copying border texels (RGBA, four bytes each) into empty
+ * neighbours, `rings` texels deep: so filtering at an island's edge never reads an empty texel.
+ */
+export function dilate(
+  resolution: number,
+  data: Uint8Array,
+  written: Uint8Array,
+  rings = DILATION,
+): void {
   let filled = written;
-  for (let pass = 0; pass < DILATION; pass++) {
+  for (let pass = 0; pass < rings; pass++) {
     const next = filled.slice();
     for (let y = 0; y < resolution; y++) {
       for (let x = 0; x < resolution; x++) {
@@ -200,7 +243,7 @@ function dilate(resolution: number, detail: Uint8Array, written: Uint8Array): vo
           if (sx < 0 || sy < 0 || sx >= resolution || sy >= resolution) continue;
           const from = sy * resolution + sx;
           if (!filled[from]) continue;
-          detail.copyWithin(texel * 4, from * 4, from * 4 + 4);
+          data.copyWithin(texel * 4, from * 4, from * 4 + 4);
           next[texel] = 1;
           break;
         }
