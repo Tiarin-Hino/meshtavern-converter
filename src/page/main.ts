@@ -45,9 +45,9 @@ import {
   type PartsOptions,
   type KindGuess,
 } from '../lib';
-import type { Texture } from 'three';
+import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
-import { generateBumpySheet, encodeBinaryStl } from '../lib/dev';
+import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import { parsePageOptions } from './options';
 import {
@@ -201,9 +201,11 @@ declare global {
       detailKtx2: () => Uint8Array | null;
       /**
        * The thumbnail of the converted mini's table level as a PNG (#99): baked when it was, in the
-       * current look, drawn with the viewer's renderer. Rejects for an opened GLB.
+       * current look, drawn with the viewer's renderer. Rejects for an opened GLB. `paint` (#125, a
+       * baked mini only) paints the table level red where x > 0 (`x+`), x < 0 (`x-`) or all over
+       * (`all`) and draws that paint under the look.
        */
-      thumbnail: (size?: number) => Promise<ArrayBuffer>;
+      thumbnail: (size?: number, paint?: TestPaint) => Promise<ArrayBuffer>;
       /** Runs the device benchmark and resolves with its Markdown result. */
       runBenchmark: (size: BenchmarkSize) => Promise<string>;
       /**
@@ -1186,7 +1188,7 @@ async function exportGlb(level: number, compact: boolean, unwrapped = false): Pr
  * The thumbnail of the converted mini (#99): what `renderThumbnail` makes of the table level, baked
  * when it was, in the current look, with the viewer's renderer (no second WebGL context).
  */
-async function thumbnail(size?: number): Promise<ArrayBuffer> {
+async function thumbnail(size?: number, paint?: TestPaint): Promise<ArrayBuffer> {
   const mesh = baked ? baked.mesh : levels[TABLE_LEVEL];
   if (!mesh || !state.stats || state.imported) throw new Error('No converted mini to draw');
   // Uncompressed (?ktx=off) the page keeps texels: a texture is made for the picture and released.
@@ -1195,17 +1197,41 @@ async function thumbnail(size?: number): Promise<ArrayBuffer> {
       ? createDetailTexture(baked.texture, baked.resolution)
       : null;
   const texture: Texture | null = made ?? (baked?.texture as Texture | undefined) ?? null;
+  const albedo = paint && baked ? testPaintTexture(baked.mesh, paint) : null;
   try {
     const png = await renderThumbnail(mesh, {
       size,
       look: state.look,
       texture,
+      albedo,
       renderer: viewer.webglRenderer,
     });
     return await png.arrayBuffer();
   } finally {
     made?.dispose();
+    albedo?.dispose();
   }
+}
+
+/** Where the test hook paints the table level red (#125). */
+type TestPaint = 'x+' | 'x-' | 'all';
+const TEST_PAINT_SIZE = 1024;
+const TEST_PAINT_RED = [255, 0, 0, 255] as const;
+
+/**
+ * A paint texture as the table would hand it over: sRGB, rows as the detail texture's. Without
+ * mipmaps: a test brush's paint is spread only PAINT_DILATION texels past its islands, and the
+ * smaller mipmaps would mix neighbouring islands into specks the pixel test counts.
+ */
+function testPaintTexture(mesh: IndexedMesh, paint: TestPaint): Texture {
+  const where = (x: number): boolean => (paint === 'all' ? true : paint === 'x+' ? x > 0 : x < 0);
+  const { data, width, height } = paintWhere(mesh, TEST_PAINT_SIZE, where, TEST_PAINT_RED);
+  const texture = new DataTexture(data, width, height);
+  texture.colorSpace = SRGBColorSpace;
+  texture.generateMipmaps = false;
+  texture.minFilter = LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 const devThumbnail = document.querySelector<HTMLImageElement>('#dev-thumbnail');
