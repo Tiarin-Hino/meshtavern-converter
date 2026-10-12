@@ -142,4 +142,10 @@ describe('renderThumbnail', () => {
     await expect(renderThumbnail(mesh, { size: 1024 })).rejects.toThrow(RangeError);
     await expect(renderThumbnail(mesh, { size: 0 })).rejects.toThrow(RangeError);
   });
+
+  it('refuses a paint without the detail texture: the mesh has nothing to put it on (#125)', async () => {
+    const mesh = { positions: new Float32Array(9), indices: new Uint32Array([0, 1, 2]) };
+    const albedo = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+    await expect(renderThumbnail(mesh, { albedo })).rejects.toThrow(RangeError);
+  });
 });
