@@ -29,6 +29,8 @@ Painting is part of the table application's plans (its spec 10). The table paint
 - **1.5 % of the vertices came out bare on the painted side.** **Cause:** the test brush painted only texels whose centre lies inside a triangle, and xatlas makes some slivers that cover no texel centre; the vertex then reads an empty texel. **Fix:** the brush paints with the bake's half-texel slack (a texel inside a triangle is never taken by a neighbour) and spreads each island two texels outward. 0 bare vertices on the three levels at 512².
 - **Specks where both half-paints changed the picture.** At 256 px, and fewer at 512, single pixels inside a half changed under the other half's paint too. **Cause:** mipmaps. The smaller mip levels average neighbouring islands of the atlas, and an island from the other half is often packed next to one from this half. **Fix:** the test hook's paint has no mipmaps. Pixels changed by both halves away from their line went from 353 (0.49 % of the mini) to 27 (0.04 %). A table that paints with mipmaps has to spread each island's colour past its edge, as the bake does with the detail texture (README).
 
+- **The brush and the bake share their code (the follow-up PR).** The first brush copied the bake's texel walk and its spreading. The automatic review pointed out that the two copies would drift, and the PM asked for a separate PR. `bake.ts` now exports `forEachIslandTexel` (every texel of the islands, with the triangle and its weights at the texel's centre), `dilate` (with the number of rings as a parameter) and `MIN_NORMAL_AGREEMENT`; `bake` and `paintWhere` both use them. The bake's output did not change: the detail texture of the generated figure has the same SHA-256 at 256² and 1024², with the same coverage. Two bare vertices came back on the tip of a thin sliver: the bake's spreading reaches the four neighbours a ring, the old brush reached eight. Three rings instead of two put them back (0 bare vertices again).
+
 ## Dead ends
 
 - **Spreading the test paint four texels, as the bake does.** It made the specks worse (507 pixels instead of 353): islands packed close together overwrite each other's spread.
@@ -37,6 +39,9 @@ Painting is part of the table application's plans (its spec 10). The table paint
 
 - Unit tests (`paint.test.ts`, whole conversion of the generated figure with a 256² bake): about 5 s, cloud container, Node 22.
 - Pixel test (512 px thumbnail, a 1024² paint without mipmaps, software rendering in Chromium, cloud container): 72,596 pixels of mini; 51,773 changed by the +x paint only, 21,500 by the -x paint only, 446 by both, 27 of those away from the line; the paint all over changed 73,721.
+
+- Bake after the shared walk (the generated figure's table level at 1024², 7 runs each, two rounds, cloud container, Node 22): median 1482 and 1457 ms, against 1376 and 1439 ms before. The runs of one round spread over 300 ms, so 1–8 % slower is within the noise; the bake now calls a function per texel.
+- Pixel test after the shared walk (three rings): 439 pixels changed by both halves (446 before), 27 of them away from the line (27).
 
 ## Still open
 
