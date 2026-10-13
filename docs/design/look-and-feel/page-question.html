@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The question · mockup (#142)</title>
+    <script src="theme/theme.js"></script>
+    <link rel="stylesheet" href="theme/tokens.css" />
+    <link rel="stylesheet" href="icons.css" />
+    <link rel="stylesheet" href="theme/components.css" />
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <div class="page" data-state="asking">
+      <header class="page-bar">
+        <a class="wordmark" href="page-empty.html">MeshTavern Converter</a>
+        <p class="promise">Runs in your browser. Your file never leaves your computer.</p>
+        <span class="spacer"></span>
+        <button class="btn btn-primary desktop-only" type="button">
+          <span class="icon icon-upload"></span>Open an STL
+        </button>
+        <button class="btn btn-primary btn-icon phone-only" type="button" aria-label="Open an STL">
+          <span class="icon icon-upload"></span>
+        </button>
+        <div
+          class="segmented desktop-only"
+          role="group"
+          aria-label="Theme"
+          data-theme-switch
+          hidden
+        >
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Light"
+            data-theme-choice="light"
+            aria-pressed="false"
+          >
+            <span class="icon icon-sun"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Dark"
+            data-theme-choice="dark"
+            aria-pressed="false"
+          >
+            <span class="icon icon-moon"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="System"
+            data-theme-choice="system"
+            aria-pressed="true"
+          >
+            <span class="icon icon-monitor"></span>
+          </button>
+        </div>
+        <a class="btn btn-ghost btn-sm desktop-only" href="#"
+          >MeshTavern<span class="icon icon-external-link"></span
+        ></a>
+        <button class="btn btn-ghost btn-sm desktop-only" type="button">Credits</button>
+        <button
+          class="btn btn-ghost btn-icon phone-only"
+          type="button"
+          aria-label="More"
+          aria-haspopup="menu"
+        >
+          <span class="icon icon-ellipsis"></span>
+        </button>
+      </header>
+      <main class="stage with-sheet">
+        <!-- The question view's scene: the welded mesh at full detail, flat-shaded in the primer's grey. -->
+        <div class="viewport" aria-hidden="true">
+          <div class="plane"></div>
+          <div class="base"></div>
+          <div class="mini"></div>
+        </div>
+        <!-- The question view's controls (#ask), on the panel frame; Cancel is the page's. -->
+        <section
+          class="panel page-panel mt-questions mt-questions-controls"
+          aria-labelledby="heading"
+        >
+          <button
+            class="sheet-handle"
+            type="button"
+            aria-label="Expand the panel"
+            aria-expanded="false"
+          ></button>
+          <div class="panel-header">
+            <h2 id="heading" class="panel-title">harbour-ogre</h2>
+          </div>
+          <div class="panel-body flush">
+            <div class="panel-section">
+              <p class="question">Which way is up?</p>
+              <p class="found">
+                A base was found: +Z is up in the file. The mini stands as it will convert.
+              </p>
+              <label class="field">
+                <span>Source</span>
+                <select class="input">
+                  <option>Not stated</option>
+                  <option>Print file: millimetres, Z up</option>
+                  <option>Scene units: metres, Z up</option>
+                  <option>Scene units: metres, Y up</option>
+                </select>
+              </label>
+              <div class="field">
+                <span>Up axis in file</span>
+                <div class="segmented wide" role="group" aria-label="Up axis in file">
+                  <button class="btn btn-sm" type="button" aria-pressed="false">+X</button>
+                  <button class="btn btn-sm" type="button" aria-pressed="false">−X</button>
+                  <button class="btn btn-sm" type="button" aria-pressed="false">+Y</button>
+                  <button class="btn btn-sm" type="button" aria-pressed="false">−Y</button>
+                  <button class="btn btn-sm" type="button" aria-pressed="true">+Z</button>
+                  <button class="btn btn-sm" type="button" aria-pressed="false">−Z</button>
+                </div>
+              </div>
+              <div class="field">
+                <span>Turn</span>
+                <div class="actions" role="group" aria-label="Turn">
+                  <div class="btn-group">
+                    <button class="btn btn-sm" type="button">
+                      <span class="icon icon-rotate-ccw"></span>Pitch −15°
+                    </button>
+                    <button class="btn btn-sm" type="button">
+                      Pitch +15°<span class="icon icon-rotate-cw"></span>
+                    </button>
+                  </div>
+                  <div class="btn-group">
+                    <button class="btn btn-sm" type="button">
+                      <span class="icon icon-rotate-ccw"></span>Roll −15°
+                    </button>
+                    <button class="btn btn-sm" type="button">
+                      Roll +15°<span class="icon icon-rotate-cw"></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <label class="check"><input type="checkbox" /> Turn by hand</label>
+              <div class="actions" style="margin-top: var(--space-3)">
+                <button class="btn btn-sm" type="button">
+                  <span class="icon icon-arrow-down-to-line"></span>Set down
+                </button>
+                <button class="btn btn-sm btn-ghost" type="button" disabled>Reset</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <button class="btn btn-ghost" type="button">Cancel</button>
+            <button class="btn btn-primary" type="button">
+              <span class="icon icon-check"></span>Confirm, +Z is up
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

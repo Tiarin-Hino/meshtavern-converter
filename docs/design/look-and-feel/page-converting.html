@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Converting · mockup (#142)</title>
+    <script src="theme/theme.js"></script>
+    <link rel="stylesheet" href="theme/tokens.css" />
+    <link rel="stylesheet" href="icons.css" />
+    <link rel="stylesheet" href="theme/components.css" />
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <div class="page" data-state="converting">
+      <header class="page-bar">
+        <a class="wordmark" href="page-empty.html">MeshTavern Converter</a>
+        <p class="promise">Runs in your browser. Your file never leaves your computer.</p>
+        <span class="spacer"></span>
+        <button class="btn btn-primary desktop-only" type="button">
+          <span class="icon icon-upload"></span>Open an STL
+        </button>
+        <button class="btn btn-primary btn-icon phone-only" type="button" aria-label="Open an STL">
+          <span class="icon icon-upload"></span>
+        </button>
+        <div
+          class="segmented desktop-only"
+          role="group"
+          aria-label="Theme"
+          data-theme-switch
+          hidden
+        >
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Light"
+            data-theme-choice="light"
+            aria-pressed="false"
+          >
+            <span class="icon icon-sun"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Dark"
+            data-theme-choice="dark"
+            aria-pressed="false"
+          >
+            <span class="icon icon-moon"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="System"
+            data-theme-choice="system"
+            aria-pressed="true"
+          >
+            <span class="icon icon-monitor"></span>
+          </button>
+        </div>
+        <a class="btn btn-ghost btn-sm desktop-only" href="#"
+          >MeshTavern<span class="icon icon-external-link"></span
+        ></a>
+        <button class="btn btn-ghost btn-sm desktop-only" type="button">Credits</button>
+        <button
+          class="btn btn-ghost btn-icon phone-only"
+          type="button"
+          aria-label="More"
+          aria-haspopup="menu"
+        >
+          <span class="icon icon-ellipsis"></span>
+        </button>
+      </header>
+      <main class="stage">
+        <div class="viewport" aria-hidden="true"><div class="plane"></div></div>
+        <section class="card" aria-labelledby="heading">
+          <p class="eyebrow">Converting</p>
+          <h1 id="heading">harbour-ogre</h1>
+          <p class="lede" role="status">Unwrapping the surface · 40 %</p>
+          <div
+            class="progress"
+            role="progressbar"
+            aria-valuenow="62"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span style="width: 62%"></span>
+          </div>
+          <div class="card-actions">
+            <button class="btn" type="button">Cancel</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

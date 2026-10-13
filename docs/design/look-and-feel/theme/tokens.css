@@ -1,0 +1,312 @@
+/* MeshTavern design tokens (spec 07 U1 and U2, #209, #210). The one token stylesheet: the
+   server serves it at /theme/tokens.css, and the server-rendered pages and the table client both
+   link it. Three parts:
+
+   0. FONTS: the two families, self-hosted (SIL OFL 1.1, fonts/OFL-*.txt), Latin subsets, WOFF2.
+   1. BASE: named values with no meaning. A palette of scales, the type scale, the spacing
+      scale, radii, shadows, durations. Components never read these.
+   2. ROLES: what components read. Every role is one custom property on :root. Light and dark
+      come from light-dark(), which the page root switches with `color-scheme`; the client's
+      table and /dev set data-theme="dark" and so are always dark, its other pages follow the
+      theme switch. A per-system theme (the seam, spec 07 U2)
+      overrides ROLES only, under [data-theme-system="<name>"] on the page root, and never a
+      component.
+
+   This is the only file with colour literals outside the table's constants.ts and the /dev
+   harness (scripts/check-colours.mjs, in npm run check). Every colour pair a person reads is
+   checked by scripts/check-contrast.mjs against WCAG 2.2 AA in both themes. Numbers marked
+   (proposal) are the design pass's; the PM's approval of the style guide settled them. */
+
+/* ---------- 0. Fonts ---------- */
+
+/* Inter for text and controls, Fraunces for headings (look-and-feel.md, 2.3); the wordmark is a
+   drawing of its own since #230. Inter wght 400..700, Fraunces opsz 9..144 and wght 500..700.
+   Nothing else is loaded; the system face stands in for other scripts. */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('fonts/inter-latin-variable.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('fonts/fraunces-latin-variable.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ---------- 1. Base ---------- */
+
+:root {
+  /* Neutrals, a touch warm so that brass sits on them without a cast. */
+  --grey-0: #ffffff;
+  --grey-50: #f7f6f3;
+  --grey-100: #efede8;
+  --grey-150: #e6e4de;
+  --grey-200: #dcd9d2;
+  --grey-300: #c4c0b8;
+  --grey-400: #a29e96;
+  --grey-500: #777369;
+  --grey-600: #5b5850;
+  --grey-700: #44423c;
+  --grey-750: #363430;
+  --grey-800: #2b2a27;
+  --grey-850: #232220;
+  --grey-900: #1c1b19;
+  --grey-950: #151412;
+  --grey-1000: #0f0e0d;
+
+  /* Brass, the one warm accent. */
+  --brass-100: #f7ecd4;
+  --brass-200: #efd9a6;
+  --brass-300: #e5c072;
+  --brass-400: #d9a94f;
+  --brass-500: #c4923a;
+  --brass-600: #96691f;
+  --brass-700: #7d5a1e;
+  --brass-750: #654818;
+  --brass-800: #4d3812;
+  --brass-900: #2e2210;
+
+  /* State hues. Each at a light-theme and a dark-theme text strength plus a soft tint. */
+  --red-100: #fbe3df;
+  --red-400: #f28a7c;
+  --red-500: #c7423a;
+  --red-600: #b3261e;
+  --red-800: #4a1f1a;
+  --green-100: #dcf1e2;
+  --green-400: #7fcf93;
+  --green-600: #1e6b35;
+  --green-800: #1b3d26;
+  --amber-100: #fde9d3;
+  --amber-400: #f0a35f;
+  --amber-600: #9a5312;
+  --amber-800: #46291a;
+  --blue-100: #dde9f9;
+  --blue-400: #86b8f2;
+  --blue-600: #1f5fa8;
+  --blue-800: #1c2e45;
+  --teal-100: #d6f0f3;
+  --teal-400: #5fcbd9;
+  --teal-600: #16737f;
+  --teal-800: #163a40;
+  --violet-100: #e9e2fa;
+  --violet-400: #b9a6ea;
+  --violet-600: #6b4fbf;
+  --violet-800: #2f2650;
+
+  /* Type. Sizes in rem of a 16 px root; the UI reads at 14 px, prose at 16 px. */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 0.75rem; /* 12 */
+  --text-sm: 0.8125rem; /* 13 */
+  --text-base: 0.875rem; /* 14 */
+  --text-md: 1rem; /* 16 */
+  --text-lg: 1.25rem; /* 20 */
+  --text-xl: 1.5rem; /* 24 */
+  --text-2xl: 2rem; /* 32 */
+  --text-3xl: 2.75rem; /* 44 */
+  --leading-tight: 1.2;
+  --leading-base: 1.45;
+  --leading-prose: 1.6;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --tracking-caps: 0.06em;
+
+  /* Space, a 4 px scale. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* Radii. */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Shadows: the colour is a role, the shapes are base values. */
+  --shadow-1: 0 1px 2px var(--shadow-color);
+  --shadow-2: 0 2px 6px var(--shadow-color), 0 8px 24px -8px var(--shadow-color);
+  --shadow-3: 0 4px 12px var(--shadow-color), 0 24px 48px -12px var(--shadow-color-strong);
+
+  /* Motion (proposal: 120 to 200 ms, spec 07 U3). */
+  --duration-fast: 120ms;
+  --duration-base: 160ms;
+  --duration-slow: 200ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Sizes. */
+  --control-height: 2rem; /* 32 px, the desktop control */
+  --tap-min: 2.75rem; /* 44 px, the touch target (tablet-layouts.md) */
+  --panel-width: 19rem; /* the dock and the left column (proposal); 17rem under 1100 px */
+  --bar-height: 3rem;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+}
+
+/* ---------- 2. Roles ---------- */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces, from the page back to the thing nearest the person. */
+  --surface-page: light-dark(var(--grey-50), var(--grey-950));
+  --surface: light-dark(var(--grey-0), var(--grey-900));
+  --surface-raised: light-dark(var(--grey-0), var(--grey-850));
+  --surface-sunken: light-dark(var(--grey-100), var(--grey-1000));
+  --surface-hover: light-dark(var(--grey-100), var(--grey-800));
+  --surface-pressed: light-dark(var(--grey-150), var(--grey-750));
+  --surface-scrim: light-dark(rgb(28 27 25 / 0.45), rgb(0 0 0 / 0.6));
+
+  /* Lines and the frame every panel, card and dialog shares. */
+  --line: light-dark(var(--grey-200), var(--grey-800));
+  --line-strong: light-dark(var(--grey-300), var(--grey-700));
+  --frame-line: var(--line);
+  --frame-radius: var(--radius-md);
+  --frame-shadow: var(--shadow-1);
+  --shadow-color: light-dark(rgb(28 27 25 / 0.1), rgb(0 0 0 / 0.45));
+  --shadow-color-strong: light-dark(rgb(28 27 25 / 0.18), rgb(0 0 0 / 0.7));
+
+  /* Text. */
+  --text: light-dark(var(--grey-900), var(--grey-100));
+  --text-muted: light-dark(var(--grey-600), var(--grey-400));
+  --text-faint: light-dark(var(--grey-400), var(--grey-500)); /* disabled, never required reading */
+  --text-inverse: light-dark(var(--grey-50), var(--grey-950));
+
+  /* The accent: a fill, its text, and the colour used as text on a surface. */
+  --accent: light-dark(var(--brass-600), var(--brass-400));
+  --accent-hover: light-dark(var(--brass-700), var(--brass-300));
+  --accent-pressed: light-dark(var(--brass-750), var(--brass-500));
+  --on-accent: light-dark(var(--grey-0), var(--grey-950));
+  --accent-text: light-dark(var(--brass-700), var(--brass-300));
+  --accent-soft: light-dark(var(--brass-100), var(--brass-900));
+  --accent-line: light-dark(var(--brass-300), var(--brass-700));
+
+  /* States. */
+  --danger: var(--red-500);
+  --on-danger: var(--grey-0);
+  --danger-text: light-dark(var(--red-600), var(--red-400));
+  --danger-soft: light-dark(var(--red-100), var(--red-800));
+  --ok-text: light-dark(var(--green-600), var(--green-400));
+  --ok-soft: light-dark(var(--green-100), var(--green-800));
+  --warn-text: light-dark(var(--amber-600), var(--amber-400));
+  --warn-soft: light-dark(var(--amber-100), var(--amber-800));
+  --info-text: light-dark(var(--blue-600), var(--blue-400));
+  --info-soft: light-dark(var(--blue-100), var(--blue-800));
+
+  /* Focus. */
+  --focus-ring: var(--accent);
+  --focus-ring-offset: var(--surface);
+
+  /* The table's treatments (spec 07 U4): one colour per state, used the same way everywhere. */
+  --selection: var(--accent); /* the selected token: ring on the map, left bar in a list */
+  --turn: light-dark(var(--teal-600), var(--teal-400)); /* the current turn */
+  --turn-soft: light-dark(var(--teal-100), var(--teal-800));
+  --private: light-dark(var(--violet-600), var(--violet-400)); /* whisper, private roll, GM note */
+  --private-soft: light-dark(var(--violet-100), var(--violet-800));
+  --hidden: var(--text-muted); /* hidden from players: dashed outline and the eye-off icon */
+  --hp-full: light-dark(var(--green-600), var(--green-400));
+  --hp-hurt: light-dark(var(--amber-600), var(--amber-400));
+  --hp-low: light-dark(var(--red-600), var(--red-400));
+
+  /* Colours that do not follow the theme: the ink on a colour a person picked (a condition's
+     icon on its colour, dark on a light one and light on a dark one), and the white behind a QR
+     code, which a camera needs whatever the theme. */
+  --fixed-dark: var(--grey-900);
+  --fixed-light: var(--grey-0);
+
+  /* The scene (always dark). The table view reads these once at start (web/src/table/
+     scene-colors.ts); table/constants.ts holds the same values as its fallback, pinned by a
+     test. Opaque: the fog's opacity is the fog layer's (players 1, the GM 0.45), and the fog is
+     a step lighter than the backdrop so a fogged map's edge still reads. --scene-grid is the
+     grid's look in the mockups; a scene's grid colour is the GM's setting, not a theme's. */
+  --scene-backdrop: var(--grey-1000);
+  --scene-grid: rgb(255 255 255 / 0.16);
+  --scene-fog: var(--grey-900);
+  --scene-ruler: var(--brass-400);
+  --scene-selection: var(--brass-400);
+  --scene-turn: var(--teal-400);
+  --scene-token-base: var(--grey-800);
+
+  /* Type roles. */
+  --font-text: var(--font-sans);
+  --font-display: var(--font-serif);
+  --font-code: var(--font-mono);
+  --heading-weight: var(--weight-semibold);
+  --display-settings: 'opsz' 144, 'SOFT' 30;
+  --heading-tracking: -0.01em;
+  --heading-transform: none;
+
+  /* Shape and depth roles. */
+  --radius-control: var(--radius-sm);
+  --radius-panel: var(--frame-radius);
+  --radius-dialog: var(--radius-lg);
+  --radius-chip: var(--radius-full);
+  --elevation-panel: var(--frame-shadow);
+  --elevation-raised: var(--shadow-2);
+  --elevation-overlay: var(--shadow-3);
+
+  /* Motion roles. */
+  --motion-hover: var(--duration-fast) var(--ease-out);
+  --motion-panel: var(--duration-base) var(--ease-out);
+  --motion-dialog: var(--duration-slow) var(--ease-out);
+
+  /* Z layers, the whole page in one list (proposal). */
+  --z-canvas: 0;
+  --z-markers: 1;
+  --z-panels: 2;
+  --z-dock: 3;
+  --z-bar: 4;
+  --z-overlay: 10;
+  --z-dialog: 20;
+  --z-toast: 30;
+  --z-tooltip: 40;
+}
+
+/* The themes. The default follows the system; the switch sets one of the two; the table page
+   sets dark and has no switch. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control-height: var(--tap-min);
+  }
+}
+
+@media (max-width: 1100px) {
+  :root {
+    --panel-width: 17rem;
+  }
+}

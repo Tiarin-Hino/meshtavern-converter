@@ -2,7 +2,17 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'out', 'playwright-report', 'test-results', '.claude'] },
+  // docs/design/look-and-feel/theme/ is the application's theme, copied byte for byte (#142).
+  {
+    ignores: [
+      'dist',
+      'out',
+      'playwright-report',
+      'test-results',
+      '.claude',
+      'docs/design/look-and-feel/theme',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

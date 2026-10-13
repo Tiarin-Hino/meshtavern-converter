@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Done, with the panel · mockup (#142)</title>
+    <script src="theme/theme.js"></script>
+    <link rel="stylesheet" href="theme/tokens.css" />
+    <link rel="stylesheet" href="icons.css" />
+    <link rel="stylesheet" href="theme/components.css" />
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <div class="page" data-state="done">
+      <header class="page-bar">
+        <a class="wordmark" href="page-empty.html">MeshTavern Converter</a>
+        <p class="promise">Runs in your browser. Your file never leaves your computer.</p>
+        <span class="spacer"></span>
+        <button class="btn btn-primary desktop-only" type="button">
+          <span class="icon icon-upload"></span>Open an STL
+        </button>
+        <button class="btn btn-primary btn-icon phone-only" type="button" aria-label="Open an STL">
+          <span class="icon icon-upload"></span>
+        </button>
+        <div
+          class="segmented desktop-only"
+          role="group"
+          aria-label="Theme"
+          data-theme-switch
+          hidden
+        >
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Light"
+            data-theme-choice="light"
+            aria-pressed="false"
+          >
+            <span class="icon icon-sun"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Dark"
+            data-theme-choice="dark"
+            aria-pressed="false"
+          >
+            <span class="icon icon-moon"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="System"
+            data-theme-choice="system"
+            aria-pressed="true"
+          >
+            <span class="icon icon-monitor"></span>
+          </button>
+        </div>
+        <a class="btn btn-ghost btn-sm desktop-only" href="#"
+          >MeshTavern<span class="icon icon-external-link"></span
+        ></a>
+        <button class="btn btn-ghost btn-sm desktop-only" type="button">Credits</button>
+        <button
+          class="btn btn-ghost btn-icon phone-only"
+          type="button"
+          aria-label="More"
+          aria-haspopup="menu"
+        >
+          <span class="icon icon-ellipsis"></span>
+        </button>
+      </header>
+      <main class="stage with-sheet">
+        <div class="viewport" aria-hidden="true">
+          <div class="plane"></div>
+          <div class="base"></div>
+          <div class="mini"></div>
+        </div>
+        <!-- The level chips in the viewport's corner, the triangle count in each one's tooltip. -->
+        <div class="levels" role="group" aria-label="Detail level">
+          <button class="chip" type="button" aria-pressed="false" title="1,250,000 triangles">
+            Original
+          </button>
+          <button class="chip" type="button" aria-pressed="false" title="50,000 triangles">
+            Close
+          </button>
+          <button class="chip" type="button" aria-pressed="true" title="15,000 triangles">
+            Table
+          </button>
+          <button class="chip" type="button" aria-pressed="false" title="4,000 triangles">
+            Far
+          </button>
+        </div>
+        <section class="panel page-panel" aria-labelledby="heading">
+          <button
+            class="sheet-handle"
+            type="button"
+            aria-label="Expand the panel"
+            aria-expanded="false"
+          ></button>
+          <div class="panel-header">
+            <h2 id="heading" class="panel-title">harbour-ogre</h2>
+            <button class="btn btn-ghost btn-sm btn-icon" type="button" aria-label="Close">
+              <span class="icon icon-x"></span>
+            </button>
+          </div>
+          <div class="panel-body flush">
+            <div class="panel-section">
+              <p class="size-line">38 mm tall · Medium, 1 square · 25 mm round base</p>
+              <p class="status-line" role="status">Ready. Converted from 1,250,000 triangles.</p>
+            </div>
+            <div class="panel-section">
+              <h3 class="panel-section-title">Download as GLB</h3>
+              <div class="stack">
+                <button class="btn btn-primary" type="button">
+                  <span class="icon icon-download"></span>Download table level
+                </button>
+                <button class="btn btn-primary" type="button">
+                  <span class="icon icon-download"></span>Download far level
+                </button>
+              </div>
+            </div>
+            <div class="panel-section" id="adjust">
+              <h3 class="panel-section-title">Adjust</h3>
+              <details class="disclosure" id="orient">
+                <summary>
+                  <span class="icon icon-chevron-down"></span>Up and turn<span class="summary-hint"
+                    >+Z, from the base</span
+                  >
+                </summary>
+                <div class="disclosure-body">
+                  <label class="field">
+                    <span>Source</span>
+                    <select class="input">
+                      <option>Not stated</option>
+                      <option>Print file: millimetres, Z up</option>
+                    </select>
+                  </label>
+                  <div class="field">
+                    <span>Up axis in file</span>
+                    <div class="segmented wide" role="group" aria-label="Up axis in file">
+                      <button class="btn btn-sm" type="button" aria-pressed="false">+X</button>
+                      <button class="btn btn-sm" type="button" aria-pressed="false">−X</button>
+                      <button class="btn btn-sm" type="button" aria-pressed="false">+Y</button>
+                      <button class="btn btn-sm" type="button" aria-pressed="false">−Y</button>
+                      <button class="btn btn-sm" type="button" aria-pressed="true">+Z</button>
+                      <button class="btn btn-sm" type="button" aria-pressed="false">−Z</button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <span>Turn</span>
+                    <div class="actions" role="group" aria-label="Turn">
+                      <div class="btn-group">
+                        <button class="btn btn-sm" type="button">
+                          <span class="icon icon-rotate-ccw"></span>Pitch −15°
+                        </button>
+                        <button class="btn btn-sm" type="button">
+                          Pitch +15°<span class="icon icon-rotate-cw"></span>
+                        </button>
+                      </div>
+                      <div class="btn-group">
+                        <button class="btn btn-sm" type="button">
+                          <span class="icon icon-rotate-ccw"></span>Roll −15°
+                        </button>
+                        <button class="btn btn-sm" type="button">
+                          Roll +15°<span class="icon icon-rotate-cw"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <label class="check"><input type="checkbox" /> Turn by hand</label>
+                  <div class="actions" style="margin-top: var(--space-3)">
+                    <button class="btn btn-sm btn-primary" type="button" disabled>Apply</button>
+                    <button class="btn btn-sm" type="button">
+                      <span class="icon icon-arrow-down-to-line"></span>Set down
+                    </button>
+                    <button class="btn btn-sm btn-ghost" type="button" disabled>Reset</button>
+                  </div>
+                </div>
+              </details>
+              <details class="disclosure" id="sizing" open>
+                <summary>
+                  <span class="icon icon-chevron-down"></span>Size<span class="summary-hint"
+                    >Medium, mm</span
+                  >
+                </summary>
+                <div class="disclosure-body">
+                  <label class="field">
+                    <span>Units in file</span>
+                    <select class="input">
+                      <option>millimetres</option>
+                      <option>inches</option>
+                      <option>metres</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Creature size</span>
+                    <select class="input">
+                      <option>Tiny, half a square</option>
+                      <option>Small, 1 square</option>
+                      <option selected>Medium, 1 square</option>
+                      <option>Large, 2×2 squares</option>
+                      <option>Huge, 3×3 squares</option>
+                      <option>Gargantuan, 4×4 squares</option>
+                    </select>
+                  </label>
+                  <div class="field">
+                    <span>Scale so the base is</span>
+                    <div class="field-row">
+                      <input
+                        class="input input-sm"
+                        type="number"
+                        value="25"
+                        aria-label="Base diameter"
+                      />
+                      <span class="muted">mm</span>
+                      <button class="btn btn-sm" type="button">Scale</button>
+                    </div>
+                  </div>
+                  <label class="check"><input type="checkbox" /> Add a plain base</label>
+                  <div class="callout callout-warn" role="status">
+                    <span class="icon icon-triangle-alert"></span>
+                    <p>The base is 20 mm across; a Medium mini stands on 25 mm.</p>
+                    <button class="btn btn-sm" type="button">Scale to fit</button>
+                  </div>
+                </div>
+              </details>
+              <details class="disclosure" id="look">
+                <summary>
+                  <span class="icon icon-chevron-down"></span>Look<span class="summary-hint"
+                    >Grey primer</span
+                  >
+                </summary>
+                <div class="disclosure-body">
+                  <div class="field">
+                    <span>Starting points</span>
+                    <div class="chips" role="group" aria-label="Starting points">
+                      <button
+                        class="chip"
+                        type="button"
+                        aria-pressed="true"
+                        style="--chip-color: #9aa0a8"
+                      >
+                        <span class="chip-dot"></span>Grey primer
+                      </button>
+                      <button
+                        class="chip"
+                        type="button"
+                        aria-pressed="false"
+                        style="--chip-color: #d8cdb0"
+                      >
+                        <span class="chip-dot"></span>Bone
+                      </button>
+                      <button
+                        class="chip"
+                        type="button"
+                        aria-pressed="false"
+                        style="--chip-color: #1c1c20"
+                      >
+                        <span class="chip-dot"></span>Black, drybrushed
+                      </button>
+                      <button
+                        class="chip"
+                        type="button"
+                        aria-pressed="false"
+                        style="--chip-color: #565e68"
+                      >
+                        <span class="chip-dot"></span>Steel
+                      </button>
+                      <button
+                        class="chip"
+                        type="button"
+                        aria-pressed="false"
+                        style="--chip-color: #7a4f24"
+                      >
+                        <span class="chip-dot"></span>Bronze
+                      </button>
+                    </div>
+                  </div>
+                  <label class="check" style="margin-bottom: var(--space-3)"
+                    ><input type="checkbox" checked /> Primed and washed</label
+                  >
+                  <div class="field">
+                    <span>Base coat</span>
+                    <div class="field-row">
+                      <input type="color" value="#9aa0a8" aria-label="Base coat" />
+                      <span class="muted">#9aa0a8</span>
+                    </div>
+                  </div>
+                  <label class="field"
+                    ><span>Shadows</span
+                    ><input type="range" min="0" max="1" step="0.05" value="0.8"
+                  /></label>
+                  <label class="field"
+                    ><span>Wash</span><input type="range" min="0" max="1" step="0.05" value="0.75"
+                  /></label>
+                  <label class="field"
+                    ><span>Edges</span><input type="range" min="0" max="1" step="0.05" value="0.3"
+                  /></label>
+                </div>
+              </details>
+              <details class="disclosure" id="pair">
+                <summary>
+                  <span class="icon icon-chevron-down"></span>Base and parts<span
+                    class="summary-hint"
+                    >one file</span
+                  >
+                </summary>
+                <div class="disclosure-body">
+                  <div class="actions">
+                    <button class="btn btn-sm" type="button">
+                      <span class="icon icon-plus"></span>Add a base file
+                    </button>
+                  </div>
+                  <p class="hint">Two files? Drop the figure and its base together.</p>
+                </div>
+              </details>
+            </div>
+            <div class="panel-section">
+              <h3 class="panel-section-title">Paint</h3>
+              <button class="btn wide" type="button">
+                <span class="icon icon-paintbrush"></span>Paint this mini
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

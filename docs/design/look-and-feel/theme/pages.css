@@ -1,0 +1,424 @@
+/* The pages outside the table (spec 07 U5, #212; design note look-and-feel.md, sections 2.8 and
+   9): their two frames and the few parts the components do not have, on the roles of tokens.css
+   and the components of components.css. The server-rendered pages link it (sign-in, sign-up, the
+   account, the second step, passkeys, invite and join, not found and errors;
+   server/src/accounts/pages.ts), and so does the client for its own pages outside the table (the
+   phone notice, not found, the error page). Every rule sits under a frame's class, `.centred` or
+   `.app`, so nothing here reaches the table. The measurements are the mockups' (mock.css). */
+
+/* Shown by a script when it can work (the theme switch, the passkey buttons): a component's
+   display must not show it before. */
+.centred [hidden],
+.app [hidden] {
+  display: none !important;
+}
+
+/* ---------- The centred card: sign-in and every page of one step ---------- */
+
+.centred {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  justify-items: center;
+}
+.centred .top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+.centred .top .wordmark {
+  font-size: var(--text-xl);
+}
+.centred .card {
+  width: min(100% - 2 * var(--space-4), 26rem);
+  align-self: center;
+  padding: var(--space-6) var(--space-6) var(--space-5);
+}
+.centred .card h1 {
+  font-size: var(--text-xl);
+}
+.centred .card .lede {
+  color: var(--text-muted);
+  margin-bottom: var(--space-4);
+}
+/* The card's one action, and a button that stands for a way of signing in, take its width. */
+.centred .card .btn-primary,
+.centred .card .wide {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+.centred .card .field:has(+ .btn-primary) {
+  margin-bottom: var(--space-2);
+}
+.centred .card form + form,
+.centred .card form + .btn,
+.centred .card .hint:empty {
+  margin-top: var(--space-3);
+}
+/* The join pages' states, centred as the mockup draws the waiting one. */
+.centred .card-centred {
+  text-align: center;
+}
+.centred .card-centred h1 {
+  font-size: var(--text-2xl);
+}
+.centred .card-centred .waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: var(--space-5) 0 var(--space-2);
+}
+.centred .card-centred .muted {
+  font-size: var(--text-sm);
+}
+.centred .card-centred .panel {
+  margin-top: var(--space-5);
+  text-align: left;
+}
+.centred .foot {
+  padding: var(--space-4);
+  font-size: var(--text-xs);
+  /* Muted, not faint as the mockup has it: it is a line a person reads (WCAG 1.4.3). */
+  color: var(--text-muted);
+  text-align: center;
+}
+/* The footer's link to the credits page, in the line's colour as the mockups draw it. */
+.centred .foot a {
+  color: inherit;
+}
+
+/* A card for reading: the credits page (#184). */
+.centred .card-wide {
+  width: min(100% - 2 * var(--space-4), 42rem);
+}
+.centred .card-wide h2 {
+  margin-top: var(--space-5);
+  font-size: var(--text-lg);
+}
+.centred .card-wide h3 {
+  margin-top: var(--space-4);
+  font-size: var(--text-md);
+}
+.centred .credits-statement {
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--line-strong);
+  color: var(--text);
+}
+.centred .credits-statement p {
+  margin: 0;
+}
+/* The addresses in the statements are long: they break anywhere rather than widen the card. */
+.centred .card-wide {
+  overflow-wrap: anywhere;
+}
+.centred .credits-list {
+  padding-left: var(--space-5);
+}
+/* The terms of service and the privacy notice (#201): a long text in the card for reading, with
+   its quotes, lists and tables. A table's cells break a word only when it does not fit, with a
+   hyphen, so its columns keep whole words on a phone and the card does not widen. */
+.centred .legal h1 {
+  font-size: var(--text-2xl);
+}
+.centred .legal blockquote {
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--line-strong);
+}
+.centred .legal blockquote p {
+  margin: 0;
+}
+.centred .legal blockquote p + p {
+  margin-top: var(--space-2);
+}
+.centred .legal ul,
+.centred .legal ol {
+  padding-left: var(--space-5);
+}
+.centred .legal li + li {
+  margin-top: var(--space-1);
+}
+.centred .legal table {
+  width: 100%;
+  margin: var(--space-3) 0;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.centred .legal th,
+.centred .legal td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+.centred .legal td:first-child,
+.centred .legal th:first-child {
+  padding-left: 0;
+}
+/* The card for reading adds its own space below a form's last line. */
+.centred .card form + .hint {
+  margin-top: var(--space-2);
+}
+.centred .legal th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+/* The sentence over a form's button that says what pressing it accepts. */
+.centred .card .terms-note {
+  margin: var(--space-3) 0 0;
+}
+.centred .credits-list li + li {
+  margin-top: var(--space-2);
+}
+.centred .divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.centred .divider::before,
+.centred .divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.centred .providers {
+  display: grid;
+  gap: var(--space-2);
+}
+.centred .providers .btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.centred .links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-sm);
+}
+
+/* ---------- The app bar over a column: the account pages ---------- */
+
+.app .app-bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-bar);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-height: 3.25rem;
+  padding: var(--space-2) var(--space-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.app .app-bar nav {
+  display: flex;
+  gap: var(--space-1);
+}
+.app .app-bar nav a {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-xs);
+}
+.app .app-bar nav a:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.app .app-bar .spacer {
+  flex: 1;
+}
+.app .page-main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+}
+/* Under the column: the link to the credits page (#184). */
+.app .app-foot {
+  padding: 0 var(--space-5) var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: center;
+}
+.app .app-foot a {
+  color: inherit;
+}
+.app .page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.app .page-head h1 {
+  margin: 0;
+}
+.app .page-head .lede {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+.app .page-head .lede strong {
+  color: var(--text);
+}
+.app .panel {
+  margin-bottom: var(--space-4);
+}
+/* A list in a panel runs to its edges, as the dock's lists do. */
+.app .panel .rows {
+  margin: 0 calc(-1 * var(--space-4)) var(--space-3);
+}
+.app .panel-section .rows:last-child,
+.app .panel-body .rows:last-child {
+  margin-bottom: 0;
+}
+.app .panel-section-title {
+  margin-bottom: var(--space-2);
+}
+.app .field {
+  max-width: 28rem;
+}
+.app .row form {
+  flex: none;
+}
+/* A row holding a form: its field's focus ring must not be cut off. */
+.app .row-edit {
+  overflow: visible;
+}
+.app .row-edit .input {
+  flex: 1;
+  min-width: 0;
+}
+.app .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.app .panel-body > * + .actions,
+.app .panel-section > .rows + form,
+.app .panel-body > .rows + form {
+  margin-top: var(--space-3);
+}
+.app .panel-section > .btn + .hint {
+  margin-top: var(--space-2);
+}
+.app .panel-section > .hint:not(:last-child) {
+  margin-bottom: var(--space-2);
+}
+
+/* The guest seat's offer: a panel that folds away. */
+.app details.offer {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+}
+.app details.offer > summary {
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+  margin-bottom: var(--space-2);
+}
+
+/* ---------- Parts both frames use ---------- */
+
+/* A page's error or notice above its form, and a standing line of information. */
+:is(.centred, .app) .callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--info-soft);
+  border-left: 3px solid var(--info-text);
+  border-radius: var(--radius-control);
+}
+:is(.centred, .app) .callout:has(> form) {
+  align-items: center;
+}
+:is(.centred, .app) .callout > .icon {
+  margin-top: 0.05em;
+  color: var(--info-text);
+}
+:is(.centred, .app) .callout > span,
+:is(.centred, .app) .callout > p {
+  flex: 1;
+  margin: 0;
+}
+:is(.centred, .app) .callout-error {
+  background: var(--danger-soft);
+  border-left-color: var(--danger-text);
+}
+:is(.centred, .app) .callout-error > .icon {
+  color: var(--danger-text);
+}
+:is(.centred, .app) .callout-ok {
+  background: var(--ok-soft);
+  border-left-color: var(--ok-text);
+}
+:is(.centred, .app) .callout-ok > .icon {
+  color: var(--ok-text);
+}
+:is(.centred, .app) .hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+:is(.centred, .app) .field .check {
+  font-weight: var(--weight-regular);
+}
+:is(.centred, .app) details {
+  margin: var(--space-4) 0 0;
+}
+:is(.centred, .app) details > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-xs);
+}
+:is(.centred, .app) details[open] > summary {
+  margin-bottom: var(--space-3);
+}
+:is(.centred, .app) form.inline {
+  display: inline-block;
+  margin: 0 var(--space-2) 0 0;
+}
+:is(.centred, .app) code,
+:is(.centred, .app) .codes {
+  font-family: var(--font-code);
+}
+:is(.centred, .app) .codes {
+  columns: 2;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  list-style: none;
+  font-size: var(--text-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+/* A camera needs the code dark on white, whatever the theme. */
+:is(.centred, .app) .qr svg {
+  display: block;
+  width: 12rem;
+  height: 12rem;
+  margin: 0 auto var(--space-3);
+  background: var(--fixed-light);
+  padding: 0.5rem;
+  border-radius: var(--radius-control);
+}
