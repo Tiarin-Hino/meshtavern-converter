@@ -28,3 +28,5 @@ export {
   THUMBNAIL_SIZE,
   type ThumbnailOptions,
 } from './three/thumbnail';
+// The camera on a sphere around a mini: the viewer, the question view and the painting view frame alike (#127).
+export { placeCameraOnSphere } from './three/camera';

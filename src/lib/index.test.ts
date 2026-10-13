@@ -108,6 +108,7 @@ describe('the library entries', () => {
       'createLookUniforms',
       'disposeBakedMaterial',
       'ownCopy',
+      'placeCameraOnSphere',
       'renderThumbnail',
       'transcodeDetail',
       'updateLookUniforms',
