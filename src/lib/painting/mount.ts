@@ -6,6 +6,7 @@ import {
   MOUSE_PRESSURE,
   PAINT_SIZE,
   spaceDabs,
+  unitDirection,
   type BrushSettings,
   type DabHit,
   type PaintRegions,
@@ -40,6 +41,7 @@ import {
   FACING_MIN_COS,
   PAINT_DILATION_RINGS,
   PaintPasses,
+  type PaintSurface,
 } from './passes';
 import { KEYFRAME_EVERY, PaintHistory, UNDO_STEPS } from './history';
 import { PaintScene } from './scene';
@@ -140,6 +142,8 @@ export interface PaintingView {
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null;
   /** Where a point of the mini is on the canvas, CSS px: what a test strokes along. */
   screenOf(point: Vec3): [number, number];
+  /** For tests: what the tools' masks read at every texel (cavity, occlusion, normal), as the composite reads it (#128). */
+  surface(): Promise<PaintSurface>;
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void;
   setWireframe(on: boolean): void;
   dispose(): void;
@@ -368,7 +372,7 @@ class Painting implements PaintingView {
       hardness: unit(next.hardness),
       opacity: unit(next.opacity),
       tolerance: unit(next.tolerance),
-      direction: next.direction ? [...next.direction] : null,
+      direction: unitDirection(next.direction),
     };
     this.emit();
   }
@@ -475,6 +479,11 @@ class Painting implements PaintingView {
     return this.scene.screenOf(point);
   }
 
+  surface(): Promise<PaintSurface> {
+    this.commitLive();
+    return this.passes.readSurface();
+  }
+
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void {
     this.scene.setCamera(azimuthDeg, elevationDeg, zoom);
   }
@@ -562,7 +571,7 @@ class Painting implements PaintingView {
     if (live.drawn >= count) return;
     const { step } = live;
     this.passes.drawDabs(step.dabs, live.drawn, step.brush, step.tool);
-    this.passes.composite(step.tool, parseHexColour(step.colour), step.brush.opacity);
+    this.passes.composite(step.tool, parseHexColour(step.colour), step.brush);
     live.drawn = count;
   }
 
@@ -601,7 +610,7 @@ class Painting implements PaintingView {
       this.passes.clearStroke();
       this.passes.drawRegion(opened.mesh, triangles);
     }
-    this.passes.composite(step.tool, parseHexColour(step.colour), step.brush.opacity);
+    this.passes.composite(step.tool, parseHexColour(step.colour), step.brush);
     this.passes.commit();
   }
 

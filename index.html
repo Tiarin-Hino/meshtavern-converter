@@ -202,20 +202,31 @@
           <figcaption id="dev-kind"></figcaption>
         </figure>
         <details id="dev-paint" data-in="done" data-mini data-dev>
-          <summary>Paint (team tool, #127)</summary>
+          <summary>Paint (team tool, #127, #128)</summary>
           <button id="paint-open" type="button">Paint this mini</button>
           <div id="paint-controls" hidden>
             <div id="paint-tools" role="group" aria-label="Tool"></div>
-            <label>Size <input id="paint-size" type="range" step="0.5" /></label>
-            <label
+            <label data-slider="sizeMm"
+              >Size <input id="paint-size" type="range" step="0.5"
+            /></label>
+            <label data-slider="hardness"
               >Hardness <input id="paint-hardness" type="range" min="0" max="1" step="0.05"
             /></label>
-            <label
-              >Opacity <input id="paint-opacity" type="range" min="0" max="1" step="0.05"
+            <label data-slider="opacity"
+              ><span id="paint-opacity-label">Opacity</span>
+              <input id="paint-opacity" type="range" min="0" max="1" step="0.05"
             /></label>
-            <label
+            <label data-slider="tolerance"
               >Tolerance <input id="paint-tolerance" type="range" min="0" max="1" step="0.05"
             /></label>
+            <label data-slider="direction"
+              >From
+              <select id="paint-direction">
+                <option value="none">Everywhere</option>
+                <option value="above">Above</option>
+                <option value="front">The front</option>
+              </select></label
+            >
             <label>Colour <input id="paint-colour" type="color" /></label>
             <div role="group" aria-label="Regions">
               <button id="paint-base" type="button">The base</button>

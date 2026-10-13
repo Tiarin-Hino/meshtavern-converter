@@ -1,4 +1,14 @@
 import type { Vec3 } from './base';
+import {
+  AIR_DIR_EDGE,
+  AIR_DIR_SOFTNESS,
+  DRY_SOFTNESS,
+  DRY_THRESHOLD,
+  INK_FLAT,
+  WASH_FLAT,
+  WASH_LIFT,
+  WASH_OCCLUSION,
+} from './look';
 
 /**
  * The painting engine's data (issue #127, design note `docs/design/painting-engine.md` §4): what a
@@ -10,7 +20,7 @@ import type { Vec3 } from './base';
 /** The paint's side in texels, whatever the detail texture's size (#127). _(proposal)_ */
 export const PAINT_SIZE = 1024;
 
-/** The tools, in the order a panel offers them. `wash` … `airbrush` are #128's. */
+/** The tools, in the order a panel offers them. `wash` … `airbrush` are the hobby brushes of #128. */
 export const TOOL_IDS = ['flat', 'fill', 'eraser', 'wash', 'ink', 'dry', 'airbrush'] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
@@ -218,13 +228,27 @@ export function ownerMap(mask: Uint8Array, size: number, rings: number): Int32Ar
   return owner;
 }
 
+const saturate = (value: number): number => Math.max(0, Math.min(1, value));
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = saturate((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+};
+
 /**
  * How much of a tool's paint lands on a texel, 0–1 (§6): the CPU twin of the mask GLSL in
  * `src/lib/painting/tools.ts`, which `tools.test.ts` keeps in step. `cavity` is the detail
  * texture's, decoded as the material does (−1 crease … +1 edge), `occlusion` the vertex
- * occlusion (0 buried … 1 open), `normal` the detail texture's object-space normal. The flat
- * brush, the eraser and the fill paint every texel they cover; the hobby brushes of #128 read
- * the surface.
+ * occlusion (0 buried … 1 open), `normal` the detail texture's object-space normal (not
+ * necessarily of unit length). The flat brush, the eraser and the fill paint every texel they
+ * cover; the hobby brushes of #128 read the surface, with their constants beside the look's:
+ *
+ * - `wash`: pools where the cavity is negative and the occlusion low, tints a flat open surface
+ *   faintly (`WASH_FLAT`) and evenly, and is shed by a raised edge (`WASH_LIFT`).
+ * - `ink`: stains everything it covers (`INK_FLAT`), the creases fully.
+ * - `dry`: only where the cavity is above `DRY_THRESHOLD × (1 − pressure)`, the pressure being
+ *   the brush's `opacity`: more pressure reaches further down the edge.
+ * - `airbrush`: with a `direction`, only the surface whose normal faces it (above `AIR_DIR_EDGE`);
+ *   without, everything.
  */
 export function toolMask(
   tool: ToolId,
@@ -233,16 +257,36 @@ export function toolMask(
   normal: Vec3,
   brush: BrushSettings,
 ): number {
-  void cavity;
-  void occlusion;
-  void normal;
-  void brush;
   switch (tool) {
     case 'flat':
     case 'eraser':
     case 'fill':
       return 1;
-    default:
-      throw new Error(`The ${tool} tool is not built yet (#128)`);
+    case 'wash': {
+      const pool = saturate(Math.max(-cavity, 0) + WASH_OCCLUSION * (1 - occlusion));
+      return (WASH_FLAT + (1 - WASH_FLAT) * pool) * (1 - WASH_LIFT * Math.max(cavity, 0));
+    }
+    case 'ink':
+      return INK_FLAT + (1 - INK_FLAT) * saturate(-cavity);
+    case 'dry': {
+      const threshold = DRY_THRESHOLD * (1 - brush.opacity);
+      return smoothstep(threshold, threshold + DRY_SOFTNESS, cavity);
+    }
+    case 'airbrush': {
+      const direction = brush.direction;
+      if (!direction) return 1;
+      const length = Math.max(Math.hypot(...normal), 1e-6);
+      const facing =
+        (normal[0] * direction[0] + normal[1] * direction[1] + normal[2] * direction[2]) / length;
+      return smoothstep(AIR_DIR_EDGE, AIR_DIR_EDGE + AIR_DIR_SOFTNESS, facing);
+    }
   }
+}
+
+/** A direction for the airbrush's mask: of unit length, or null for none (a zero or broken vector, or none given). */
+export function unitDirection(direction: Vec3 | null | undefined): Vec3 | null {
+  if (!direction) return null;
+  const length = Math.hypot(...direction);
+  if (!(length > 0) || !Number.isFinite(length)) return null;
+  return [direction[0] / length, direction[1] / length, direction[2] / length];
 }

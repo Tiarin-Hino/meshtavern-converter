@@ -7,9 +7,13 @@ import {
   NO_OWNER,
   ownerMap,
   spaceDabs,
+  TOOL_IDS,
   toolMask,
+  unitDirection,
+  type BrushSettings,
   type DabHit,
 } from './brush';
+import { DRY_SOFTNESS, DRY_THRESHOLD, INK_FLAT, WASH_FLAT, WASH_LIFT } from './look';
 
 const hit = (x: number, y = 0, z = 0, pressure = 0.5): DabHit => ({ point: [x, y, z], pressure });
 
@@ -148,5 +152,97 @@ describe('toolMask', () => {
     for (const tool of ['flat', 'eraser', 'fill'] as const)
       for (const cavity of [-1, 0, 1])
         expect(toolMask(tool, cavity, 0.3, [0, 1, 0], DEFAULT_BRUSH)).toBe(1);
+  });
+
+  // The hobby brushes (#128, design note §6), one test per line of the issue.
+  const brush = (changes: Partial<BrushSettings> = {}): BrushSettings => ({
+    ...DEFAULT_BRUSH,
+    ...changes,
+  });
+  const UP: [number, number, number] = [0, 1, 0];
+
+  it('pools a wash in the creases and buried places, tints flat faintly and evenly, nearly leaves an edge', () => {
+    const wash = (cavity: number, occlusion: number): number =>
+      toolMask('wash', cavity, occlusion, UP, DEFAULT_BRUSH);
+    // A flat, open surface: the faint tint, the same everywhere on it.
+    expect(wash(0, 1)).toBeCloseTo(WASH_FLAT, 10);
+    // A crease takes all of it; a buried place more than the open one.
+    expect(wash(-1, 1)).toBe(1);
+    expect(wash(0, 0)).toBeGreaterThan(wash(0, 1));
+    expect(wash(-0.5, 1)).toBeGreaterThan(wash(0, 1));
+    // A raised, open edge: under a tenth of what the crease takes.
+    expect(wash(1, 1)).toBeLessThan(0.1 * wash(-1, 1));
+    expect(wash(1, 1)).toBeCloseTo(WASH_FLAT * (1 - WASH_LIFT), 10);
+  });
+
+  it('stains the whole stroke with ink, the creases most', () => {
+    const ink = (cavity: number): number => toolMask('ink', cavity, 1, UP, DEFAULT_BRUSH);
+    for (const cavity of [-1, -0.5, 0, 0.5, 1])
+      expect(ink(cavity)).toBeGreaterThanOrEqual(INK_FLAT);
+    expect(ink(1)).toBe(INK_FLAT);
+    expect(ink(-1)).toBe(1);
+    expect(ink(-0.5)).toBeGreaterThan(ink(0));
+  });
+
+  it('dry-brushes only where the cavity is positive, and further down the edge with more pressure', () => {
+    const dry = (cavity: number, pressure: number): number =>
+      toolMask('dry', cavity, 1, UP, brush({ opacity: pressure }));
+    for (const pressure of [0, 0.5, 1])
+      for (const cavity of [-1, -0.3, 0]) expect(dry(cavity, pressure)).toBe(0);
+    expect(dry(1, 1)).toBe(1);
+    // At full pressure the threshold is 0: a slightly raised texel catches some.
+    expect(dry(0.1, 1)).toBeGreaterThan(0);
+    // At none it is DRY_THRESHOLD: that texel takes nothing, a sharper edge does.
+    expect(dry(0.1, 0)).toBe(0);
+    expect(dry(DRY_THRESHOLD, 0)).toBe(0);
+    expect(dry(DRY_THRESHOLD + DRY_SOFTNESS, 0)).toBe(1);
+    for (const cavity of [0.05, 0.2, 0.4, 0.6])
+      expect(dry(cavity, 0.8)).toBeGreaterThanOrEqual(dry(cavity, 0.2));
+  });
+
+  it('airbrushes everything without a direction, and from above nothing that faces down', () => {
+    const air = (normal: [number, number, number], direction: [number, number, number] | null) =>
+      toolMask('airbrush', 0, 1, normal, brush({ direction }));
+    expect(air([0, -1, 0], null)).toBe(1);
+    expect(air([0, 1, 0], UP)).toBe(1);
+    // Facing down, or sideways: nothing.
+    for (const normal of [
+      [0, -1, 0],
+      [0.6, -0.8, 0],
+      [1, 0, 0],
+      [0, 0, -1],
+    ] as [number, number, number][])
+      expect(air(normal, UP)).toBe(0);
+    // A normal as the detail texture stores it, not quite of unit length: the angle decides.
+    expect(air([0, 0.5, 0], UP)).toBe(1);
+    expect(air([0.98, 0.2, 0], UP)).toBeGreaterThan(air([0.995, 0.1, 0], UP));
+    expect(air([0.995, 0.1, 0], UP)).toBeGreaterThan(0);
+  });
+
+  it('keeps every mask within 0 and 1', () => {
+    for (const tool of TOOL_IDS)
+      for (const cavity of [-1, -0.4, 0, 0.4, 1])
+        for (const occlusion of [0, 0.5, 1])
+          for (const opacity of [0, 0.5, 1]) {
+            const mask = toolMask(
+              tool,
+              cavity,
+              occlusion,
+              [0.3, 0.9, 0.1],
+              brush({ opacity, direction: UP }),
+            );
+            expect(mask).toBeGreaterThanOrEqual(0);
+            expect(mask).toBeLessThanOrEqual(1);
+          }
+  });
+});
+
+describe('unitDirection', () => {
+  it('scales a direction to unit length, and gives none for a zero vector or none', () => {
+    expect(unitDirection([0, 2, 0])).toEqual([0, 1, 0]);
+    expect(unitDirection([3, 4, 0])).toEqual([0.6, 0.8, 0]);
+    expect(unitDirection([0, 0, 0])).toBeNull();
+    expect(unitDirection([Number.NaN, 1, 0])).toBeNull();
+    expect(unitDirection(null)).toBeNull();
   });
 });

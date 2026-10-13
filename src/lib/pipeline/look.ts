@@ -85,6 +85,34 @@ export const CAVITY_GAIN = 4;
 export const DARKEST = 0.12;
 export const HIGHLIGHT = 0.85;
 
+// The hobby brushes of the painting engine (issue #128, design note
+// `docs/design/painting-engine.md` §6): how much of a brush's colour a texel takes, read from the
+// same cavity (decoded with CAVITY_GAIN, −1 crease … +1 edge) and occlusion as the look above.
+// `toolMask` in brush.ts and the GLSL in `src/lib/painting/tools.ts` use them. All _(proposals)_.
+
+/** The wash on a flat, open surface: a faint, even tint. */
+export const WASH_FLAT = 0.15;
+/** How much a buried place (low occlusion) pools the wash, beside the crease. */
+export const WASH_OCCLUSION = 0.5;
+/** How much of the wash a raised edge sheds, at cavity +1. */
+export const WASH_LIFT = 0.8;
+/** The ink's stain on a flat surface; the creases take all of it. */
+export const INK_FLAT = 0.5;
+/** The dry brush catches where the cavity is above this, times (1 − pressure): at full pressure every raised texel. */
+export const DRY_THRESHOLD = 0.5;
+/** Over this much cavity above the threshold the dry brush goes from nothing to all. */
+export const DRY_SOFTNESS = 0.2;
+/** The dry brush's opacity: its slider is the pressure, not the opacity. */
+export const DRY_OPACITY = 0.9;
+/** The airbrush's dab: soft from its centre out. */
+export const AIR_HARDNESS = 0;
+/** What one airbrush dab adds to the stroke at full flow and full coverage: a spray that builds up. */
+export const AIR_FLOW_GAIN = 0.15;
+/** The airbrush's direction mask: nothing where the normal's dot with the direction is at or below this … */
+export const AIR_DIR_EDGE = 0;
+/** … all of it this far above. */
+export const AIR_DIR_SOFTNESS = 0.3;
+
 const srgbToLinear = (value: number): number =>
   value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
 

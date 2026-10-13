@@ -25,4 +25,5 @@ export {
   CURSOR_MIN_PX,
   FRAME_BUDGET_MS,
 } from './painting/mount';
+export type { PaintSurface } from './painting/passes';
 export { PAINT_COPY, type PaintCopy } from './painting/copy';
