@@ -18,7 +18,7 @@ The PM decided to publish the page before the table exists (#140), and the spec 
 ## How
 
 - **Static HTML on the application's own stylesheets.** The mockups are plain pages under `docs/design/look-and-feel/` that link a byte-for-byte copy of the application's `tokens.css`, `components.css`, `pages.css`, `theme.js` and fonts (its `main` at `c515120`), plus `mock.css` for the page's layout and nothing a component already says. A drawing tool would have needed the components redrawn by hand; this way every button, field and panel is the real component, and the build copies measurements, not impressions.
-- **Rendered by a script.** `npm run shots:look-and-feel` (`scripts/look-and-feel-shots.mjs`) opens each mockup in headless Chromium (Playwright 1.63) at 1440 × 900 and 375 × 812 and switches the theme through the emulated system setting: 26 PNGs in `shots/`, remade after any change.
+- **Rendered by a script.** `npm run shots:look-and-feel` (`scripts/look-and-feel-shots.mjs`) opens each mockup in headless Chromium (Playwright 1.63, on the development PC) at 1440 × 900 and 375 × 812 and switches the theme through the emulated system setting: 26 PNGs in `shots/`, remade after any change.
 - **Icons as CSS masks** for the mockups only: the 38 Lucide icons they use, generated from `lucide-static` 1.53.0 into `icons.css`. The build bundles them inline as the application does.
 - **The 3D viewport is a drawn stand-in** (a grid and a standee blob), so the mockups need no WebGL; the real mini against the new chrome is K3's `verify-3d` step.
 - **The scene stays dark in both themes**: the mini's look was tuned on a dark backdrop and the thumbnails are transparent, so the light theme is a light frame around a dark stage, through the application's `--scene-*` roles. A light stage is a two-line override if the PM prefers it.
@@ -28,6 +28,7 @@ The PM decided to publish the page before the table exists (#140), and the spec 
 ## Problems and how we solved them
 
 - **The size warning wrapped badly.** The spec proposed the application's banner for it; the first render showed the sentence and its Scale to fit button wrapping inside a one-line pill. **Cause:** the banner is made for a short transient line ("Reconnecting…"). **Fix:** the application's callout (a tinted block with a bar and an icon), with the button under the sentence; the drag overlay keeps the banner.
+- **The level chips vanished under the phone sheet, then the viewport vanished.** The chips were positioned against the stage, whose bottom is under the sheet. **Cause:** the chips must sit in the viewport's grid row, not the stage's bottom; and once the chips and the sheet had explicit grid rows, the auto-placed viewport was pushed into a third, empty row. **Fix:** the chips and the viewport are both placed in row 1 explicitly, the sheet in row 2; K3 keeps the explicit rows.
 
 ## Dead ends
 
