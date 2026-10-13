@@ -4,7 +4,7 @@ date: 2026-10-13
 phase: 1
 issues: [148]
 prs: [141]
-topics: [spec, page, planning]
+topics: [planning, ui]
 ---
 
 ## What we did
@@ -13,7 +13,7 @@ Wrote `docs/specs/look-and-feel.md`: five stories and six work items that make t
 
 ## Why
 
-On 2026-10-13 the PM decided to publish the page before the table application exists (`docs/journal/2026-10-13-published-before-the-table.md`). The page was built for the team: the spike's dark scheme as ten custom properties, the system font, browser-default controls, 30 colour literals over three stylesheets, the development name in the top bar. A public page in the same style as MeshTavern needs the application's design system, not a second one, and a name of its own.
+On 2026-10-13 the PM decided to publish the page before the table application exists (#140; recorded in this PR among the Phase 1 spec's decisions and in `CLAUDE.md`). The page was built for the team: the spike's dark scheme as ten custom properties, the system font, browser-default controls, 30 colour literals over three stylesheets, the development name in the top bar. A public page in the same style as MeshTavern needs the application's design system, not a second one, and a name of its own.
 
 ## How
 

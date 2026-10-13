@@ -10,7 +10,7 @@ Turn the spike into the component the MeshTavern table will use to take in minis
 
 ## Decisions taken by the PM for this phase (2026-09-20)
 
-- **No public launch in Phase 1.** The converter stays unpublished until the table exists. The source repository is public already; "launch" means a deployed page and telling people about it.
+- **No public launch in Phase 1.** The converter stays unpublished until the table exists. The source repository is public already; "launch" means a deployed page and telling people about it. _Changed by the PM on 2026-10-13 (#140): the page is published before the table application, with the painter, once it looks like a finished product in MeshTavern's style ([look-and-feel.md](look-and-feel.md))._
 - When it is published, it goes to **GitHub Pages**.
 - **Downloads offer the table and far levels only.** The close level is shown on screen but not exported, in line with what may leave a device.
 - **The page collects nothing**: no analytics, no email field.
@@ -25,7 +25,7 @@ Turn the spike into the component the MeshTavern table will use to take in minis
 
 In: the stories below; the release blockers carried over from Phase 0 (#33, #35, #38); a stable way for another application to call the converter; a faster unwrap (#34, moved into this phase on 2026-09-21, see story 9).
 
-Out: publishing (#47 leaves this phase and waits for the table); accounts, storage, sharing, the table; painting; exporters for other VTTs (Phase 1.5); export of baked minis (#36, only needed once something outside our own app consumes them).
+Out: publishing (#47 leaves this phase; since 2026-10-13 it no longer waits for the table, see the decisions above); accounts, storage, sharing, the table; painting; exporters for other VTTs (Phase 1.5); export of baked minis (#36, only needed once something outside our own app consumes them).
 
 ## Stories, in proposed order
 
