@@ -62,6 +62,31 @@ describe('spaceDabs', () => {
     expect([...first, ...rest]).toEqual(whole);
   });
 
+  it('lays even dabs exactly a spacing apart, however densely the pointer reports (#128)', () => {
+    // A pointer that reports every 0.05 mm along 3 mm, at a 0.5 mm spacing: the dabs fall at
+    // whole spacings from the first, not at the samples.
+    const dense = Array.from({ length: 61 }, (_, k) => hit(k * 0.05));
+    const xs = points(spaceDabs(dense, 0.5, null, true)).map(([x]) => x);
+    expect(xs).toHaveLength(7);
+    xs.forEach((x, k) => expect(x).toBeCloseTo(k * 0.5, 9));
+    // The same path sampled sparsely: the same dabs.
+    const sparse = [hit(0), hit(1.2), hit(3)];
+    points(spaceDabs(sparse, 0.5, null, true)).forEach(([x], k) =>
+      expect(x).toBeCloseTo(k * 0.5, 9),
+    );
+    // Nearer than a spacing: nothing yet; the pieces of a stroke lay what it would whole.
+    expect(spaceDabs([hit(0.3)], 0.5, [0, 0, 0, 0.5], true)).toEqual([]);
+    const whole = spaceDabs([hit(0), hit(0.3), hit(0.9), hit(2)], 0.5, null, true);
+    const first = spaceDabs([hit(0), hit(0.3)], 0.5, null, true);
+    const rest = spaceDabs([hit(0.9), hit(2)], 0.5, first.slice(-4), true);
+    expect([...first, ...rest]).toEqual(whole);
+    // A lift starts a new run at the next hit.
+    expect(points(spaceDabs([hit(0), null, hit(0.2)], 0.5, null, true))).toEqual([
+      [0, 0, 0],
+      [0.2, 0, 0],
+    ]);
+  });
+
   it('refuses a spacing that is not positive', () => {
     expect(() => spaceDabs([hit(0)], 0)).toThrow(RangeError);
   });

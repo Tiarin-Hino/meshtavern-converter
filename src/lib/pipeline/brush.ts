@@ -112,11 +112,19 @@ export type DabHit = { point: Vec3; pressure: number } | null;
  *
  * `from` continues a stroke already under way: the hits are the new samples, `from` the last
  * dab laid (its four numbers), so a stroke spaced in pieces lays the dabs it would whole.
+ *
+ * `even` lays the dabs exactly `spacingMm` apart instead (#128): along the line from the last
+ * dab to each hit, as many whole spacings as fit, and nothing while the hit is nearer than one;
+ * the hit itself is a dab only when it falls on a spacing. A tool whose dabs add up (the
+ * airbrush) needs that: with a dab at every hit, how much it sprays would follow how often the
+ * pointer reports, not how far it went. A stroke may end short of its last hit by less than a
+ * spacing.
  */
 export function spaceDabs(
   hits: readonly DabHit[],
   spacingMm: number,
   from: readonly number[] | null = null,
+  even = false,
 ): number[] {
   if (!(spacingMm > 0)) throw new RangeError('The dab spacing must be positive');
   const dabs: number[] = [];
@@ -135,6 +143,20 @@ export function spaceDabs(
     const [lx, ly, lz, lp] = last as [number, number, number, number];
     const length = Math.hypot(x - lx, y - ly, z - lz);
     if (length === 0) continue;
+    if (even) {
+      const whole = Math.floor(length / spacingMm);
+      for (let k = 1; k <= whole; k++) {
+        const t = (k * spacingMm) / length;
+        last = [
+          lx + (x - lx) * t,
+          ly + (y - ly) * t,
+          lz + (z - lz) * t,
+          lp + (hit.pressure - lp) * t,
+        ];
+        dabs.push(...last);
+      }
+      continue;
+    }
     const steps = Math.ceil(length / spacingMm);
     for (let k = 1; k <= steps; k++) {
       const t = k / steps;

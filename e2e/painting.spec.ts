@@ -1,4 +1,16 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import {
+  AIR_HARDNESS,
+  DEFAULT_BRUSH,
+  DRY_OPACITY,
+  DRY_SOFTNESS,
+  DRY_THRESHOLD,
+  INK_FLAT,
+  toolMask,
+  WASH_FLAT,
+  type BrushSettings,
+  type ToolId,
+} from '../src/lib';
 import { encodeBinaryStl } from '../src/lib/dev';
 import {
   generateFigure,
@@ -750,4 +762,309 @@ test('erases back to bare where the eraser goes, and only there', async ({ figur
   expect(near.filter((seen) => seen.alpha !== 0)).toEqual([]);
   expect(far.filter((seen) => seen.alpha !== 255)).toEqual([]);
   expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
+});
+// The hobby brushes (#128, design note §6 and §13 step 11). Where a stroke lands is #127's and
+// tested above; what a brush adds is its mask. So each test paints its stroke twice on the bare
+// figure: with the flat brush at full opacity (what the stroke reaches, texel by texel: `reach`),
+// then with the brush under test, and reads back what the masks read at every texel
+// (`view.surface()`). A texel then holds `reach × opacity × toolMask(...)`.
+
+type Vec3 = [number, number, number];
+
+/** A texel near a stroke: what the masks read there, how much the flat brush's stroke reached it, and the brush's paint. */
+interface Under {
+  texel: number;
+  cavity: number;
+  occlusion: number;
+  normal: Vec3;
+  /** The flat brush's alpha there, 0–255: the stroke's coverage, in sight and facing. */
+  reach: number;
+  rgba: [number, number, number, number];
+}
+
+/**
+ * Opens the shared figure bare and paints with `tool` along the canvas points of `along` (points
+ * of the mini, projected from `camera`), by the surface points under a canvas path through them,
+ * `passes` times. First the same stroke with the flat brush at full opacity and `reachHardness`
+ * (the reference), undone before the brush paints. Gives every texel the reference reached, and
+ * every texel the brush changed.
+ */
+async function brushOver(
+  page: Page,
+  options: {
+    tool: ToolId;
+    brush: Partial<BrushSettings>;
+    reachHardness?: number;
+    camera: Vec3;
+    along: Vec3[];
+    passes?: number;
+  },
+): Promise<{ under: Under[]; steps: number }> {
+  return page.evaluate(async ({ tool, brush, reachHardness, camera, along, passes = 1 }) => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setColour('#203040');
+    view.setCamera(...camera);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const anchors = along.map((point) => view.screenOf(point));
+    // A canvas point every 3 px through the anchors, and the surface under each.
+    const points: Vec3[] = [];
+    for (let k = 1; k < anchors.length; k++) {
+      const [ax, ay] = anchors[k - 1]!;
+      const [bx, by] = anchors[k]!;
+      const n = k === anchors.length - 1 ? 1 : 0;
+      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 3));
+      for (let i = 0; i < steps + n; i++) {
+        const hit = view.texelAt(ax + ((bx - ax) * i) / steps, ay + ((by - ay) * i) / steps);
+        if (hit) points.push(hit.point);
+      }
+    }
+    // The reference, undone; then the brush.
+    view.setTool('flat');
+    view.setBrush({ ...brush, opacity: 1, hardness: reachHardness ?? brush.hardness });
+    await view.stroke(points);
+    const reach = await view.paint();
+    await view.undo();
+    view.setTool(tool);
+    view.setBrush(brush);
+    for (let pass = 0; pass < passes; pass++) await view.stroke(points);
+    const painted = await view.paint();
+    const surface = await view.surface();
+    const under: Under[] = [];
+    for (let texel = 0; texel < 1024 * 1024; texel++) {
+      const k = texel * 4;
+      if (reach.data[k + 3] === 0 && painted.data[k + 3] === 0) continue;
+      under.push({
+        texel,
+        cavity: surface.cavity[texel]!,
+        occlusion: surface.occlusion[texel]!,
+        normal: [0, 1, 2].map((axis) => surface.normal[texel * 3 + axis]!) as Vec3,
+        reach: reach.data[k + 3]!,
+        rgba: [0, 1, 2, 3].map((c) => painted.data[k + c]!) as Under['rgba'],
+      });
+    }
+    return { under, steps: view.state.steps };
+  }, options);
+}
+
+/** Down the figure's front from its chest, over the disc's top and its rim: creases, crests, flat and an edge. */
+const DOWN_THE_FRONT: Vec3[] = [
+  ...[18, 16, 14, 12, 10, 8].map((y): Vec3 => [0.5, y, 6]),
+  ...[5.5, 7, 8.5, 10, 11.5].map((z): Vec3 => [0.5, 3, z]),
+  [0.5, 2.2, 12.6],
+];
+const FROM_THE_FRONT: Vec3 = [0, 20, 1];
+
+/**
+ * Every texel the stroke reached took the tool's mask: its alpha is `reach × opacity × toolMask`
+ * of what the masks read there, within the rounding of the reach, the read-back and the paint;
+ * a texel it did not reach is bare. Gives the texels it reached fully.
+ */
+function expectMasked(
+  under: Under[],
+  tool: ToolId,
+  brush: BrushSettings,
+  opacity: number,
+): Under[] {
+  for (const texel of under) {
+    const masks = [-1, 0, 1].flatMap((dc) =>
+      [-1, 0, 1].map((doc) =>
+        toolMask(tool, texel.cavity + dc / 127, texel.occlusion + doc / 255, texel.normal, brush),
+      ),
+    );
+    const low = Math.max(0, texel.reach - 0.5) * opacity * Math.min(...masks) - 1.5;
+    const high = Math.min(255, texel.reach + 0.5) * opacity * Math.max(...masks) + 1.5;
+    const alpha = texel.rgba[3];
+    if (alpha < low || alpha > high)
+      throw new Error(
+        `${tool}: texel ${texel.texel} (reach ${texel.reach}, cavity ${texel.cavity.toFixed(3)}, occlusion ${texel.occlusion.toFixed(3)}) has alpha ${alpha}, expected ${low.toFixed(1)}–${high.toFixed(1)}`,
+      );
+  }
+  const full = under.filter((texel) => texel.reach === 255);
+  expect(full.length).toBeGreaterThan(1000);
+  return full;
+}
+
+const mean = (values: number[]): number => values.reduce((a, b) => a + b, 0) / values.length;
+const alphas = (texels: Under[]): number[] => texels.map((texel) => texel.rgba[3]);
+const brushWith = (changes: Partial<BrushSettings>): BrushSettings => ({
+  ...DEFAULT_BRUSH,
+  ...changes,
+});
+
+test('washes into the creases, faintly and evenly over flat, and nearly not on an edge', async ({
+  figurePage: page,
+}) => {
+  const brush = brushWith({ sizeMm: 3, hardness: 0.8, opacity: 1 });
+  const { under, steps } = await brushOver(page, {
+    tool: 'wash',
+    brush,
+    camera: FROM_THE_FRONT,
+    along: DOWN_THE_FRONT,
+  });
+  expect(steps).toBe(1);
+  const full = expectMasked(under, 'wash', brush, 1);
+  // The edge: the disc's rim, raised and open, keeps within a tenth of a full coat.
+  const edge = full.filter((texel) => texel.cavity > 0.6 && texel.occlusion > 0.9);
+  const crease = full.filter((texel) => texel.cavity < -0.3);
+  const flat = full.filter((texel) => Math.abs(texel.cavity) < 0.01 && texel.occlusion > 0.95);
+  expect(edge.length).toBeGreaterThan(10);
+  expect(crease.length).toBeGreaterThan(10);
+  expect(flat.length).toBeGreaterThan(20);
+  expect(Math.max(...alphas(edge))).toBeLessThanOrEqual(Math.round(0.1 * 255));
+  // The creases: darker than any edge, and than the flat tint.
+  expect(Math.min(...alphas(crease))).toBeGreaterThan(Math.max(...alphas(edge)));
+  expect(mean(alphas(crease))).toBeGreaterThan(2 * mean(alphas(flat)));
+  // The flat, open disc: a faint tint, even: WASH_FLAT, and at most what a twentieth less
+  // occlusion and the read-back's rounding of the cavity add to it.
+  const tint = Math.round(255 * WASH_FLAT);
+  for (const value of alphas(flat)) {
+    expect(value).toBeGreaterThanOrEqual(tint - 2);
+    expect(value).toBeLessThanOrEqual(tint + 8);
+  }
+});
+
+test('inks every texel under the stroke, the creases most', async ({ figurePage: page }) => {
+  const brush = brushWith({ sizeMm: 3, hardness: 0.8, opacity: 0.8 });
+  const { under, steps } = await brushOver(page, {
+    tool: 'ink',
+    brush,
+    camera: FROM_THE_FRONT,
+    along: DOWN_THE_FRONT,
+  });
+  expect(steps).toBe(1);
+  const full = expectMasked(under, 'ink', brush, 0.8);
+  // Every texel the stroke reached is stained, down to its soft rim.
+  const reached = under.filter((texel) => texel.reach * 0.8 * INK_FLAT >= 2);
+  expect(reached.length).toBeGreaterThan(full.length);
+  expect(reached.filter((texel) => texel.rgba[3] === 0)).toEqual([]);
+  for (const texel of full)
+    expect(texel.rgba[3]).toBeGreaterThanOrEqual(Math.round(255 * 0.8 * INK_FLAT) - 2);
+  const crease = alphas(full.filter((texel) => texel.cavity < -0.3));
+  const flat = alphas(full.filter((texel) => Math.abs(texel.cavity) < 0.02));
+  expect(crease.length).toBeGreaterThan(10);
+  expect(mean(crease)).toBeGreaterThan(mean(flat) + 30);
+});
+
+test('dry-brushes the raised surface only, the creases left as they were', async ({
+  figurePage: page,
+}) => {
+  for (const pressure of [1, 0.5]) {
+    const brush = brushWith({ sizeMm: 3, hardness: 0.8, opacity: pressure });
+    const { under, steps } = await brushOver(page, {
+      tool: 'dry',
+      brush,
+      camera: FROM_THE_FRONT,
+      along: DOWN_THE_FRONT,
+    });
+    expect(steps).toBe(1);
+    const full = expectMasked(under, 'dry', brush, DRY_OPACITY);
+    // A crease, a hollow or a flat texel: not a byte changed, anywhere under the stroke.
+    const notRaised = under.filter((texel) => texel.cavity < -0.01);
+    expect(notRaised.filter((texel) => texel.reach === 255).length).toBeGreaterThan(50);
+    expect(notRaised.filter((texel) => texel.rgba.some((value) => value !== 0))).toEqual([]);
+    // An edge, past the threshold and the softness: painted at the dry brush's opacity.
+    const threshold = DRY_THRESHOLD * (1 - pressure);
+    const edge = full.filter((texel) => texel.cavity > threshold + DRY_SOFTNESS + 0.01);
+    expect(edge.length).toBeGreaterThan(10);
+    for (const texel of edge) expect(texel.rgba[3]).toBe(Math.round(255 * DRY_OPACITY));
+    // Less pressure reaches less far down the edge: what lies below its threshold stays bare.
+    const below = under.filter((texel) => texel.cavity < threshold - 0.01);
+    expect(below.filter((texel) => texel.rgba[3] !== 0)).toEqual([]);
+  }
+});
+
+test('airbrushes from above only what faces up, building up over passes', async ({
+  figurePage: page,
+}) => {
+  // From below the figure's waist, so that its underside and the undersides of its arms are in
+  // sight: down its front, from the shoulders to the disc.
+  const options = {
+    tool: 'airbrush' as const,
+    brush: { sizeMm: 8, opacity: 1, direction: [0, 1, 0] as Vec3 },
+    reachHardness: AIR_HARDNESS,
+    camera: [0, -15, 1] as Vec3,
+    along: [22, 18, 14, 10, 6].map((y): Vec3 => [0.5, y, 6]),
+  };
+  const once = await brushOver(page, options);
+  expect(once.steps).toBe(1);
+  const down = once.under.filter((texel) => texel.normal[1] < -0.02);
+  const up = once.under.filter((texel) => texel.reach > 128 && texel.normal[1] > 0.35);
+  expect(down.filter((texel) => texel.reach > 128).length).toBeGreaterThan(200);
+  expect(up.length).toBeGreaterThan(50);
+  // Facing down: not a byte changed.
+  expect(down.filter((texel) => texel.rgba.some((value) => value !== 0))).toEqual([]);
+  // Facing up: sprayed, a little at a time.
+  expect(up.filter((texel) => texel.rgba[3] === 0)).toEqual([]);
+  expect(Math.max(...alphas(up))).toBeLessThan(255);
+
+  const twice = await brushOver(page, { ...options, passes: 2 });
+  expect(twice.steps).toBe(2);
+  const after = new Map(twice.under.map((texel) => [texel.texel, texel.rgba[3]]));
+  const built = up.filter((texel) => (after.get(texel.texel) ?? 0) > texel.rgba[3]);
+  expect(built.length).toBeGreaterThan(0.9 * up.length);
+  const stillDown = twice.under.filter((texel) => texel.normal[1] < -0.02);
+  expect(stillDown.filter((texel) => texel.rgba.some((value) => value !== 0))).toEqual([]);
+});
+
+test('makes every hobby brush’s stroke one step, replayed to the same bytes', async ({
+  figurePage: page,
+}) => {
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const path = Array.from({ length: 30 }, (_, k) =>
+      view.screenOf([-3 + (6 * k) / 29, 14 + Math.sin(k / 4), 6]),
+    );
+    const hash = async (): Promise<number> => {
+      const { data } = await view.paint();
+      let h = 0;
+      for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
+      return h;
+    };
+    const rows: {
+      tool: string;
+      steps: number;
+      changed: boolean;
+      undone: boolean;
+      redone: boolean;
+    }[] = [];
+    for (const tool of ['wash', 'ink', 'dry', 'airbrush'] as const) {
+      view.setTool(tool);
+      view.setBrush({
+        sizeMm: 4,
+        opacity: 0.7,
+        direction: tool === 'airbrush' ? [0, 0, 1] : null,
+      });
+      const before = await hash();
+      const steps = view.state.steps;
+      // A pointer's stroke, a few dabs a frame; undo and redo replay it whole.
+      await view.strokeAt(path);
+      const after = await hash();
+      await view.undo();
+      const undone = (await hash()) === before;
+      await view.redo();
+      const redone = (await hash()) === after;
+      rows.push({
+        tool,
+        steps: view.state.steps - steps,
+        changed: after !== before,
+        undone,
+        redone,
+      });
+    }
+    return rows;
+  });
+  for (const row of outcome)
+    expect(row).toEqual({
+      tool: row.tool,
+      steps: 1,
+      changed: true,
+      undone: true,
+      redone: true,
+    });
 });

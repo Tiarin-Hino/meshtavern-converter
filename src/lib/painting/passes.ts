@@ -192,7 +192,7 @@ void main() {
     return;
   }
   ivec2 from = ivec2( int( owner.r + owner.g * 256.0 ), int( owner.b + owner.a * 256.0 ) );
-  vec4 detail = texture( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)} );
+  vec4 detail = textureLod( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)}, 0.0 );
   if ( uPart == 0 ) {
     float cavity = clamp( ( detail.a - 0.5 ) * ${CAVITY_GAIN.toFixed(1)}, -1.0, 1.0 );
     fragColor = vec4( cavity * 0.5 + 0.5, texelFetch( uAtlas, from, 0 ).g, 1.0, 1.0 );
@@ -255,7 +255,10 @@ void main() {
     fragColor = paint;
     return;
   }
-  vec4 detail = texture( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)} );
+  // The full-size level, named: after the return above the implicit derivatives a mip level
+  // comes from are undefined, and the surface a texel reads would follow which of its neighbours
+  // the stroke covered (#128: a second airbrush pass found other normals than the first).
+  vec4 detail = textureLod( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)}, 0.0 );
   float cavity = clamp( ( detail.a - 0.5 ) * ${CAVITY_GAIN.toFixed(1)}, -1.0, 1.0 );
   vec3 normal = detail.rgb * 2.0 - 1.0;
   float occlusion = texelFetch( uAtlas, from, 0 ).g;

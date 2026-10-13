@@ -552,12 +552,14 @@ class Painting implements PaintingView {
     const live = this.live;
     if (!live) return;
     const spacing = DAB_SPACING * live.step.brush.sizeMm;
+    // A tool whose dabs add up lays them evenly, so that it sprays by distance, not by samples.
+    const even = toolPass(live.step.tool).blend === 'add';
     for (const hit of hits) {
       if (!hit) {
         live.last = null;
         continue;
       }
-      const dabs = spaceDabs([hit], spacing, live.last);
+      const dabs = spaceDabs([hit], spacing, live.last, even);
       for (const value of dabs) live.step.dabs.push(value);
       live.last = live.step.dabs.slice(-4);
     }
