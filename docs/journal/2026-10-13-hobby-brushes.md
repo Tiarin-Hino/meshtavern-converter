@@ -22,6 +22,8 @@ The table application (Phase 2) paints minis the way people paint real ones, and
 - **The airbrush adds.** The other brushes keep the largest coverage a texel has had in the stroke, so going over a spot again does not darken it. The airbrush adds every dab's share instead. Two things make that exact. Each dab adds a whole number of 1/255 steps, so sums in any grouping are the same bytes: the live stroke draws a few dabs a frame, an undo replays them all at once, and both give the same paint. And a stencil lets one fragment per texel add in each draw, because a texel on an island's edge is reached by both a triangle and an edge line, and would otherwise count twice.
 - **Pixel tests that separate reach from mask.** Where a stroke lands is #127's and tested there. Each brush test paints its stroke twice on the bare generated figure: first with the flat brush at full opacity, which records how far the stroke reached every texel, then with the brush under test. A read-back of what the masks see at every texel (`view.surface()`, for tests) gives the cavity, occlusion and normal, and every texel must hold reach × opacity × `toolMask` within the rounding. On top, the issue's lines: the dry brush changes not a byte in a crease, the wash keeps the disc's rim under a tenth of a coat and darkens the creases more than any edge, the ink stains every reached texel, and an airbrush from above changes no texel whose normal faces down, then builds up on a second pass.
 
+- **What each brush does, in words.** The PM tried the brushes and found the brush, the wash and the ink hard to tell apart without being told. `PAINT_COPY.toolHints` has a sentence or two per tool, which the `?dev` panel shows under the tool buttons and the table can show beside its own; a preview animation per brush is the table's to make.
+
 ## Problems and how we solved them
 
 - **The airbrush sprayed by the pointer's sample rate.** A first pass saturated where it should have laid about a third of a coat. **Cause:** dabs are laid every quarter brush width, but a pointer sample closer than that is a dab itself; for brushes that keep the largest coverage that costs nothing, for one that adds it means more paint the faster the pointer reports. **Fix:** an adding brush lays its dabs exactly a spacing apart and nothing while the pointer is nearer than one (`spaceDabs(…, even)`); the stroke may end short of the last sample by less than a spacing.
@@ -46,6 +48,8 @@ Every frame of every brush came at the display's 6.1 ms, as the flat brush's did
 Tests, software rendering in Chromium (as CI): the full e2e suite on two workers, 72 tests in 13.6 minutes, the painting spec 5.8 of them. On the default number of workers on the development PC the suite timed out in 14 tests of other files (conversions in software rendering starving each other); alone and on two workers they pass. Unit tests: 638.
 
 ## Still open
+
+- The PM's second point: dry-brushing small, low detail with a small brush lays nothing, because the dry brush's threshold is absolute (how raised the bake measured a texel to be). A threshold relative to the highest point under the brush where the stroke starts is a follow-up issue with a design pass.
 
 - The masks are proposals to judge by eye on the corpus in the `?dev` Paint tool; their constants are the PM's.
 - The reference laptop's numbers, for #127's brushes and these.

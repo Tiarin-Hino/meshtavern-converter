@@ -79,6 +79,7 @@ interface Panel {
   open: HTMLButtonElement;
   controls: HTMLElement;
   tools: HTMLElement;
+  hint: HTMLElement;
   size: HTMLInputElement;
   hardness: HTMLInputElement;
   opacity: HTMLInputElement;
@@ -104,6 +105,7 @@ function findPanel(root: Document): Panel | null {
     open,
     controls: get('paint-controls')!,
     tools: get('paint-tools')!,
+    hint: get('paint-hint')!,
     size: get('paint-size')!,
     hardness: get('paint-hardness')!,
     opacity: get('paint-opacity')!,
@@ -158,6 +160,7 @@ export function createPaintTool(
     for (const label of panel.controls.querySelectorAll<HTMLElement>('[data-slider]'))
       label.hidden = !sliders.show.includes(label.dataset.slider as keyof BrushSettings);
     panel.opacityLabel.textContent = PAINT_COPY.sliders[sliders.opacity];
+    panel.hint.textContent = PAINT_COPY.toolHints[state.tool];
     panel.colour.value = state.colour;
     panel.base.disabled = !state.regions.includes('base');
     panel.figure.disabled = !state.regions.includes('figure');

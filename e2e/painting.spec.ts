@@ -1028,6 +1028,7 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
     };
     const rows: {
       tool: string;
+      hint: string;
       steps: number;
       changed: boolean;
       undone: boolean;
@@ -1051,6 +1052,8 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
       const redone = (await hash()) === after;
       rows.push({
         tool,
+        // The ?dev panel says what the brush does (PAINT_COPY.toolHints).
+        hint: document.querySelector('#paint-hint')?.textContent ?? '',
         steps: view.state.steps - steps,
         changed: after !== before,
         undone,
@@ -1062,9 +1065,13 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
   for (const row of outcome)
     expect(row).toEqual({
       tool: row.tool,
+      hint: row.hint,
       steps: 1,
       changed: true,
       undone: true,
       redone: true,
     });
+  const hints = outcome.map((row) => row.hint);
+  expect(hints.every((hint) => hint.length > 20)).toBe(true);
+  expect(new Set(hints).size).toBe(hints.length);
 });

@@ -15,6 +15,17 @@ export const PAINT_COPY = {
     dry: 'Dry brush',
     airbrush: 'Airbrush',
   },
+  /** What each tool does, a sentence or two for a panel to show beside it (#128). */
+  toolHints: {
+    flat: 'Paints the colour evenly wherever it touches.',
+    fill: 'Fills the surface you tap, up to a fold or a crease. Tolerance lets it go further.',
+    eraser: 'Takes the paint away again, back to the bare mini.',
+    wash: 'Thin colour that runs into creases and recesses, tints flat areas faintly and leaves raised edges almost bare. Use it to shade.',
+    ink: 'Stains everything it covers, darkest in the creases. Stronger than a wash, softer than the brush.',
+    dry: 'Catches only the raised edges and crests. More pressure reaches further down from the edge. Use it to highlight.',
+    airbrush:
+      'A soft spray that builds up with every pass. Spraying from above reaches only surfaces that face up: a zenithal highlight in one pass.',
+  },
   sliders: {
     sizeMm: 'Size',
     hardness: 'Hardness',
