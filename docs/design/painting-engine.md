@@ -378,6 +378,8 @@ export type PaintCopy = typeof PAINT_COPY;
 
 The engine itself shows only `cannotPaint` (as the refusal's message); the rest is offered so a consumer's panel and this page's `?dev` tool say the same words, as `QUESTION_COPY` does for the questions. `copy` in the options replaces fields; nested objects are replaced whole.
 
+**As built (2026-10-13, #128):** `PAINT_COPY` also has `toolHints`, a sentence or two per tool on what it does, for the consumer's panel to show beside the tool (the `?dev` tool shows it under its tool buttons), added after the PM found the brush, the wash and the ink hard to tell apart.
+
 ### 10.3 The scene and the styles
 
 `src/lib/painting/scene.ts` is the question scene's frame without the question: a canvas in the host, `WebGLRenderer({ antialias: true })` with the pixel ratio capped at 2, the page's background, `addTableLights`, the grid (`GRID_SQUARE_MM × 40`), `PerspectiveCamera(40, …)`, OrbitControls with damping and `zoomToCursor`, a `ResizeObserver`, a loop that runs only while a mini is open, and the mini: `createBakedGeometry(mesh)` with `createBakedMaterial(ownTexture, createLookUniforms(look), { map: live.texture })`. The camera on a sphere (`setCamera`) is the third copy of the viewer's fifteen lines; #119 §7.2 said a shared helper is worth it at the third copy: the build moves it to `src/lib/three/camera.ts` as `placeCameraOnSphere(camera, controls, size, azimuthDeg, elevationDeg, zoom)` and makes the viewer and the question scene call it, in a commit of its own with no behaviour change (the maths is identical; the e2e screenshots prove it). If any screenshot moves, the painting scene keeps its own copy and the commit is dropped (§15).
