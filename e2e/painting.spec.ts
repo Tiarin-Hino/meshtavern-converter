@@ -61,17 +61,42 @@ test('stays closed when closed while it opens, and the later of two opens wins',
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    // Holds every GPU read-back: three.js polls `clientWaitSync` until the fence is passed. While
+    // held, the call says the time ran out; `waiting` tells that an open has reached its read-back.
+    const gl = WebGL2RenderingContext.prototype;
+    const clientWaitSync = gl.clientWaitSync;
+    const hold = { on: false, waiting: false };
+    gl.clientWaitSync = function (this: WebGL2RenderingContext, ...args) {
+      if (!hold.on) return clientWaitSync.apply(this, args);
+      hold.waiting = true;
+      return this.TIMEOUT_EXPIRED;
+    };
+    const atReadBack = async (): Promise<void> => {
+      while (!hold.waiting) await new Promise((resolve) => setTimeout(resolve, 5));
+    };
+    const release = (): void => {
+      hold.on = false;
+      hold.waiting = false;
+    };
     // Closed while the atlas is read back: the open resolves and installs nothing.
+    hold.on = true;
     const closing = painting.open('x+');
+    await atReadBack();
     painting.close();
+    release();
     await closing;
     await frame();
     await frame();
     const closed = { table: painting.table() !== null, open: window.__mt.state.painting?.open };
-    // A second open while the first reads back: the second's paint (bare) is the one open.
+    // A second open while the first is read back (the page's tool closes the view, then opens): the
+    // second's paint, bare, is the one open.
+    hold.on = true;
     const first = painting.open('x+');
+    await atReadBack();
     const second = painting.open();
+    release();
     await Promise.all([first, second]);
+    gl.clientWaitSync = clientWaitSync;
     const { data } = await painting.view().paint();
     let painted = 0;
     for (let k = 3; k < data.length; k += 4) if (data[k] !== 0) painted++;
