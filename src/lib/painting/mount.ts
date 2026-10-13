@@ -186,6 +186,9 @@ class Painting implements PaintingView {
   private colour = DEFAULT_COLOUR;
   private perf: PaintPerf = NO_PERF;
   private current: PaintingState;
+  /** The pointers down on the canvas, and the one painting the stroke on it. */
+  private readonly pointers = new Set<number>();
+  private strokePointer: number | null = null;
 
   constructor(options: PaintingOptions) {
     const host = options.scene;
@@ -204,6 +207,7 @@ class Painting implements PaintingView {
     this.scene.onFrame = () => this.drawLive();
     this.scene.onFrameTimed = (ms) => this.live?.frames.push(ms);
     this.current = this.snapshot();
+    this.wireCanvas();
   }
 
   get state(): PaintingState {
@@ -421,14 +425,19 @@ class Painting implements PaintingView {
     };
   }
 
-  /** A stroke starts at its first hit (§9): its camera frozen, its depth map rendered. */
-  private beginLive(first: NonNullable<DabHit>): void {
+  /**
+   * A stroke starts at its first hit (§9): its camera recorded, its depth map rendered. The
+   * controls stop while a mouse or a pen paints; a finger's stroke leaves them on, so a second
+   * finger can take over the pinch the moment it cancels the stroke (one finger alone does not
+   * orbit).
+   */
+  private beginLive(first: NonNullable<DabHit>, touch = false): void {
     if (!this.opened) return;
     const tool = this.tool;
     if (tool === 'fill') throw new RangeError('The fill tool fills; it does not stroke');
     const camera = this.scene.strokeCamera();
     this.passes.beginStroke(camera);
-    this.scene.controls.enabled = false;
+    this.scene.controls.enabled = touch;
     this.live = {
       step: {
         kind: 'stroke',
@@ -489,6 +498,104 @@ class Painting implements PaintingView {
     this.perf = perfOf(live.frames);
     this.emit();
   }
+
+  /** The stroke on the canvas is dropped (a second finger arrived, the pointer was cancelled): no step. */
+  private cancelLive(): void {
+    if (!this.live) return;
+    this.live = null;
+    this.strokePointer = null;
+    this.scene.controls.enabled = true;
+    this.passes.cancel();
+    this.emit();
+  }
+
+  /**
+   * The pointer rules (§9): the left button, a pen's tip and one finger paint (with the fill tool
+   * they fill what they hit); the right button and two fingers orbit, the middle button pans (the
+   * scene's controls). A second finger during a finger's stroke cancels it. Navigating, nothing
+   * paints. A pen's samples between frames come from `getCoalescedEvents`.
+   */
+  private wireCanvas(): void {
+    const canvas = this.scene.canvas;
+    const at = (event: PointerEvent): [number, number] => {
+      const rect = canvas.getBoundingClientRect();
+      return [event.clientX - rect.left, event.clientY - rect.top];
+    };
+    const sample = (event: PointerEvent): DabHit => {
+      const hit = this.hitAt(...at(event));
+      return hit ? { point: hit.point, pressure: pressureOf(event) } : null;
+    };
+    // Before the controls' own listener, so a cancelled stroke gives the pinch back at once.
+    canvas.addEventListener(
+      'pointerdown',
+      (event) => {
+        this.pointers.add(event.pointerId);
+        if (this.pointers.size > 1) {
+          if (this.strokePointer !== null) this.cancelLive();
+          return;
+        }
+        if (!this.opened || this.scene.isNavigating || event.button !== 0) return;
+        const hit = this.hitAt(...at(event));
+        if (!hit) return;
+        if (this.tool === 'fill') {
+          void this.fillAt(hit.triangle, hit.point);
+          return;
+        }
+        this.commitLive();
+        this.strokePointer = event.pointerId;
+        // The stroke goes on, and ends, though the pointer leaves the canvas.
+        canvas.setPointerCapture?.(event.pointerId);
+        this.beginLive(
+          { point: hit.point, pressure: pressureOf(event) },
+          event.pointerType === 'touch',
+        );
+      },
+      { capture: true },
+    );
+    canvas.addEventListener('pointermove', (event) => {
+      this.moveCursor(event, at(event));
+      if (!this.live || event.pointerId !== this.strokePointer) return;
+      const events = event.getCoalescedEvents?.() ?? [];
+      this.extendLive((events.length > 0 ? events : [event]).map(sample));
+    });
+    const release = (event: PointerEvent): void => {
+      this.pointers.delete(event.pointerId);
+      if (event.pointerId !== this.strokePointer) return;
+      this.strokePointer = null;
+      if (event.type === 'pointerup') this.commitLive();
+      else this.cancelLive();
+    };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
+    canvas.addEventListener('pointerleave', () => {
+      this.cursor.hidden = true;
+    });
+  }
+
+  /** The cursor ring (§9): the brush's size at the surface under the pointer; not on touch, off the mini or with the fill tool. */
+  private moveCursor(event: PointerEvent, [x, y]: [number, number]): void {
+    const hit = event.pointerType === 'touch' || this.tool === 'fill' ? null : this.hitAt(x, y);
+    this.cursor.hidden = hit === null;
+    if (!hit) return;
+    const size = Math.max(CURSOR_MIN_PX, this.brush.sizeMm * this.scene.pixelsPerMm(hit.point));
+    const style = this.cursor.style;
+    style.left = `${x}px`;
+    style.top = `${y}px`;
+    style.width = `${size}px`;
+    style.height = `${size}px`;
+  }
+
+  /** A tap with the fill tool (§9): built in a later step. */
+  private fillAt(triangle: number, point: Vec3): Promise<void> {
+    void triangle;
+    void point;
+    return Promise.resolve();
+  }
+}
+
+/** A pointer's pressure: a pen's or a finger's as it reports it; a mouse's MOUSE_PRESSURE. */
+function pressureOf(event: PointerEvent): number {
+  return event.pointerType === 'mouse' || !(event.pressure > 0) ? MOUSE_PRESSURE : event.pressure;
 }
 
 /** The view's own GPU copy of a detail texture (§3.2): the consumer's is never disposed by the view. Null for a kind it cannot copy. */

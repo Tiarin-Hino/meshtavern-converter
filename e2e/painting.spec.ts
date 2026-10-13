@@ -276,3 +276,168 @@ test('paints both sides of a seam and the gutter beside each', async ({ page }) 
   expect(outcome.found).toBe(true);
   expect(outcome.alphas).toEqual(Array(8).fill(255));
 });
+
+/** How many bytes two paints differ in, and how many texels each has painted. */
+async function paintNow(page: Page): Promise<{ painted: number; hash: number }> {
+  return page.evaluate(async () => {
+    const { data } = await window.__mt.painting.view().paint();
+    let painted = 0;
+    let hash = 0;
+    for (let k = 0; k < data.length; k++) {
+      hash = (Math.imul(hash, 31) + data[k]!) | 0;
+      if (k % 4 === 3 && data[k]! > 0) painted++;
+    }
+    return { painted, hash };
+  });
+}
+
+/** A path across the figure's chest on the canvas, from the front. */
+async function chestPath(page: Page): Promise<[number, number][]> {
+  return page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return Array.from({ length: 30 }, (_, k) =>
+      view.screenOf([-3 + (6 * k) / 29, 14 + Math.sin(k / 4), 6]),
+    );
+  });
+}
+
+test('paints the same texels from a canvas path as from its points on the surface', async ({
+  page,
+}) => {
+  await convert(page, generateFigure(true));
+  await page.evaluate(() => window.__mt.painting.open());
+  const path = await chestPath(page);
+  await page.evaluate(async (path) => {
+    const view = window.__mt.painting.view();
+    view.setBrush({ sizeMm: 1.5 });
+    await view.strokeAt(path);
+  }, path);
+  const fromPath = await paintNow(page);
+  const state = await page.evaluate(() => window.__mt.painting.view().state);
+  expect(state.steps).toBe(1);
+  expect(state.perf.frames).toBeGreaterThanOrEqual(path.length);
+  // The same stroke from the points on the surface under the path.
+  await page.evaluate(() => window.__mt.painting.open());
+  await page.evaluate(async (path) => {
+    const view = window.__mt.painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    view.setBrush({ sizeMm: 1.5 });
+    const points = path.flatMap(([x, y]) => {
+      const hit = view.texelAt(x, y);
+      return hit ? [hit.point] : [];
+    });
+    await view.stroke(points);
+  }, path);
+  const fromPoints = await paintNow(page);
+  expect(fromPath.painted).toBeGreaterThan(1000);
+  expect(fromPoints).toEqual(fromPath);
+});
+
+test('paints with the left button, orbits with the right', async ({ page }) => {
+  await convert(page, generateFigure(true));
+  await page.evaluate(() => window.__mt.painting.open());
+  const path = await chestPath(page);
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  // The left button: a stroke, one step.
+  await page.mouse.move(box.x + path[0]![0], box.y + path[0]![1]);
+  await page.mouse.down();
+  for (const [x, y] of path.slice(1)) await page.mouse.move(box.x + x, box.y + y, { steps: 2 });
+  await page.mouse.up();
+  await page.waitForFunction(() => window.__mt.painting.view().state.steps === 1);
+  expect((await paintNow(page)).painted).toBeGreaterThan(1000);
+  // The right button turns the mini: the canvas's middle shows another triangle, nothing painted.
+  const middle: [number, number] = [box.width / 2, box.height / 2];
+  const before = await page.evaluate(
+    (at) => window.__mt.painting.view().texelAt(...at)?.triangle,
+    middle,
+  );
+  await page.mouse.move(box.x + middle[0], box.y + middle[1]);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + middle[0] + 150, box.y + middle[1], { steps: 10 });
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(500);
+  const after = await page.evaluate(
+    (at) => window.__mt.painting.view().texelAt(...at)?.triangle,
+    middle,
+  );
+  expect(before).toBeDefined();
+  expect(after).not.toBe(before);
+  expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
+});
+
+test('draws the brush’s ring under the pointer, and turns the mini instead while navigating', async ({
+  page,
+}) => {
+  await convert(page, generateFigure(true));
+  await page.evaluate(() => window.__mt.painting.open());
+  const path = await chestPath(page);
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  const cursor = page.locator('#paint-view .mt-painting-cursor');
+  // Over the chest: a ring as wide as a 4 mm brush there.
+  await page.evaluate(() => window.__mt.painting.view().setBrush({ sizeMm: 4 }));
+  await page.mouse.move(box.x + path[15]![0], box.y + path[15]![1]);
+  await expect(cursor).toBeVisible();
+  const ring = (await cursor.boundingBox())!;
+  const span = await page.evaluate(() => {
+    const view = window.__mt.painting.view();
+    const [ax] = view.screenOf([-2, 14, 4]);
+    const [bx] = view.screenOf([2, 14, 4]);
+    return bx - ax;
+  });
+  expect(ring.width).toBeGreaterThan(span * 0.8);
+  expect(ring.width).toBeLessThan(span * 1.25);
+  // Off the mini: no ring.
+  await page.mouse.move(box.x + 5, box.y + 5);
+  await expect(cursor).toBeHidden();
+  // Navigating, the left button turns the mini and paints nothing.
+  await page.evaluate(() => window.__mt.painting.view().setNavigating(true));
+  const middle: [number, number] = [box.width / 2, box.height / 2];
+  const before = await page.evaluate(
+    (at) => window.__mt.painting.view().texelAt(...at)?.triangle,
+    middle,
+  );
+  await page.mouse.move(box.x + path[0]![0], box.y + path[0]![1]);
+  await page.mouse.down();
+  await page.mouse.move(box.x + path[0]![0] + 150, box.y + path[0]![1], { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  const state = await page.evaluate(() => window.__mt.painting.view().state);
+  expect(state.navigating).toBe(true);
+  expect(state.steps).toBe(0);
+  expect(
+    await page.evaluate((at) => window.__mt.painting.view().texelAt(...at)?.triangle, middle),
+  ).not.toBe(before);
+});
+
+test.describe('on a phone', () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+
+  test('drops a finger’s stroke when a second finger arrives', async ({ page }) => {
+    await convert(page, generateFigure(true));
+    await page.evaluate(() => window.__mt.painting.open());
+    const path = await chestPath(page);
+    const box = (await page.locator('#paint-view canvas').boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: [number, number][]) =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: points.map(([x, y], id) => ({ x: box.x + x, y: box.y + y, id })),
+      });
+    // One finger across the chest: a stroke on the canvas.
+    await touch('touchStart', [path[0]!]);
+    for (const point of path.slice(1, 15)) await touch('touchMove', [point]);
+    await page.waitForFunction(() => window.__mt.painting.view().state.painting);
+    // A second finger above the first (the page's level buttons lie over the canvas's foot): the
+    // person meant to pinch.
+    const second: [number, number] = [path[14]![0], path[14]![1] - 80];
+    await touch('touchStart', [path[14]!, second]);
+    await touch('touchMove', [path[15]!, [second[0], second[1] + 20]]);
+    await touch('touchEnd', []);
+    await page.waitForFunction(() => !window.__mt.painting.view().state.painting);
+    expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(0);
+    expect((await paintNow(page)).painted).toBe(0);
+  });
+});
