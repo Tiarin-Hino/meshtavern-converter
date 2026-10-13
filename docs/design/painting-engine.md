@@ -174,7 +174,7 @@ export interface BrushSettings {
   sizeMm: number;
   /** 0 soft … 1 hard: where the dab's falloff begins, as a share of its radius. */
   hardness: number;
-  /** 0–1: the stroke's opacity (flat, eraser, fill), strength (wash), flow (ink, airbrush), or the dry brush's reach. */
+  /** 0–1: the stroke's opacity (flat, eraser, fill), strength (wash), flow (ink, airbrush), or the dry brush's pressure. */
   opacity: number;
   /** The fill's tolerance, 0 strict … 1 loose, scaling both bounds (§7.1). */
   tolerance: number;
@@ -289,6 +289,8 @@ One dab pass for every tool (§5.3); what differs is the **blend into `stroke`**
 
 Constants, beside the look's in `look.ts` or in `brush.ts`, all _(proposal)_: `WASH_FLAT = 0.15`, `WASH_OCCLUSION = 0.5`, `WASH_LIFT = 0.8`, `INK_FLAT = 0.5`, `DRY_THRESHOLD = 0.5`, `DRY_SOFTNESS = 0.2`, `DRY_OPACITY = 0.9`, `AIR_HARDNESS = 0`, `AIR_FLOW_GAIN = 0.15`, `AIR_DIR_EDGE = 0.0`, `AIR_DIR_SOFTNESS = 0.3`. "From above" is `direction = [0, 1, 0]`: minis stand Y-up in mesh space, so the object-space normal's y is up. The consumer offers the presets it wants (above, the camera's direction, none); the engine takes a vector.
 
+**As built (2026-10-13, #128):** the masks, constants and opacities are as the table says (the constants in `look.ts`; the airbrush's composite opacity is 1, its flow being in each dab's `AIR_FLOW_GAIN × flow`), except that the airbrush's mask divides `dot(normal, direction)` by the normal's length, because the detail texture's normal is not of unit length, and `setBrush` scales the direction to unit length (a zero vector is none). Three things the note did not say. The airbrush lays its dabs exactly `DAB_SPACING × sizeMm` apart (`spaceDabs(…, even)`): with a dab at every pointer sample closer than the spacing, an adding brush sprayed by the pointer's sample rate, not by distance. Each dab adds a whole number of 1/255 steps and a stencil on `stroke` lets one fragment a texel add per draw (the triangles and the edge lines both reach some texels), so a stroke drawn a few dabs a frame and its replay drawn at once are the same bytes. The composite samples the detail texture with `textureLod(…, 0)`: after its early return for untouched texels the implicit mip level was undefined, and a second pass read other normals than the first. The journal entry `docs/journal/2026-10-13-hobby-brushes.md` has the details.
+
 The masks are judged by eye in #128 on the corpus (the `?dev` tool of §13 step 5 exists for that), and the tests pin what the issue says: a dry brush across a crease leaves the crease's texels unchanged (mask 0 where `cavity ≤ t`), a wash across an edge leaves the edge's texels within a tolerance and darkens the crease's, an ink changes every texel under it and the crease's more, an airbrush from above changes no texel whose normal faces down (`dot ≤ AIR_DIR_EDGE`). Each is one assertion on `toolMask` in Node and one on the paint read back through the hook (§13).
 
 ## 7. The fill and the ready regions
@@ -375,6 +377,8 @@ export type PaintCopy = typeof PAINT_COPY;
 ```
 
 The engine itself shows only `cannotPaint` (as the refusal's message); the rest is offered so a consumer's panel and this page's `?dev` tool say the same words, as `QUESTION_COPY` does for the questions. `copy` in the options replaces fields; nested objects are replaced whole.
+
+**As built (2026-10-13, #128):** `PAINT_COPY` also has `toolHints`, a sentence or two per tool on what it does, for the consumer's panel to show beside the tool (the `?dev` tool shows it under its tool buttons), added after the PM found the brush, the wash and the ink hard to tell apart.
 
 ### 10.3 The scene and the styles
 

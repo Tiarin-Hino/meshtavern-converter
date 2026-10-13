@@ -7,6 +7,7 @@ import {
   type IndexedMesh,
   type Look,
   type PaintRegions,
+  type ToolId,
 } from '../lib';
 import {
   BRUSH_MAX_MM,
@@ -21,7 +22,8 @@ import {
  * The team's Paint tool under ?dev (issue #127, design note `docs/design/painting-engine.md` §13
  * step 5): the painting view mounted over the viewport for the converted mini, with a plain panel
  * of the tools, sliders, colour, regions, Undo, Redo, Save and Close. The test harness for the
- * engine's pixel tests and the PM's tool for judging the brushes; not the product page's (it is
+ * engine's pixel tests and the PM's tool for judging the brushes (the hobby brushes of #128 with
+ * their own sliders and the airbrush's direction); not the product page's (it is
  * `data-dev`, removed without ?dev). It uses the entry as any consumer would.
  */
 
@@ -47,14 +49,43 @@ export interface PaintHooks {
   regions: () => PaintRegions | null;
 }
 
+/**
+ * The sliders each tool has (design note §6), and what its opacity slider is called: the panel
+ * shows only those, as a consumer's would.
+ */
+const SLIDERS: Record<
+  ToolId,
+  { show: (keyof BrushSettings)[]; opacity: keyof typeof PAINT_COPY.sliders }
+> = {
+  flat: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
+  eraser: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
+  fill: { show: ['opacity', 'tolerance'], opacity: 'opacity' },
+  wash: { show: ['sizeMm', 'opacity'], opacity: 'strength' },
+  ink: { show: ['sizeMm', 'opacity'], opacity: 'flow' },
+  dry: { show: ['sizeMm', 'opacity'], opacity: 'pressure' },
+  airbrush: { show: ['sizeMm', 'opacity', 'direction'], opacity: 'flow' },
+};
+
+type Vec3 = [number, number, number];
+
+/** The airbrush's directions the panel offers: minis stand Y-up, and face +z at the camera's first angle. */
+const DIRECTIONS: Record<string, Vec3 | null> = {
+  none: null,
+  above: [0, 1, 0],
+  front: [0, 0, 1],
+};
+
 interface Panel {
   open: HTMLButtonElement;
   controls: HTMLElement;
   tools: HTMLElement;
+  hint: HTMLElement;
   size: HTMLInputElement;
   hardness: HTMLInputElement;
   opacity: HTMLInputElement;
+  opacityLabel: HTMLElement;
   tolerance: HTMLInputElement;
+  direction: HTMLSelectElement;
   colour: HTMLInputElement;
   base: HTMLButtonElement;
   figure: HTMLButtonElement;
@@ -74,10 +105,13 @@ function findPanel(root: Document): Panel | null {
     open,
     controls: get('paint-controls')!,
     tools: get('paint-tools')!,
+    hint: get('paint-hint')!,
     size: get('paint-size')!,
     hardness: get('paint-hardness')!,
     opacity: get('paint-opacity')!,
+    opacityLabel: get('paint-opacity-label')!,
     tolerance: get('paint-tolerance')!,
+    direction: get('paint-direction')!,
     colour: get('paint-colour')!,
     base: get('paint-base')!,
     figure: get('paint-figure')!,
@@ -115,6 +149,18 @@ export function createPaintTool(
     panel.hardness.value = String(state.brush.hardness);
     panel.opacity.value = String(state.brush.opacity);
     panel.tolerance.value = String(state.brush.tolerance);
+    const direction = state.brush.direction;
+    panel.direction.value =
+      Object.entries(DIRECTIONS).find(
+        ([, value]) =>
+          (value === null) === (direction === null) &&
+          (!value || value.every((v, k) => v === direction![k])),
+      )?.[0] ?? 'none';
+    const sliders = SLIDERS[state.tool];
+    for (const label of panel.controls.querySelectorAll<HTMLElement>('[data-slider]'))
+      label.hidden = !sliders.show.includes(label.dataset.slider as keyof BrushSettings);
+    panel.opacityLabel.textContent = PAINT_COPY.sliders[sliders.opacity];
+    panel.hint.textContent = PAINT_COPY.toolHints[state.tool];
     panel.colour.value = state.colour;
     panel.base.disabled = !state.regions.includes('base');
     panel.figure.disabled = !state.regions.includes('figure');
@@ -185,6 +231,9 @@ export function createPaintTool(
     slider(panel.hardness, 'hardness');
     slider(panel.opacity, 'opacity');
     slider(panel.tolerance, 'tolerance');
+    panel.direction.addEventListener('change', () =>
+      current().setBrush({ direction: DIRECTIONS[panel.direction.value] ?? null }),
+    );
     panel.colour.addEventListener('input', () => current().setColour(panel.colour.value));
     panel.base.addEventListener('click', () => void current().fillRegion('base'));
     panel.figure.addEventListener('click', () => void current().fillRegion('figure'));

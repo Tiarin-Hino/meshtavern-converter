@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import {
   BORDER_TEXEL,
+  DEFAULT_BRUSH,
   GUTTER_TEXEL,
   ISLAND_TEXEL,
   NO_OWNER,
   ownerMap,
   PAINT_SIZE,
+  unitDirection,
   type BrushSettings,
   type StrokeCamera,
   type ToolId,
@@ -13,7 +15,7 @@ import {
 import { CAVITY_GAIN } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
-import { toolPass } from './tools';
+import { dabGain, strokeOpacity, toolPass } from './tools';
 
 /**
  * The painting engine's GPU side (issue #127, design note `docs/design/painting-engine.md` §5): the
@@ -25,7 +27,10 @@ import { toolPass } from './tools';
  *   (R 0.5, drawn as the triangles' edges), the vertex occlusion (G).
  * - `depth` (at a stroke's start): the mesh from the stroke's camera, so a dab reaches only what
  *   was visible.
- * - `stroke` (every frame): each texel's coverage by the frame's dabs, its largest so far.
+ * - `stroke` (every frame): each texel's coverage by the frame's dabs, its largest so far, or for
+ *   the airbrush (#128) what every dab added, in whole steps of 1/255, so that a stroke drawn a
+ *   few dabs a frame and its replay drawn at once give the same bytes; a stencil lets one
+ *   fragment a texel add per draw, so a texel that a triangle and an edge both reach counts once.
  * - `live` (every frame): the stroke through the tool's mask over `paint`, each gutter texel taken
  *   from its owner (the composite and the dilation of §5.4 in one pass: a texel's result is a
  *   function of its owner's inputs alone).
@@ -96,7 +101,11 @@ void main() {
 }
 `;
 
-const DAB_FRAGMENT = /* glsl */ `${PRECISION}
+/**
+ * The dab pass's fragment: the largest coverage of the dabs, or, adding, their sum, each dab's
+ * `uGain × coverage` rounded to a whole 1/255 so that sums in any grouping are the same bytes.
+ */
+const dabFragment = (add: boolean): string => /* glsl */ `${PRECISION}
 uniform sampler2D uDepth;
 uniform mat4 uViewProjection;
 uniform vec3 uEye;
@@ -105,6 +114,7 @@ uniform vec4 uDabs[ ${DABS_PER_PASS} ];
 uniform int uDabCount;
 uniform float uRadius;
 uniform float uHardness;
+uniform float uGain;
 in vec3 vPosition;
 in vec3 vNormal;
 in float vOcclusion;
@@ -130,7 +140,8 @@ void main() {
   float coverage = 0.0;
   for ( int i = 0; i < uDabCount; i++ ) {
     float d = distance( vPosition, uDabs[ i ].xyz );
-    coverage = max( coverage, 1.0 - smoothstep( uHardness * uRadius, uRadius, d ) );
+    float dab = 1.0 - smoothstep( uHardness * uRadius, uRadius, d );
+    ${add ? 'coverage += floor( uGain * dab * 255.0 + 0.5 ) / 255.0;' : 'coverage = max( coverage, dab );'}
   }
   fragColor = vec4( coverage, 0.0, 0.0, 1.0 );
 }
@@ -162,6 +173,47 @@ void main() {
 }
 `;
 
+/**
+ * What the masks read at every texel, at its owner as the composite reads it (#128, for tests):
+ * with `uPart` 0 the cavity (R, as `cavity × 0.5 + 0.5`), the occlusion (G) and in B 1 where the
+ * texel has an owner; with 1 the normal (RGB, as `n × 0.5 + 0.5`).
+ */
+const SURFACE_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uOwner;
+uniform sampler2D uAtlas;
+uniform sampler2D uDetail;
+uniform int uPart;
+out vec4 fragColor;
+void main() {
+  ivec2 texel = ivec2( gl_FragCoord.xy );
+  vec4 owner = floor( texelFetch( uOwner, texel, 0 ) * 255.0 + 0.5 );
+  if ( owner.a == 255.0 ) {
+    fragColor = vec4( 0.0 );
+    return;
+  }
+  ivec2 from = ivec2( int( owner.r + owner.g * 256.0 ), int( owner.b + owner.a * 256.0 ) );
+  vec4 detail = textureLod( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)}, 0.0 );
+  if ( uPart == 0 ) {
+    float cavity = clamp( ( detail.a - 0.5 ) * ${CAVITY_GAIN.toFixed(1)}, -1.0, 1.0 );
+    fragColor = vec4( cavity * 0.5 + 0.5, texelFetch( uAtlas, from, 0 ).g, 1.0, 1.0 );
+  } else {
+    fragColor = vec4( detail.rgb, 1.0 );
+  }
+}
+`;
+
+/** What the masks read at every texel (`PaintPasses.readSurface`): for tests. */
+export interface PaintSurface {
+  /** −1 crease … +1 edge, as the composite decodes it, to within 1/127. */
+  cavity: Float32Array;
+  /** 0 buried … 1 open, to within 1/255. */
+  occlusion: Float32Array;
+  /** The object-space normal as stored, three numbers a texel. */
+  normal: Float32Array;
+  /** 1 where the texel takes paint (it has an owner), else 0. */
+  owned: Uint8Array;
+}
+
 /** The composite and the dilation in one pass (§5.4), for one tool. */
 function compositeFragment(tool: ToolId): string {
   const pass = toolPass(tool);
@@ -179,6 +231,8 @@ uniform sampler2D uAtlas;
 uniform sampler2D uDetail;
 uniform vec3 uColour;
 uniform float uOpacity;
+uniform float uPressure;
+uniform vec4 uDirection;
 out vec4 fragColor;
 
 float mtMask( float cavity, float occlusion, vec3 normal ) {
@@ -201,7 +255,10 @@ void main() {
     fragColor = paint;
     return;
   }
-  vec4 detail = texture( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)} );
+  // The full-size level, named: after the return above the implicit derivatives a mip level
+  // comes from are undefined, and the surface a texel reads would follow which of its neighbours
+  // the stroke covered (#128: a second airbrush pass found other normals than the first).
+  vec4 detail = textureLod( uDetail, ( vec2( from ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)}, 0.0 );
   float cavity = clamp( ( detail.a - 0.5 ) * ${CAVITY_GAIN.toFixed(1)}, -1.0, 1.0 );
   vec3 normal = detail.rgb * 2.0 - 1.0;
   float occlusion = texelFetch( uAtlas, from, 0 ).g;
@@ -253,6 +310,33 @@ const textureTarget = (format: 'srgb' | 'rgba' | 'red'): THREE.WebGLRenderTarget
   return target;
 };
 
+/** The stroke layer: R8, with a stencil for the adding draws (`onceATexel`). */
+const strokeTarget = (): THREE.WebGLRenderTarget =>
+  new THREE.WebGLRenderTarget(PAINT_SIZE, PAINT_SIZE, {
+    depthBuffer: true,
+    stencilBuffer: true,
+    generateMipmaps: false,
+    format: THREE.RedFormat,
+    type: THREE.UnsignedByteType,
+    colorSpace: THREE.NoColorSpace,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+
+/**
+ * A material that writes a texel once a draw: the first fragment there marks the stencil (the
+ * triangles are drawn before the edges), the later ones are dropped. A discarded fragment (out of
+ * sight, facing away) marks nothing, so which fragment counts depends on the stroke's camera
+ * alone, the same in every draw of the stroke and in its replay.
+ */
+function onceATexel(material: THREE.RawShaderMaterial): THREE.RawShaderMaterial {
+  material.stencilWrite = true;
+  material.stencilRef = 1;
+  material.stencilFunc = THREE.NotEqualStencilFunc;
+  material.stencilZPass = THREE.ReplaceStencilOp;
+  return material;
+}
+
 /** The edges of every triangle as line segments over the same vertices: the border texels. */
 function edgeIndex(indices: ArrayLike<number>, triangles?: ArrayLike<number>): Uint32Array {
   const count = triangles ? triangles.length : indices.length / 3;
@@ -302,7 +386,7 @@ export class PaintPasses {
   /** The committed paint and the paint with the stroke in progress (what the material shows). */
   readonly paint = textureTarget('srgb');
   readonly live = textureTarget('srgb');
-  private readonly stroke = textureTarget('red');
+  private readonly stroke = strokeTarget();
   private readonly atlas = textureTarget('rgba');
   private depth: THREE.WebGLRenderTarget | null = null;
   private owner: THREE.DataTexture | null = null;
@@ -337,10 +421,11 @@ export class PaintPasses {
     uDabCount: { value: 0 },
     uRadius: { value: 1 },
     uHardness: { value: 0.8 },
+    uGain: { value: 1 },
   };
   private readonly dabMaterials = {
-    max: raw(TEXTURE_SPACE_VERTEX, DAB_FRAGMENT, this.dabUniforms, 'max'),
-    add: raw(TEXTURE_SPACE_VERTEX, DAB_FRAGMENT, this.dabUniforms, 'add'),
+    max: raw(TEXTURE_SPACE_VERTEX, dabFragment(false), this.dabUniforms, 'max'),
+    add: onceATexel(raw(TEXTURE_SPACE_VERTEX, dabFragment(true), this.dabUniforms, 'add')),
   };
   private readonly regionMaterial = raw(TEXTURE_SPACE_VERTEX, REGION_FRAGMENT, {}, 'max');
   private readonly copyMaterial = raw(QUAD_VERTEX, COPY_FRAGMENT, { uSource: { value: null } });
@@ -353,6 +438,8 @@ export class PaintPasses {
     uDetail: { value: null as THREE.Texture | null },
     uColour: { value: new THREE.Vector3() },
     uOpacity: { value: 1 },
+    uPressure: { value: 1 },
+    uDirection: { value: new THREE.Vector4() },
   };
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {
@@ -391,6 +478,8 @@ export class PaintPasses {
     const lines = new THREE.LineSegments(edges, this.atlasMaterial);
     const depth = new THREE.Mesh(geometry, this.depthMaterial);
     for (const object of [triangles, lines, depth]) object.frustumCulled = false;
+    // The triangles before the edges: an adding draw counts the first fragment at a texel.
+    lines.renderOrder = 1;
     this.textureScene.add(triangles, lines);
     this.depthScene.add(depth);
     const mini = { triangles, edges: lines, depth, geometry: edges, detail };
@@ -475,9 +564,14 @@ export class PaintPasses {
     const mini = this.mini;
     if (!mini) return;
     const count = dabs.length / 4;
-    const material = this.dabMaterials[toolPass(tool).blend];
+    const pass = toolPass(tool);
+    const material = this.dabMaterials[pass.blend];
     this.dabUniforms.uRadius.value = brush.sizeMm / 2;
-    this.dabUniforms.uHardness.value = Math.min(HARDEST, Math.max(0, brush.hardness));
+    this.dabUniforms.uHardness.value = Math.min(
+      HARDEST,
+      Math.max(0, pass.hardness ?? brush.hardness),
+    );
+    this.dabUniforms.uGain.value = dabGain(tool, brush);
     mini.triangles.material = material;
     mini.edges.material = material;
     const packed = this.dabUniforms.uDabs.value;
@@ -485,7 +579,7 @@ export class PaintPasses {
       const n = Math.min(DABS_PER_PASS, count - first);
       for (let k = 0; k < n * 4; k++) packed[k] = dabs[first * 4 + k]!;
       this.dabUniforms.uDabCount.value = n;
-      this.draw(this.stroke, this.textureScene, false);
+      this.draw(this.stroke, this.textureScene, pass.blend === 'add' ? 'stencil' : false);
     }
     mini.triangles.material = this.atlasMaterial;
     mini.edges.material = this.atlasMaterial;
@@ -512,14 +606,18 @@ export class PaintPasses {
   }
 
   /** The stroke onto the paint into `live`, through the tool's mask, every gutter texel from its owner (§5.4). */
-  composite(tool: ToolId, colour: readonly [number, number, number], opacity: number): void {
+  composite(tool: ToolId, colour: readonly [number, number, number], brush: BrushSettings): void {
     let material = this.compositeMaterials.get(tool);
     if (!material) {
       material = raw(QUAD_VERTEX, compositeFragment(tool), this.compositeUniforms);
       this.compositeMaterials.set(tool, material);
     }
     this.compositeUniforms.uColour.value.set(...colour);
-    this.compositeUniforms.uOpacity.value = Math.max(0, Math.min(1, opacity));
+    this.compositeUniforms.uOpacity.value = Math.max(0, Math.min(1, strokeOpacity(tool, brush)));
+    this.compositeUniforms.uPressure.value = Math.max(0, Math.min(1, brush.opacity));
+    const direction = unitDirection(brush.direction);
+    if (direction) this.compositeUniforms.uDirection.value.set(...direction, 1);
+    else this.compositeUniforms.uDirection.value.set(0, 0, 0, 0);
     this.quad.material = material;
     this.draw(this.live, this.quadScene, false);
   }
@@ -563,6 +661,59 @@ export class PaintPasses {
   }
 
   /**
+   * What the masks read at every texel, at its owner (§6): the cavity, the occlusion and the
+   * normal, for tests that check a brush against `toolMask`. Two quad passes and two read-backs;
+   * not used while painting.
+   */
+  async readSurface(): Promise<PaintSurface> {
+    const count = PAINT_SIZE * PAINT_SIZE;
+    const surface: PaintSurface = {
+      cavity: new Float32Array(count),
+      occlusion: new Float32Array(count),
+      normal: new Float32Array(count * 3),
+      owned: new Uint8Array(count),
+    };
+    if (!this.mini || !this.owner) return surface;
+    const target = textureTarget('rgba');
+    const material = raw(QUAD_VERTEX, SURFACE_FRAGMENT, {
+      uOwner: { value: this.owner },
+      uAtlas: { value: this.atlas.texture },
+      uDetail: { value: this.mini.detail },
+      uPart: { value: 0 },
+    });
+    const bytes = new Uint8Array(count * 4);
+    try {
+      this.quad.material = material;
+      for (const part of [0, 1]) {
+        material.uniforms.uPart!.value = part;
+        this.draw(target, this.quadScene, true);
+        await this.renderer.readRenderTargetPixelsAsync(
+          target,
+          0,
+          0,
+          PAINT_SIZE,
+          PAINT_SIZE,
+          bytes,
+        );
+        for (let texel = 0; texel < count; texel++) {
+          const k = texel * 4;
+          if (part === 0) {
+            surface.cavity[texel] = (bytes[k]! / 255) * 2 - 1;
+            surface.occlusion[texel] = bytes[k + 1]! / 255;
+            surface.owned[texel] = bytes[k + 2]! > 127 ? 1 : 0;
+          } else
+            for (let axis = 0; axis < 3; axis++)
+              surface.normal[texel * 3 + axis] = (bytes[k + axis]! / 255) * 2 - 1;
+        }
+      }
+    } finally {
+      target.dispose();
+      material.dispose();
+    }
+    return surface;
+  }
+
+  /**
    * Compiles and runs every pass's program once without changing the paint (no dabs, nothing
    * covered), so the first stroke does not wait for them: after `open`, from the view's camera.
    */
@@ -571,12 +722,15 @@ export class PaintPasses {
     const mini = this.mini;
     if (!mini) return;
     this.dabUniforms.uDabCount.value = 0;
-    mini.triangles.material = this.dabMaterials.max;
-    mini.edges.material = this.dabMaterials.max;
-    this.draw(this.stroke, this.textureScene, false);
+    for (const blend of ['max', 'add'] as const) {
+      mini.triangles.material = this.dabMaterials[blend];
+      mini.edges.material = this.dabMaterials[blend];
+      this.draw(this.stroke, this.textureScene, blend === 'add' ? 'stencil' : false);
+    }
     mini.triangles.material = this.atlasMaterial;
     mini.edges.material = this.atlasMaterial;
-    for (const tool of tools) this.composite(tool, [0, 0, 0], 0);
+    // Nothing covered: no tool changes a texel, whatever its opacity.
+    for (const tool of tools) this.composite(tool, [0, 0, 0], DEFAULT_BRUSH);
     this.cancel();
   }
 
@@ -612,8 +766,15 @@ export class PaintPasses {
     this.quad.geometry.dispose();
   }
 
-  /** Renders `scene` into `target` (clearing it to transparent black first when asked), leaving the renderer as it was. */
-  private draw(target: THREE.WebGLRenderTarget, scene: THREE.Scene | null, clear: boolean): void {
+  /**
+   * Renders `scene` into `target`, leaving the renderer as it was: cleared to transparent black
+   * first (`true`), or only its stencil (`'stencil'`: an adding dab draw, §5.3).
+   */
+  private draw(
+    target: THREE.WebGLRenderTarget,
+    scene: THREE.Scene | null,
+    clear: boolean | 'stencil',
+  ): void {
     const renderer = this.renderer;
     const previous = renderer.getRenderTarget();
     const autoClear = renderer.autoClear;
@@ -621,9 +782,10 @@ export class PaintPasses {
     const clearAlpha = renderer.getClearAlpha();
     renderer.autoClear = false;
     renderer.setRenderTarget(target);
-    if (clear) {
+    if (clear === 'stencil') renderer.clear(false, false, true);
+    else if (clear) {
       renderer.setClearColor(0x000000, 0);
-      renderer.clear(true, true, false);
+      renderer.clear(true, true, target.stencilBuffer);
     }
     if (scene) renderer.render(scene, this.camera);
     renderer.setRenderTarget(previous);

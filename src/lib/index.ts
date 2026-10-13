@@ -154,6 +154,20 @@ export {
   type FillSeed,
   type PaintRegions,
 } from './pipeline/brush';
+// The hobby brushes' masks (#128): what toolMask reads, beside the look's constants.
+export {
+  WASH_FLAT,
+  WASH_OCCLUSION,
+  WASH_LIFT,
+  INK_FLAT,
+  DRY_THRESHOLD,
+  DRY_SOFTNESS,
+  DRY_OPACITY,
+  AIR_HARDNESS,
+  AIR_FLOW_GAIN,
+  AIR_DIR_EDGE,
+  AIR_DIR_SOFTNESS,
+} from './pipeline/look';
 export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
 export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
 // The detail texture.
