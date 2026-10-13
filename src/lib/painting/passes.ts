@@ -393,7 +393,8 @@ export class PaintPasses {
     for (const object of [triangles, lines, depth]) object.frustumCulled = false;
     this.textureScene.add(triangles, lines);
     this.depthScene.add(depth);
-    this.mini = { triangles, edges: lines, depth, geometry: edges, detail };
+    const mini = { triangles, edges: lines, depth, geometry: edges, detail };
+    this.mini = mini;
     this.compositeUniforms.uDetail.value = detail;
 
     // The atlas: islands at 1, their borders at 0.5 (the edges, max-blended under the triangles).
@@ -415,6 +416,8 @@ export class PaintPasses {
       PAINT_SIZE,
       texels,
     );
+    // Closed or disposed while the read-back was pending: nothing more to prepare.
+    if (this.mini !== mini) return;
     const mask = new Uint8Array(PAINT_SIZE * PAINT_SIZE);
     for (let texel = 0; texel < mask.length; texel++) {
       const level = texels[texel * 4]!;
@@ -431,11 +434,6 @@ export class PaintPasses {
     this.renderer.copyTextureToTexture(upload, this.paint.texture);
     upload.dispose();
     this.cancel();
-  }
-
-  /** The mini's share of the atlas: which texels are island, border or gutter (for tests and the README's figures). */
-  get opened(): boolean {
-    return this.mini !== null;
   }
 
   /** A stroke starts (§5.2): its depth map from its camera, an empty stroke layer. */
@@ -573,11 +571,9 @@ export class PaintPasses {
     const mini = this.mini;
     if (!mini) return;
     this.dabUniforms.uDabCount.value = 0;
-    for (const blend of ['max'] as const) {
-      mini.triangles.material = this.dabMaterials[blend];
-      mini.edges.material = this.dabMaterials[blend];
-      this.draw(this.stroke, this.textureScene, false);
-    }
+    mini.triangles.material = this.dabMaterials.max;
+    mini.edges.material = this.dabMaterials.max;
+    this.draw(this.stroke, this.textureScene, false);
     mini.triangles.material = this.atlasMaterial;
     mini.edges.material = this.atlasMaterial;
     for (const tool of tools) this.composite(tool, [0, 0, 0], 0);

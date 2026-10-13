@@ -115,6 +115,7 @@ export interface PaintingState {
 
 export interface PaintingView {
   readonly state: PaintingState;
+  /** Opens one open after another; resolves without opening when `close`, `dispose` or a later `open` came first. */
   open(mini: MiniToPaint): Promise<void>;
   close(): void;
   setTool(tool: ToolId): void;
@@ -166,7 +167,6 @@ interface Opened {
   regions: PaintRegions | null;
   geometry: THREE.BufferGeometry;
   material: THREE.MeshStandardMaterial;
-  shown: THREE.Mesh;
   uniforms: ReturnType<typeof createLookUniforms>;
 }
 
@@ -201,6 +201,10 @@ class Painting implements PaintingView {
   /** The pointers down on the canvas, and the one painting the stroke on it. */
   private readonly pointers = new Set<number>();
   private strokePointer: number | null = null;
+  /** Counts opens and closes: an open that is no longer the latest drops what it made. */
+  private generation = 0;
+  /** The opens in order, so that two never share the passes. */
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(options: PaintingOptions) {
     const host = options.scene;
@@ -261,15 +265,43 @@ class Painting implements PaintingView {
       throw new RangeError('The regions are not this mesh’s: one byte per triangle');
     const texture = ownTexture(mini.texture);
     if (!texture) throw new RangeError(this.copy.cannotPaint);
-    return this.opening(mini, texture);
+    const generation = ++this.generation;
+    const opening = this.queue.then(() => this.opening(mini, texture, generation));
+    this.queue = opening.catch(() => undefined);
+    return opening;
   }
 
-  private async opening(mini: MiniToPaint, texture: THREE.Texture): Promise<void> {
-    this.close();
+  private async opening(
+    mini: MiniToPaint,
+    texture: THREE.Texture,
+    generation: number,
+  ): Promise<void> {
+    const abandoned = (): boolean => generation !== this.generation;
+    if (abandoned()) {
+      texture.dispose();
+      return;
+    }
+    this.release();
     const { mesh } = mini;
     const geometry = createBakedGeometry(mesh);
     const uniforms = createLookUniforms(mini.look ?? DEFAULT_LOOK);
-    await this.passes.open(geometry, mesh, texture, mini.paint ?? null);
+    const drop = (): void => {
+      this.passes.close();
+      geometry.dispose();
+      texture.dispose();
+    };
+    try {
+      await this.passes.open(geometry, mesh, texture, mini.paint ?? null);
+    } catch (error) {
+      drop();
+      if (abandoned()) return;
+      throw error;
+    }
+    // Closed, disposed or opened again while the GPU read the atlas back.
+    if (abandoned()) {
+      drop();
+      return;
+    }
     const material = createBakedMaterial(texture, uniforms, { map: this.passes.liveTexture });
     const shown = new THREE.Mesh(geometry, material);
     const box = new THREE.Box3().setFromArray(mesh.positions);
@@ -281,7 +313,6 @@ class Painting implements PaintingView {
       regions: mini.regions ?? null,
       geometry,
       material,
-      shown,
       uniforms,
     };
     this.timeline = new PaintHistory({
@@ -301,6 +332,12 @@ class Painting implements PaintingView {
   }
 
   close(): void {
+    this.generation++;
+    this.release();
+  }
+
+  /** Releases the mini that is open, if any. */
+  private release(): void {
     const opened = this.opened;
     if (!opened) return;
     this.live = null;

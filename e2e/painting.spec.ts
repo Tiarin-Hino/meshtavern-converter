@@ -54,6 +54,34 @@ test('gives back the paint it was opened with, byte for byte', async ({ page }) 
   expect(outcome.state.steps).toBe(0);
 });
 
+test('stays closed when closed while it opens, and the later of two opens wins', async ({
+  page,
+}) => {
+  await convert(page, generateFigure(true));
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    // Closed while the atlas is read back: the open resolves and installs nothing.
+    const closing = painting.open('x+');
+    painting.close();
+    await closing;
+    await frame();
+    await frame();
+    const closed = { table: painting.table() !== null, open: window.__mt.state.painting?.open };
+    // A second open while the first reads back: the second's paint (bare) is the one open.
+    const first = painting.open('x+');
+    const second = painting.open();
+    await Promise.all([first, second]);
+    const { data } = await painting.view().paint();
+    let painted = 0;
+    for (let k = 3; k < data.length; k += 4) if (data[k] !== 0) painted++;
+    return { closed, open: painting.view().state.open, painted };
+  });
+  expect(outcome.closed).toEqual({ table: false, open: false });
+  expect(outcome.open).toBe(true);
+  expect(outcome.painted).toBe(0);
+});
+
 /** What a grid of canvas points sees: the texel under each, its paint's alpha and red, and its distance to the nearest dab. */
 interface Seen {
   alpha: number;
