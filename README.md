@@ -24,7 +24,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.m
 
 ## Use it as a library
 
-The page is one consumer of the converter; the MeshTavern table application is another. `package.json` exports four entries, as TypeScript sources for a Vite project: `meshtavern-converter` (convert, refuse, size, orient, export; no three.js), `meshtavern-converter/three` (draw a baked mini), `meshtavern-converter/questions` (the view that asks a conversion's questions, with its stylesheet `meshtavern-converter/questions.css`) and `meshtavern-converter/dev` (generated meshes and STL writers, for tests and tooling). The package is not published to npm; install it from git (`"meshtavern-converter": "github:Tiarin-Hino/meshtavern-converter#<commit>"`).
+The page is one consumer of the converter; the MeshTavern table application is another. `package.json` exports five entries, as TypeScript sources for a Vite project: `meshtavern-converter` (convert, refuse, size, orient, export, the painting's data and fill; no three.js), `meshtavern-converter/three` (draw a baked mini), `meshtavern-converter/questions` (the view that asks a conversion's questions, with its stylesheet `meshtavern-converter/questions.css`), `meshtavern-converter/painting` (the view in which a person paints a baked mini, with its stylesheet `meshtavern-converter/painting.css`) and `meshtavern-converter/dev` (generated meshes and STL writers, for tests and tooling). The package is not published to npm; install it from git (`"meshtavern-converter": "github:Tiarin-Hino/meshtavern-converter#<commit>"`).
 
 ```ts
 import {
@@ -123,6 +123,54 @@ export async function addMini(files: File[]) {
 - The look is per material: `createBakedMaterial(texture, uniforms)` reads the look from the `LookUniforms` it is given. Give each mini its own (`createLookUniforms(look)`, changed later with `updateLookUniforms`) when minis look different; pass one set to every material when they all look alike, as this page does, and one `updateLookUniforms` changes them all.
 - A paint goes under the look (#125): `createBakedMaterial(texture, uniforms, { map })` takes a colour texture on the table level's texture coordinates (`result.baked.mesh`). It is laid out like the detail texture (row 0 at v = 0: `flipY` false) with its colour in sRGB (`colorSpace = SRGBColorSpace`) and straight alpha: where alpha is 1 the paint replaces the base coat, where it is 0 the base coat shows, in between the two mix; the wash still pools in the creases and the edges still catch the light. The far and close levels have no texture coordinates, so they take the paint per vertex, once: `paintAtVertices(level, result.baked.mesh, { width, height, data })` gives RGBA bytes per vertex (a vertex more than `PAINT_REACH_MM` from the table level stays bare), and `vertexColours(level, look, paint)` draws it under the same look. The texture stays the consumer's (not disposed with the material); spread a painted island's colour a few texels past its edge, as the bake does, or the smaller mipmaps mix the neighbouring islands of the atlas in at the seams.
 - `renderThumbnail(mesh, { renderer, texture, albedo, look, size })` from `meshtavern-converter/three` makes the picture for a list of minis: the table level from the viewer's angle and light, a PNG `Blob` of at most `THUMBNAIL_SIZE` (512) px on a transparent background. It is made by the consumer after the conversion, not by the worker: pass the renderer that already draws the mini (it draws into a render target and leaves the screen alone; without one a private renderer is made and released), and, for a baked mini, `result.baked.mesh` with its transcoded texture (`transcodeDetail`) and its paint, if it has one (`albedo`, as `map` above), else `result.lods[BAKED_LEVEL].mesh`.
+- A baked mini can be painted in a view of its own (#127, design note `docs/design/painting-engine.md`): `mountPainting` from `meshtavern-converter/painting` puts a canvas and a brush ring into one element; every panel (tools, sliders, palette, Undo, Redo, regions, Save) is yours, wired to the view's methods. The strokes are written into a `PAINT_SIZE` (1,024) px colour texture over the table level's unwrap, drawn through `createBakedMaterial`'s `map`, so the paint comes back as an `Albedo` that `paintAtVertices` and `renderThumbnail` take:
+
+  ```ts
+  import { mountPainting } from 'meshtavern-converter/painting';
+  import 'meshtavern-converter/painting.css';
+  import { regionsOf } from 'meshtavern-converter';
+
+  const view = mountPainting({
+    scene: dialog.querySelector<HTMLElement>('.scene')!,
+    onChange: (state) => panel.render(state), // your tools, sliders, palette, Undo, Redo
+  });
+  await view.open({
+    mesh: result.baked!.mesh,
+    texture, // transcodeDetail(result.baked.ktx2, renderer)
+    look,
+    paint: storedPaint ?? null, // the Albedo you kept, or none
+    regions: regionsOf(result.baked!.mesh, {
+      source: result.mesh,
+      figureTriangles: result.pair?.figureTriangles,
+      sizing: result.sizing,
+      kind: result.kind,
+    }),
+  });
+  view.setTool('flat');
+  view.setBrush({ sizeMm: 2 });
+  view.setColour('#b03030');
+  // ... the person paints ...
+  const albedo = await view.paint(); // 1,024² RGBA bytes: store them; paintAtVertices and renderThumbnail take them
+  view.close();
+  ```
+
+  `open` refuses a mesh without texture coordinates (a mini whose bake was skipped) with a `RangeError` whose message is `PAINT_COPY.cannotPaint`. The left button, a pen's tip and one finger paint; the right button and two fingers turn the mini, the middle button pans, the wheel zooms; a second finger during a stroke cancels it; `setNavigating(true)` lets one finger turn the mini instead. A stroke reaches only what was in sight of the camera it was painted from and faces it, within a sphere of the brush's size in mm, and the gutter around every island of the atlas is filled two texels deep as it is painted, so no seam shows at full size; for mipmaps spread it further, as the paint bullet above says. The tools of this build are `flat`, `fill` (a tap fills the surface up to a fold or a crease, `brush.tolerance` loosening both; `fillRegion('base' | 'figure')` fills the ready regions `regionsOf` found) and `eraser`; the hobby brushes come with #128. Every stroke and fill is one step as plain JSON (`history()`), `undo` and `redo` go at least `UNDO_STEPS` (50) back by replaying from keyframes. The words are `PAINT_COPY`, replaced field by field; the view shows only `cannotPaint`. Every rule of the stylesheet is under `.mt-painting`; the ring takes `--accent`. Several views may share a document, one per element.
+
+  What the view holds while a mini is open, over your own renderer's (a second WebGL context, like the question view's):
+
+  | Target or texture                                    | Format                                       |                                              Size |
+  | ---------------------------------------------------- | -------------------------------------------- | ------------------------------------------------: |
+  | `atlas` (islands, borders, occlusion)                | RGBA8                                        |                                            4.0 MB |
+  | `owner` (where each gutter texel's paint comes from) | RGBA8                                        |                                            4.0 MB |
+  | `paint` (committed), `live` (on screen)              | RGBA8 sRGB, two                              |                                            8.0 MB |
+  | `stroke` (the stroke's coverage)                     | R8                                           |                                            1.0 MB |
+  | `depth` (the stroke's camera)                        | 24-bit depth + R8, the drawing buffer's size |                           8.3 MB at 1,920 × 1,080 |
+  | keyframes for undo, at most six                      | RGBA8 sRGB                                   |                                     up to 24.0 MB |
+  | the view's copy of the detail texture                | yours (compressed or raw)                    | 1.3 MB (1,024 px) to 5.3 MB (2,048 px) compressed |
+  | the table level's geometry                           | 36 B a vertex, 12 B a triangle               |                                            1–3 MB |
+
+  About 32 MB, 56 MB with every keyframe, plus the context's own canvas buffers (the drawing buffer is capped at 2 device pixels per CSS pixel). Measured on the development PC with the view open on large-01: the GPU process grew by 130 MB. `state.perf` is the view's frame counter for the last stroke (`performance.now()` around each frame, `slow` over `FRAME_BUDGET_MS`); it measures the CPU's part and what the GPU makes the CPU wait for, not GPU time, which needs `EXT_disjoint_timer_query_webgl2`. `scripts/measure-painting.mjs` also measures the time between frames.
+
 - Linked with `file:../meshtavern-converter` instead, Vite's dev server refuses to serve the worker from outside the project until the folder is allowed: `server: { fs: { allow: ['.', '../meshtavern-converter'] } }`.
 
 ## Licence
