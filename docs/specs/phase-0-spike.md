@@ -33,7 +33,7 @@ All three questions are answered with yes, on real devices.
 | What leaves the uploader's device | Table and far level only; the close-up level stays local (ADR-0001, revision 2, private repo)                                                                                                                                                                | PM                              |
 | Dependencies                      | meshoptimizer stays. `xatlas-wasm` is replaced by our own build before release (#33). `ktx2-encoder` is reviewed with #38                                                                                                                                    | PM                              |
 
-**Next:** Phase 1, the converter at product quality, is epic #40; its spec is [phase-1-converter.md](phase-1-converter.md). The release blockers #33, #35 and #38 belong to it. The converter is not published in Phase 1 (PM decision, 2026-09-20), so publishing (#47) waits outside the epic.
+**Next:** Phase 1, the converter at product quality, is epic #40; its spec is [phase-1-converter.md](phase-1-converter.md). The release blockers #33, #35 and #38 belong to it. The converter is not published in Phase 1 (PM decision, 2026-09-20), so publishing (#47) waits outside the epic. **Reversed on 2026-10-13 (PM):** the page is published before the table, with the painter on it; see the Phase 1 spec.
 
 **What Phase 0 did not answer**, carried into Phase 1 and the release blockers:
 
