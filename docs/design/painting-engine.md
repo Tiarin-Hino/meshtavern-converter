@@ -267,6 +267,8 @@ The edge draw matters at the islands' borders. The paint is `PAINT_SIZE` square 
 
 Targets: **`paint`** (the committed paint) and **`live`** (the stroke composited and dilated) are both RGBA8 with `colorSpace = SRGBColorSpace`, so three.js allocates them as `SRGB8_ALPHA8`: the GPU decodes on sampling, encodes on writing and blends in linear, and the material samples `live` as it samples the consumer's sRGB `DataTexture`. The display material's `map` is `live`'s texture; while no stroke is on the canvas `live` holds the paint. **A commit is a swap**: at the stroke's end `live` becomes `paint`, the old `paint` becomes the next `live`, and the step is pushed (§8). A cancelled stroke (§9) copies `paint` back over `live` with one quad pass.
 
+**As built (2026-10-13, #127):** composite and dilate are **one** quad pass, each texel computed at its owner (`compositeFragment` in `passes.ts`), not two. A commit is a **copy** of `live` into `paint`, not a swap, because the display material holds `live`'s texture; a cancel, a keyframe and a restore are byte copies too (`copyTextureToTexture`). The behaviour above is unchanged. The journal entry `docs/journal/2026-10-13-painting-engine.md` has why.
+
 Colour exactness: the paint goes in by `renderer.copyTextureToTexture` from a `DataTexture` of the bytes into `paint` (a byte copy, no colour conversion) and comes out by `readRenderTargetPixelsAsync` (the stored bytes). A paint opened and read back without a stroke is the same bytes (a test, §13 step 4).
 
 No mipmaps while open: `live` is sampled with linear filtering only, so no pass regenerates a mip chain each frame, and the person paints zoomed in anyway. The consumer's own texture at the table takes mipmaps from the dilated paint it gets back, as the README says since #125.
@@ -295,6 +297,8 @@ The masks are judged by eye in #128 on the corpus (the `?dev` tool of §13 step 
 
 `fillRegion(mesh, seed, options)` in `src/lib/pipeline/fill.ts`: a breadth-first flood over the table level's triangles from the seed triangle, across each shared edge, stopping where the edge is a bound. An edge is a bound when **either** the dihedral angle between the two triangles' face normals exceeds `FILL_ANGLE_DEG × (1 + tolerance)` **or** both its vertices' cavity (`mesh.cavity`, raw) lies below `FILL_CREASE_CAVITY × (1 − tolerance)`; `FILL_ANGLE_DEG = 40`, `FILL_CREASE_CAVITY = −0.1` _(proposals; a 20° fold measures about 0.17 raw)_. Two signals because the table level has two kinds of crease: a sharp fold between a few large triangles (the angle sees it, the vertex cavity may not) and a soft crease the sculpt had that the vertices measured (the cavity sees it, the angle between two small triangles does not). The adjacency is built once per `open` (`buildAdjacency` as in `shade.ts`, over triangles) and kept with the tree. The result is a `Uint32Array` of triangle indices.
 
+**As built (2026-10-13, #127), not decided:** the crease bound is `FILL_CREASE_CAVITY × (1 + tolerance)` (−0.1 at 0, −0.2 at 1), not `× (1 − tolerance)` as written above, which would make a loose fill stop at every negative cavity and contradict §4 and the step-2 test. Asked of the PM on PR #131; the decision goes here with its date.
+
 The region is painted as coverage: the triangles are drawn in texture space (triangles and edges, as §5.1) into `stroke` with value 1, and the composite applies the fill's colour and opacity with mask 1. A fill is one step; its boundary follows triangles (0.3–0.5 mm on a table level), which is the resolution the issue asks for.
 
 ### 7.2 The base and the figure
@@ -308,11 +312,15 @@ The region is painted as coverage: the triangles are drawn in texture space (tri
 
 The consumer calls it after a conversion with what it has (`regionsOf(result.baked.mesh, { source: result.mesh, figureTriangles: result.pair?.figureTriangles, sizing: result.sizing, kind: result.kind })`) and keeps the bytes with the mini or makes them again from a stored table level and its `sizing` (the GLB carries `extras.meshtavern` with the sizing; the triangle order of a plain GLB is the mesh's). That is why `'plain'` and `'disc'` need no full mesh. `fillRegion` with a `'base'` or `'figure'` seed takes the region's triangles (figure = not base), no flood.
 
+**As built (2026-10-13, #127):** `'disc'` takes the highest up-facing triangle centroid within the band with the most area as the base's top, not the band's upper edge (`regions.ts`).
+
 ## 8. Undo and redo
 
 The history is the list of `PaintStep`s applied, a cursor, and **keyframes**: copies of `paint` after every `KEYFRAME_EVERY = 10` steps and one at step 0 (the paint as opened), as render targets of the same format as `paint`, at most `UNDO_STEPS = 50` steps back _(proposals)_. Undo moves the cursor one back, restores the nearest keyframe at or before it (one quad copy) and **replays** the steps between, each exactly as it was applied: a stroke renders its depth map from its `camera` at its `viewport`, runs its dab pass with all its dabs (`DABS_PER_PASS` a draw), composites and dilates; a fill finds its region from its seed and does the same. Redo replays the next undone step. A new step after an undo drops the undone steps and the keyframes beyond the cursor; a step beyond `UNDO_STEPS` drops the oldest keyframe and the steps it covers. Memory: `ceil(UNDO_STEPS / KEYFRAME_EVERY) + 1 = 6` keyframes of 4 MB. Time: an undo is at most `KEYFRAME_EVERY − 1` replays, a few ms each (§11), plus a fill's flood.
 
 Why replay and not snapshots or tiles: a snapshot per step is 4 MB a step, 200 MB for fifty; tiles need the stroke's footprint read back after every stroke; replay needs nothing read back, makes the stroke data the truth, and is bounded by the keyframes. A replayed stroke equals the live stroke because every input is in the step (the camera and its viewport decide the depth map, the dabs the coverage) and the passes are deterministic on one GPU; §13 step 7 proves it with a pixel test (undo, redo, compare the bytes).
+
+**As built (2026-10-13, #127):** a step beyond `UNDO_STEPS` drops the oldest keyframe only; the steps it covered stay in the record (`history()` gives every step since the paint was opened), they can no longer be undone.
 
 `history.ts` holds this logic over an interface of four operations (`snapshot(i)`, `restore(i)`, `apply(step)`, `drop(i)`), so `history.test.ts` runs in Node with a fake backend and pins the schedule: which keyframes exist after n steps, how many replays an undo at step n costs, what a new step after undo drops.
 
@@ -405,6 +413,8 @@ Plus the second context itself (about 40 MB on the page for the question view, #
 | the CPU                     | ray casts for the frame's pointer samples (a few, tens of µs each), dab spacing                   |                         <1 ms |
 
 About 4–7 ms a frame against the 33 ms of 30 fps. The estimate is the builder's to replace with the counter's numbers on the development PC and the laptop (#127's criterion, §13 step 9): a stroke of `BRUSH_MAX_MM` across the generated figure and across the largest corpus mini at 1,920 × 1,080, median and worst frame.
+
+**As built (2026-10-13, #127):** composite and dilate are one pass (§5.4). The development PC's numbers are in the journal entry; the laptop's are not measured yet.
 
 ### 11.3 The counter
 
