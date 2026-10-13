@@ -19,6 +19,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `npm run basis:build` — rebuilds `wasm/basis-encoder/basis_encoder.wasm` (the KTX2 encoder) the same way (`-- --check`, `-- --variant <name>` into `out/basis-encoder/`)
 - `npm run feedback` — steps through figure + base pairs in real Chrome for the PM to judge (R right, S save placement, K skip, N next, Escape end) and writes a record and a sheet per pair to `out/feedback/` (`-- --pairs <json>`, `--only`, `--from`, `--redo`; issue #70, design note §13)
 - `npm run score-placements` — scores the current placement code against the recorded placements (`scripts/corpus-placements.json`, `out/feedback/`) in Node, in about a minute
+- `npm run shots:look-and-feel` — renders the look-and-feel mockups (`docs/design/look-and-feel/`, #142) into their `shots/` with headless Chromium, both themes, desktop and phone
 - `npm run format` — Prettier
 
 ## Layout
@@ -53,7 +54,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `scripts/measure-xatlas.mjs` — times one build of the xatlas module, cold and warm, on the generated figure and the slowest corpus unwraps, in Node.
 - `scripts/measure-encoder.mjs` — times one build of the encoder module, cold and warm, on generated 1024² and 2048² textures, in Node, with each file's size and hash.
 - `scripts/measure-stress.mjs` — measures the 100/400-mini stress scene in real Chrome, with and without the frame-rate cap.
-- `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (SVG or Excalidraw JSON, each with a PNG export), renders and screenshots from `verify-3d`, and design notes from a design pass (`<name>.md`, one per hand-over PR).
+- `e2e/` — Playwright tests. `docs/specs/` — specs. `docs/design/` — wireframes (SVG or Excalidraw JSON, each with a PNG export; since #142 also HTML mockups on the application's theme, `look-and-feel/`, rendered by `npm run shots:look-and-feel`), renders and screenshots from `verify-3d`, and design notes from a design pass (`<name>.md`, one per hand-over PR).
 - `docs/journal/` — one entry per piece of work: what was done, why, problems and their fixes, dead ends, numbers. Format and rules in its `README.md`. Read the entries of the area you are about to change.
 
 ## Conventions
