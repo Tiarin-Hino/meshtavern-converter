@@ -155,6 +155,7 @@ export {
   type PaintRegions,
 } from './pipeline/brush';
 export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
+export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';
