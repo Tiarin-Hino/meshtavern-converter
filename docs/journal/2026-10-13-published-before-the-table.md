@@ -25,4 +25,4 @@ None.
 
 ## Still open
 
-Which of the `release-blocker` issues (#87, #98, #118) must close before the page is published is the PM's call per issue; the spec's open question names it.
+Which of the `release-blocker` issues (#87, #98, #118) must close before the page is published is the PM's call per issue.

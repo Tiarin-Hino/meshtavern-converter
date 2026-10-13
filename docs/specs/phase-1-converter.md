@@ -191,7 +191,7 @@ No server, no storage, no accounts, no analytics. Files are read in the browser 
 - **Up-detection without a base is a heuristic too** (story 11): a scored guess can still fall over on a shape the corpus does not have. The free correction on the page is the guaranteed path; the corpus check makes every regression visible.
 - **Unwrap time** is the largest part of a conversion and the reason large minis take a minute or more even on the development PC. The spike #34 (story 9) found the answer and #57 built it: cut into 8 slabs, every corpus mini unwraps in under 10 s on the development PC. On the reference laptop the same cut gave 3.2 s instead of 33.8 s for a large mini (#35).
 - **Young dependencies in the critical path:** none. Both WebAssembly modules are our own builds from pinned sources, proven byte for byte in CI (xatlas, #33; the Basis Universal encoder, #38). three.js's Basis transcoder is still a prebuilt binary (#87).
-- **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus.
+- **The page is polish for an audience of few** while nothing is published. Keep #41 small, and spend the effort on the library and the corpus. Since 2026-10-13 the page is the product for hobbyists (decision above); this risk no longer applies.
 
 ## Hand-over notes for whoever implements this
 
