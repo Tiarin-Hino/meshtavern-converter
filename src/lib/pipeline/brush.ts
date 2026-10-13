@@ -75,6 +75,15 @@ export interface PaintFill {
   seed: FillSeed;
 }
 
+/**
+ * The fill's ready regions (§7.2): one byte per triangle of the table level, 1 for the base, 0 for
+ * the figure, and how the base was found (`regionsOf` in regions.ts).
+ */
+export interface PaintRegions {
+  base: Uint8Array;
+  method: 'pair' | 'plain' | 'disc';
+}
+
 /** One step of the history: what undo takes back and redo puts again. */
 export type PaintStep = PaintStroke | PaintFill;
 

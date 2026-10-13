@@ -152,7 +152,9 @@ export {
   type PaintFill,
   type StrokeCamera,
   type FillSeed,
+  type PaintRegions,
 } from './pipeline/brush';
+export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';
