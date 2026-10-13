@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The painting panel in the application's dialog · mockup (#142)</title>
+    <script src="theme/theme.js"></script>
+    <link rel="stylesheet" href="theme/tokens.css" />
+    <link rel="stylesheet" href="icons.css" />
+    <link rel="stylesheet" href="theme/components.css" />
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <div class="app-page">
+      <header class="app-bar">
+        <a class="wordmark" href="#">Mesh<b>Tavern</b></a>
+        <nav aria-label="Pages">
+          <a href="#">Campaigns</a>
+          <a href="#" aria-current="page">Your minis</a>
+        </nav>
+        <span class="spacer"></span>
+        <div class="segmented" role="group" aria-label="Theme" data-theme-switch hidden>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Light"
+            data-theme-choice="light"
+            aria-pressed="false"
+          >
+            <span class="icon icon-sun"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="Dark"
+            data-theme-choice="dark"
+            aria-pressed="false"
+          >
+            <span class="icon icon-moon"></span>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            type="button"
+            aria-label="System"
+            data-theme-choice="system"
+            aria-pressed="true"
+          >
+            <span class="icon icon-monitor"></span>
+          </button>
+        </div>
+      </header>
+      <main class="page-main">
+        <div class="page-head">
+          <div>
+            <h1>Your minis</h1>
+            <p class="lede">6 minis · stored as game-ready files only, never your STLs.</p>
+          </div>
+          <button class="btn btn-primary" type="button">
+            <span class="icon icon-upload"></span>Add minis
+          </button>
+        </div>
+        <div class="mini-grid">
+          <a class="card" href="#"
+            ><div class="card-media">
+              <span class="mini-thumb" style="--c1: #a4a9b0; --c2: #4b5059"></span>
+            </div>
+            <div class="card-body">
+              <h2 class="card-title">Harbour ogre</h2>
+              <div class="card-meta"><span class="badge">50 mm</span></div>
+            </div></a
+          >
+          <a class="card" href="#"
+            ><div class="card-media">
+              <span class="mini-thumb" style="--c1: #7fa6c9; --c2: #3c5f80"></span>
+            </div>
+            <div class="card-body">
+              <h2 class="card-title">Kestrel, ranger</h2>
+              <div class="card-meta"><span class="badge">32 mm</span></div>
+            </div></a
+          >
+          <a class="card" href="#"
+            ><div class="card-media">
+              <span class="mini-thumb" style="--c1: #c9a27f; --c2: #7e5a3c"></span>
+            </div>
+            <div class="card-body">
+              <h2 class="card-title">Tamsin</h2>
+              <div class="card-meta"><span class="badge">32 mm</span></div>
+            </div></a
+          >
+          <a class="card" href="#"
+            ><div class="card-media">
+              <span class="mini-thumb" style="--c1: #a0c98a; --c2: #4f7a3c"></span>
+            </div>
+            <div class="card-body">
+              <h2 class="card-title">Rook</h2>
+              <div class="card-meta"><span class="badge">32 mm</span></div>
+            </div></a
+          >
+        </div>
+      </main>
+    </div>
+    <!-- The application's wide dialog with the painting view mounted and the painter's panel beside it. -->
+    <div class="scrim">
+      <div
+        class="dialog dialog-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dialog-title"
+      >
+        <h2 id="dialog-title">Paint <small class="muted">· Harbour ogre</small></h2>
+        <div class="view-grid">
+          <div class="mt-painting" role="img" aria-label="The mini being painted">
+            <div class="viewport" aria-hidden="true">
+              <div class="plane"></div>
+              <div class="base"></div>
+              <div class="mini"></div>
+              <div
+                class="paint"
+                style="
+                  left: 47%;
+                  top: 38%;
+                  width: 70px;
+                  height: 90px;
+                  transform: translate(-50%, -50%);
+                "
+              ></div>
+              <div
+                class="paint"
+                style="
+                  left: 53%;
+                  top: 44%;
+                  width: 50px;
+                  height: 60px;
+                  transform: translate(-50%, -50%);
+                "
+              ></div>
+              <div class="cursor" style="left: 55%; top: 47%"></div>
+            </div>
+          </div>
+          <section class="panel paint-panel" aria-label="Painting">
+            <div class="panel-body flush">
+              <div class="panel-section">
+                <h3 class="panel-section-title">Tool</h3>
+                <div class="toolbar-group" role="group" aria-label="Tool">
+                  <button class="tool" type="button" aria-label="Brush" aria-pressed="true">
+                    <span class="icon icon-paintbrush"></span>
+                  </button>
+                  <button class="tool" type="button" aria-label="Fill" aria-pressed="false">
+                    <span class="icon icon-paint-bucket"></span>
+                  </button>
+                  <button class="tool" type="button" aria-label="Eraser" aria-pressed="false">
+                    <span class="icon icon-eraser"></span>
+                  </button>
+                  <button class="tool" type="button" aria-label="Wash" aria-pressed="false">
+                    <span class="icon icon-droplet"></span>
+                  </button>
+                  <button class="tool" type="button" aria-label="Ink" aria-pressed="false">
+                    <span class="icon icon-pencil"></span>
+                  </button>
+                  <button class="tool" type="button" aria-label="Dry brush" aria-pressed="false">
+                    <span class="icon icon-brush"></span>
+                  </button>
+                  <button class="tool" type="button" aria-label="Airbrush" aria-pressed="false">
+                    <span class="icon icon-spray-can"></span>
+                  </button>
+                </div>
+                <p class="tool-hint">
+                  Brush: an even coat of the colour, as hard or as soft as you set it.
+                </p>
+              </div>
+              <div class="panel-section">
+                <h3 class="panel-section-title">Brush</h3>
+                <label class="field"
+                  ><span>Size <span class="muted">4 mm</span></span
+                  ><input type="range" min="0.5" max="16" step="0.5" value="4"
+                /></label>
+                <label class="field"
+                  ><span>Hardness</span><input type="range" min="0" max="1" step="0.05" value="0.7"
+                /></label>
+                <label class="field"
+                  ><span>Opacity</span><input type="range" min="0" max="1" step="0.05" value="1"
+                /></label>
+              </div>
+              <div class="panel-section">
+                <h3 class="panel-section-title">Colour</h3>
+                <div class="field">
+                  <div class="field-row">
+                    <input type="color" value="#b03030" aria-label="Colour" />
+                    <div class="swatches" role="group" aria-label="Colours on this mini">
+                      <button
+                        class="swatch"
+                        type="button"
+                        aria-label="#b03030"
+                        aria-pressed="true"
+                        style="--swatch: #b03030"
+                      ></button>
+                      <button
+                        class="swatch"
+                        type="button"
+                        aria-label="#2f4f7a"
+                        style="--swatch: #2f4f7a"
+                      ></button>
+                      <button
+                        class="swatch"
+                        type="button"
+                        aria-label="#d9c08a"
+                        style="--swatch: #d9c08a"
+                      ></button>
+                      <button
+                        class="swatch"
+                        type="button"
+                        aria-label="#3a3a3a"
+                        style="--swatch: #3a3a3a"
+                      ></button>
+                      <button
+                        class="swatch"
+                        type="button"
+                        aria-label="#8a6a3a"
+                        style="--swatch: #8a6a3a"
+                      ></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="panel-section">
+                <h3 class="panel-section-title">Regions</h3>
+                <div class="actions" role="group" aria-label="Regions">
+                  <button class="btn btn-sm" type="button">The base</button>
+                  <button class="btn btn-sm" type="button">The figure</button>
+                </div>
+                <p class="hint">Fills the region with the colour in one tap.</p>
+              </div>
+              <div class="panel-section">
+                <div class="actions">
+                  <div class="btn-group" role="group" aria-label="History">
+                    <button class="btn btn-sm btn-icon" type="button" aria-label="Undo">
+                      <span class="icon icon-undo-2"></span>
+                    </button>
+                    <button class="btn btn-sm btn-icon" type="button" aria-label="Redo" disabled>
+                      <span class="icon icon-redo-2"></span>
+                    </button>
+                  </div>
+                  <button class="btn btn-sm" type="button" aria-pressed="false">
+                    <span class="icon icon-orbit"></span>Turn the mini
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="panel-footer">
+              <button class="btn btn-ghost" type="button">Close</button>
+              <button class="btn btn-primary" type="button">
+                <span class="icon icon-check"></span>Save
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
