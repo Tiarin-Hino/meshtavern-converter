@@ -2,7 +2,7 @@
 title: A spec for the page's look and feel before it is published
 date: 2026-10-13
 phase: 1
-issues: [148]
+issues: [142, 143, 144, 145, 146, 147, 148]
 prs: [141]
 topics: [planning, ui]
 ---
@@ -13,7 +13,7 @@ Wrote `docs/specs/look-and-feel.md`: five stories and six work items that make t
 
 ## Why
 
-On 2026-10-13 the PM decided to publish the page before the table application exists (#140; recorded in this PR among the Phase 1 spec's decisions and in `CLAUDE.md`). The page was built for the team: the spike's dark scheme as ten custom properties, the system font, browser-default controls, 30 colour literals over three stylesheets, the development name in the top bar. A public page in the same style as MeshTavern needs the application's design system, not a second one, and a name of its own.
+On 2026-10-13 the PM decided to publish the page before the table application exists (#140; recorded in this PR among the Phase 1 spec's decisions and in `CLAUDE.md`). The page was built for the team: the spike's dark scheme as ten custom properties, the system font, browser-default controls, 26 colour literals over three stylesheets, the development name in the top bar. A public page in the same style as MeshTavern needs the application's design system, not a second one, and a name of its own.
 
 ## How
 
@@ -25,4 +25,4 @@ None.
 
 ## Still open
 
-The theme's home, whether the page follows the system theme or stays dark, the words of the empty state and the link to MeshTavern, and the name, all the PM's. The PM asked for the epic and its issues at once: epic #148 with #142 to #147, created with the PR open.
+The theme's home, whether the page follows the system theme or stays dark, the words of the empty state and the link to MeshTavern, and the name, all the PM's. The epic (#148) and its issues (#142 to #147, K1 to K6) were created with this PR open, at the PM's request, and link it; the spec's wording wins on merge.
