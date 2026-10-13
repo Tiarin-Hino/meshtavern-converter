@@ -15,4 +15,4 @@ These files are MeshTavern's design system as the table application serves them 
 
 Nothing here is edited by hand: a change is made in the application and copied again. K2 (#143)
 moves the copy to `public/theme/`, where the page serves it, and the application's test keeps the
-two byte-equal (or the application takes them from here: the note's section 3 states the trade).
+two byte-equal (or the application takes them from here: the note's section 2.1 states the trade).

@@ -2,7 +2,8 @@
    application's components, the mock viewport that stands in for the WebGL canvas, and the
    application's dialog that mounts the question view and the painting panel. Nothing here is a
    component: every colour is a role of theme/tokens.css, every control a class of
-   theme/components.css. K3 takes the page's measurements from here into src/page/style.css; the
+   theme/components.css, except the stand-in mini, its base and the paint dab, which are the mock
+   scene's paint and stay here. K3 takes the page's measurements from here into src/page/style.css; the
    `.mt-questions` and `.mt-painting` rules are what K2 writes into the two views' stylesheets. */
 
 /* A component class that sets display outranks the browser's rule for `hidden` (pages.css has the
