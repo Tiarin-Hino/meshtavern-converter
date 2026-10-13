@@ -1,4 +1,4 @@
-/* The icons the page's mockups use (#142): Lucide 1.53.0, ISC (theme/LICENSE-Lucide.txt), the
+/* The icons the page's mockups use (#142): Lucide 1.53.0, ISC (public/theme/LICENSE-Lucide.txt), the
    format of the application's style guide sheet (docs/design/style-guide/icons.css there): each
    icon a CSS mask in currentColor, stroke width 2 at 24 px. K2 bundles the same names as inline
    SVG from the pinned lucide-static package, as the application's web/src/app/icons.ts does; this

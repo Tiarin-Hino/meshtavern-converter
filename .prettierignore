@@ -3,6 +3,6 @@ playwright-report
 test-results
 package-lock.json
 *.excalidraw
-# The application's theme files, copied byte for byte for the mockups (#142); the generated icon sheet.
-docs/design/look-and-feel/theme/
+# The application's theme files, copied byte for byte (#142, #143); the mockups' generated icon sheet.
+public/theme/
 docs/design/look-and-feel/icons.css
