@@ -4,7 +4,7 @@ date: 2026-10-13
 phase: 1
 issues: [47]
 prs: [140]
-topics: [planning, page, painting]
+topics: [planning, ui]
 ---
 
 ## What we did
