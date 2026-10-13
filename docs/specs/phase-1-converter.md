@@ -10,7 +10,7 @@ Turn the spike into the component the MeshTavern table will use to take in minis
 
 ## Decisions taken by the PM for this phase (2026-09-20)
 
-- **No public launch in Phase 1.** The converter stays unpublished until the table exists. The source repository is public already; "launch" means a deployed page and telling people about it. **Reversed on 2026-10-13 (PM):** the page is published before the table, with the mini painter on it (the engine of #126 to #128 and a painter's panel as a library entry, a painting saved as a paint file of its strokes that reopens here and replays in the table later), as a free tool for the community; public use is real testing of the converter while the table is built. #47 is the publishing task again. The three decisions below stand.
+- **No public launch in Phase 1.** The converter stays unpublished until the table exists. The source repository is public already; "launch" means a deployed page and telling people about it. **Reversed on 2026-10-13 (PM):** the page is published before the table, with the mini painter on it (the engine of #126 to #128 and a painter's panel as a library entry, a painting saved as a paint file of its strokes that reopens here and replays in the table later), as a free tool for the community; public use is real testing of the converter while the table is built. #47 is the publishing task again, once the page looks like a finished product in MeshTavern's style ([look-and-feel.md](look-and-feel.md)). The three decisions below stand.
 - When it is published, it goes to **GitHub Pages**.
 - **Downloads offer the table and far levels only.** The close level is shown on screen but not exported, in line with what may leave a device.
 - **The page collects nothing**: no analytics, no email field.
