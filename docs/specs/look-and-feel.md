@@ -91,7 +91,7 @@ None. The page stores nothing but the person's own choices on their device (the 
 
 ## Work items
 
-An epic, **Look and feel of the page**, in this repo. D = design pass first (Fable), B = straight to build (Opus), H = the PM.
+An epic, **Look and feel of the page** (#148; K1 to K6 are #142 to #147), in this repo. D = design pass first (Fable), B = straight to build (Opus), H = the PM.
 
 | # | Title | Labels | Section | Depends on | Pass |
 |---|---|---|---|---|---|

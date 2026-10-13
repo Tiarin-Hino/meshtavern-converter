@@ -2,8 +2,8 @@
 title: A spec for the page's look and feel before it is published
 date: 2026-10-13
 phase: 1
-issues: []
-prs: []
+issues: [148]
+prs: [141]
 topics: [spec, page, planning]
 ---
 
@@ -25,4 +25,4 @@ None.
 
 ## Still open
 
-The theme's home, whether the page follows the system theme or stays dark, the words of the empty state and the link to MeshTavern, and the name, all the PM's. The issues are created after the spec is merged.
+The theme's home, whether the page follows the system theme or stays dark, the words of the empty state and the link to MeshTavern, and the name, all the PM's. The PM asked for the epic and its issues at once: epic #148 with #142 to #147, created with the PR open.
