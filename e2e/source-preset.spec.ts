@@ -77,7 +77,7 @@ test('a preset at the question stands the file its way, and None in Adjust guess
   expect(second).toMatchObject({ reason: 'chosen', orientation: { up: '+y', method: 'manual' } });
   await expect(page.locator('#ask-found')).toHaveText('Standing as its source says.');
   await expect(page.locator('#ask-source')).toHaveValue('scene-m-y');
-  await expect(page.locator('#ask-up')).toHaveValue('+y');
+  await expect(page.locator('#ask-up [aria-pressed="true"]')).toHaveAttribute('data-up', '+y');
   await shoot(page, testInfo, 'question-with-preset');
 
   await page.locator('#ask-confirm').click();

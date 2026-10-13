@@ -35,6 +35,7 @@ import {
   TURN_STEP_DEG,
   type QuestionCopy,
 } from './copy';
+import { ICONS } from './icons';
 import { PAIR_COLOURS, QuestionScene } from './scene';
 
 export { PAIR_COLOURS } from './scene';
@@ -57,8 +58,8 @@ export const BRUSH_STEP_PX = 6;
 export const BRUSH_RADIUS_MM = 1;
 /** A finger held this long without moving turns the camera about the spot under it (#93). _(proposal)_ */
 export const FOCUS_HOLD_MS = 500;
-/** The width of the view's own panel over the scene, when no `controls` element is given: the page's panel. _(proposal)_ */
-export const PANEL_WIDTH_PX = 360;
+/** The width of the view's own panel over the scene, when no `controls` element is given: 22 rem, the page's done panel (#143, look-and-feel §7). _(proposal)_ */
+export const PANEL_WIDTH_PX = 352;
 
 /** A meet question as the view keeps it: the pairs without their triangles, which the scene has. */
 export type AskedMeet = Omit<MeetQuestion, 'pairs'> & {
@@ -198,7 +199,8 @@ let mounted = false;
 /**
  * Mounts the question view into the consumer's elements: its own canvas into `scene`, its controls
  * into `controls` (or a panel of its own over the scene). The stylesheet is
- * `meshtavern-converter/questions.css`, imported once by the consumer.
+ * `meshtavern-converter/questions.css`, imported once by the consumer after it links the theme's
+ * `tokens.css` and `components.css` (#143): the controls are those components.
  */
 export function mountQuestions(options: QuestionsOptions): QuestionsView {
   if (mounted) throw new Error('A question view is already mounted: one per document');
@@ -209,44 +211,72 @@ export function mountQuestions(options: QuestionsOptions): QuestionsView {
 const escapeHtml = (text: string): string =>
   text.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-/** The controls, with the ids, attributes and nesting the page's index.html had (#92, #93). */
+/** The element that holds a control's words beside its icon: its last child. */
+const labelOf = (element: HTMLElement): HTMLElement => element.lastElementChild as HTMLElement;
+
+/** An up axis as a button names it: +X, −X, … */
+const axisLabel = (axis: UpAxis): string =>
+  `${axis[0] === '-' ? '−' : '+'}${axis.slice(1).toUpperCase()}`;
+
+/**
+ * The controls, with the ids, attributes and nesting the page's index.html had (#92, #93), on the
+ * table application's components (#143, design note look-and-feel.md §4.5): every control carries
+ * its class of components.css, which the consumer links, so the view reads the same on the page
+ * and in the application. The icons are inline SVG (icons.ts), decorative: the words name the
+ * control, or its `aria-label` when it has none.
+ */
 function template(copy: QuestionCopy): string {
   const t = (key: keyof typeof QUESTION_COPY): string => escapeHtml(copy[key]);
-  const turnButtons = (['pitch', 'roll'] as const)
-    .flatMap((axis) =>
-      [-TURN_STEP_DEG, TURN_STEP_DEG].map(
-        (deg) =>
-          `<button type="button" data-turn="${axis}" data-deg="${deg}">${t(axis)} ${deg < 0 ? '−' : '+'}${TURN_STEP_DEG}°</button>`,
-      ),
+  const turnGroups = (['pitch', 'roll'] as const)
+    .map(
+      (axis) =>
+        `<div class="btn-group">${[-TURN_STEP_DEG, TURN_STEP_DEG]
+          .map(
+            (deg) =>
+              `<button class="btn btn-sm" type="button" data-turn="${axis}" data-deg="${deg}">${deg < 0 ? ICONS['rotate-ccw'] : ''}${t(axis)} ${deg < 0 ? '−' : '+'}${TURN_STEP_DEG}°${deg > 0 ? ICONS['rotate-cw'] : ''}</button>`,
+          )
+          .join('')}</div>`,
+    )
+    .join('');
+  const upButtons = UP_AXES.map(
+    (axis) =>
+      `<button class="btn btn-sm" type="button" data-up="${axis}" aria-pressed="false">${axisLabel(axis)}</button>`,
+  ).join('');
+  const meetTurns = [-TURN_STEP_DEG, TURN_STEP_DEG]
+    .map(
+      (deg) =>
+        `<button class="btn btn-sm" type="button" data-meet-turn="${deg}">${deg < 0 ? ICONS['rotate-ccw'] : ''}${t('turn')} ${deg < 0 ? '−' : '+'}${TURN_STEP_DEG}°${deg > 0 ? ICONS['rotate-cw'] : ''}</button>`,
     )
     .join('');
   return `<section id="ask" aria-labelledby="ask-question" hidden>
-<p id="ask-file" hidden></p>
-<p id="ask-question">${t('askUp')}</p>
-<p id="ask-found"></p>
-<p id="ask-warning" hidden></p>
-<label id="ask-base-choice" hidden>${t('base')} <select id="ask-base"></select></label>
-<label><span>${t('source')}</span> <select id="ask-source"></select></label>
-<label>${t('upAxis')} <select id="ask-up"></select></label>
-<div id="ask-turn" role="group" aria-label="${t('turn')}">${turnButtons}<label class="check"><input id="ask-turn-by-hand" type="checkbox" /> ${t('turnByHand')}</label><span id="ask-pending" hidden></span><button id="ask-set-down" type="button">${t('askSetDown')}</button><button id="ask-reset" type="button">${t('askReset')}</button></div>
-<button id="ask-swap" type="button" hidden>${t('swapPair')}</button>
-<button id="ask-confirm" class="primary" type="button"></button>
+<p id="ask-file" class="hint" hidden></p>
+<p id="ask-question" class="question">${t('askUp')}</p>
+<p id="ask-found" class="found"></p>
+<p id="ask-warning" class="callout callout-warn" hidden>${ICONS['triangle-alert']}<span></span></p>
+<label id="ask-base-choice" class="field" hidden><span>${t('base')}</span><select id="ask-base" class="input"></select></label>
+<label class="field"><span>${t('source')}</span><select id="ask-source" class="input"></select></label>
+<div class="field"><span id="ask-up-label">${t('upAxis')}</span><div id="ask-up" class="segmented" role="group" aria-labelledby="ask-up-label">${upButtons}</div></div>
+<div class="field"><span id="ask-turn-label">${t('turn')}</span><div id="ask-turn" class="actions" role="group" aria-labelledby="ask-turn-label">${turnGroups}</div></div>
+<label class="check"><input id="ask-turn-by-hand" type="checkbox" /> ${t('turnByHand')}</label>
+<p id="ask-pending" class="hint" hidden></p>
+<div class="actions"><button id="ask-set-down" class="btn btn-sm" type="button">${ICONS['arrow-down-to-line']}${t('askSetDown')}</button><button id="ask-reset" class="btn btn-sm btn-ghost" type="button">${t('askReset')}</button><button id="ask-swap" class="btn btn-sm" type="button" hidden>${t('swapPair')}</button></div>
+<button id="ask-confirm" class="btn btn-primary mt-questions-confirm" type="button">${ICONS.check}<span></span></button>
 </section>
 <section id="meet" aria-labelledby="meet-question" hidden>
-<p id="meet-question"></p>
-<ul id="meet-parts" hidden></ul>
+<p id="meet-question" class="question"></p>
+<ul id="meet-parts" class="parts" hidden></ul>
 <div id="meet-marking" data-stage="pairs">
-<ul id="meet-pairs" aria-label="${t('pairs')}"></ul>
-<p id="meet-hint"></p>
-<div id="meet-tools" role="group" aria-label="${t('marks')}"><button id="meet-add" type="button">${t('addPair')}</button><button id="meet-brush" type="button" aria-pressed="false">${t('brush')}</button><button id="meet-erase" type="button" aria-pressed="false">${t('erase')}</button><button id="meet-undo" type="button">${t('undo')}</button><button id="meet-clear" type="button">${t('startOver')}</button><button id="meet-apart" type="button" hidden>${t('pullApart')}</button></div>
+<ul id="meet-pairs" class="pairs" aria-label="${t('pairs')}"></ul>
+<p id="meet-hint" class="found"></p>
+<div class="field"><span id="meet-tools-label">${t('marks')}</span><div id="meet-tools" class="actions" role="group" aria-labelledby="meet-tools-label"><button id="meet-add" class="btn btn-sm" type="button">${ICONS.plus}${t('addPair')}</button><div class="btn-group"><button id="meet-brush" class="btn btn-sm" type="button" aria-pressed="false">${ICONS.paintbrush}${t('brush')}</button><button id="meet-erase" class="btn btn-sm" type="button" aria-pressed="false">${ICONS.eraser}${t('erase')}</button></div><button id="meet-undo" class="btn btn-sm btn-icon" type="button" aria-label="${t('undo')}" title="${t('undo')}">${ICONS['undo-2']}</button><button id="meet-clear" class="btn btn-sm" type="button">${t('startOver')}</button><button id="meet-apart" class="btn btn-sm" type="button" hidden>${ICONS['move-3d']}<span>${t('pullApart')}</span></button></div></div>
 </div>
 <div id="meet-final" data-stage="fitted">
-<p id="meet-placement"></p>
-<div id="meet-adjust" role="group" aria-label="${t('adjustMeeting')}"><button type="button" data-meet-lift="1">${t('raise')} ${LIFT_STEP_MM} mm</button><button type="button" data-meet-lift="-1">${t('lower')} ${LIFT_STEP_MM} mm</button><button type="button" data-meet-turn="-${TURN_STEP_DEG}">${t('turn')} −${TURN_STEP_DEG}°</button><button type="button" data-meet-turn="${TURN_STEP_DEG}">${t('turn')} +${TURN_STEP_DEG}°</button><button id="meet-tilt" type="button" hidden></button></div>
-<button id="meet-back" type="button">${t('backToMarking')}</button>
+<p id="meet-placement" class="found"></p>
+<div id="meet-adjust" class="actions" role="group" aria-label="${t('adjustMeeting')}"><div class="btn-group"><button class="btn btn-sm" type="button" data-meet-lift="1">${ICONS['arrow-up']}${t('raise')} ${LIFT_STEP_MM} mm</button><button class="btn btn-sm" type="button" data-meet-lift="-1">${ICONS['arrow-down']}${t('lower')} ${LIFT_STEP_MM} mm</button></div><div class="btn-group">${meetTurns}</div><button id="meet-tilt" class="btn btn-sm" type="button" hidden></button></div>
+<div class="actions"><button id="meet-back" class="btn btn-sm btn-ghost" type="button">${t('backToMarking')}</button></div>
 </div>
-<div id="meet-look"><span>${t('lookAt')}</span><div id="meet-view" role="group" aria-label="${t('lookAt')}"></div><p id="meet-view-hint">${t('viewHint')}</p></div>
-<button id="meet-confirm" class="primary" type="button"></button>
+<div id="meet-look" class="field"><span id="meet-view-label">${t('lookAt')}</span><div id="meet-view" class="actions" role="group" aria-labelledby="meet-view-label"></div><p id="meet-view-hint" class="hint">${t('viewHint')}</p></div>
+<button id="meet-confirm" class="btn btn-primary mt-questions-confirm" type="button">${ICONS.check}<span></span></button>
 </section>`;
 }
 
@@ -284,7 +314,7 @@ class View implements QuestionsView {
     section: HTMLElement;
     found: HTMLElement;
     warning: HTMLElement;
-    up: HTMLSelectElement;
+    up: HTMLElement;
     turn: HTMLElement;
     turnByHand: HTMLInputElement;
     pending: HTMLElement;
@@ -372,7 +402,7 @@ class View implements QuestionsView {
     this.panel = options.controls ? null : document.createElement('div');
     const controls = options.controls ?? this.panel!;
     if (this.panel) {
-      this.panel.className = 'mt-questions-panel';
+      this.panel.className = 'panel mt-questions-panel';
       sceneHost.append(this.panel);
     }
     sceneHost.classList.add('mt-questions', 'mt-questions-scene');
@@ -644,8 +674,10 @@ class View implements QuestionsView {
       const warning =
         question.role === 'base' ? copy.describePairWarning(question.warnings, 'question') : null;
       ask.warning.hidden = warning === null;
-      ask.warning.textContent = warning ?? '';
-      ask.up.value = question.orientation.up;
+      labelOf(ask.warning).textContent = warning ?? '';
+      for (const button of ask.up.querySelectorAll<HTMLButtonElement>('[data-up]')) {
+        button.setAttribute('aria-pressed', String(button.dataset.up === question.orientation.up));
+      }
       ask.source.value = this.preset ?? '';
       ask.swap.hidden = question.role === 'mini' || names.length !== 2;
       // Which file is the base, or none (#93): at the base's question, or for parts without one.
@@ -661,7 +693,7 @@ class View implements QuestionsView {
         );
         ask.base.value = String(question.roles.baseFile ?? '');
       }
-      ask.confirm.textContent =
+      labelOf(ask.confirm).textContent =
         question.role === 'base'
           ? confirmLabel(copy.confirmBaseUp)
           : question.role === 'figure'
@@ -737,14 +769,14 @@ class View implements QuestionsView {
       // Parts laid out for print have no place of their own to show.
       meet.apart.hidden =
         question.about !== 'parts' || !question.apart || question.inPlace === false;
-      meet.apart.textContent = this.meet.apart ? copy.showInPlace : copy.pullApart;
+      labelOf(meet.apart).textContent = this.meet.apart ? copy.showInPlace : copy.pullApart;
       meet.brush.setAttribute('aria-pressed', String(this.meet.brush));
       meet.erase.setAttribute('aria-pressed', String(this.meet.erase));
       meet.add.disabled =
         question.pairs.length >= this.pairsOf(question) || this.meet.pair >= question.pairs.length;
       meet.undo.disabled = question.proposed && question.marks === null;
       meet.clear.disabled = question.proposed;
-      meet.confirm.textContent = copy.confirmPairs;
+      labelOf(meet.confirm).textContent = copy.confirmPairs;
       // A pair with one side marked is not a pair yet; a kit laid out for print is a pile until
       // every part is marked.
       meet.confirm.disabled =
@@ -761,7 +793,7 @@ class View implements QuestionsView {
     meet.tilt.hidden = fit === null;
     meet.tilt.textContent = fit?.kept === 'free' ? copy.keepUpright : copy.letTilt;
     meet.confirm.disabled = false;
-    meet.confirm.textContent =
+    labelOf(meet.confirm).textContent =
       question.about === 'parts' ? confirmLabel(copy.confirmParts) : copy.confirmUp;
   }
 
@@ -779,22 +811,27 @@ class View implements QuestionsView {
     for (let k = 0; k < count; k++) {
       const pair = question.pairs[k];
       const item = document.createElement('li');
-      item.style.setProperty('--chip', `var(--pair-${(k % MAX_PAIRS) + 1})`);
+      item.style.setProperty('--chip-color', `var(--pair-${(k % MAX_PAIRS) + 1})`);
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'chip';
       chip.dataset.pair = String(k);
       chip.setAttribute('aria-pressed', String(k === this.meet.pair));
-      chip.textContent = `${k + 1}  ${side(pair?.on ?? null)} · ${side(pair?.of ?? null)}${question.proposed && pair ? `  ${this.copy.proposed}` : ''}`;
+      const dot = document.createElement('span');
+      dot.className = 'chip-dot';
+      chip.append(
+        dot,
+        `${k + 1}  ${side(pair?.on ?? null)} · ${side(pair?.of ?? null)}${question.proposed && pair ? `  ${this.copy.proposed}` : ''}`,
+      );
       chip.addEventListener('click', () => this.selectPair(k));
       item.append(chip);
       // A proposed pair can be dropped too: the rest of the proposal stays, to edit.
       if (pair) {
         const clear = document.createElement('button');
         clear.type = 'button';
-        clear.className = 'chip-clear';
+        clear.className = 'btn btn-ghost btn-sm btn-icon chip-clear';
         clear.setAttribute('aria-label', `${this.copy.clearPair} ${k + 1}`);
-        clear.textContent = '×';
+        clear.innerHTML = ICONS.x;
         clear.addEventListener('click', () => void this.sendMeet({ do: 'clear', pair: k }));
         item.append(clear);
       }
@@ -1110,12 +1147,14 @@ class View implements QuestionsView {
     const buttons = shown.map(({ file }) => {
       const button = document.createElement('button');
       button.type = 'button';
+      button.className = 'btn btn-sm';
       button.textContent = partName(this.nameOf(file));
       button.addEventListener('click', () => this.scene.focusFile(file));
       return button;
     });
     const all = document.createElement('button');
     all.type = 'button';
+    all.className = 'btn btn-sm';
     all.textContent = this.copy.viewAll;
     all.addEventListener('click', () => this.scene.setCamera(34, 22, 1));
     this.meetInputs.view.replaceChildren(...buttons, all);
@@ -1170,19 +1209,22 @@ class View implements QuestionsView {
   // with; the turn buttons are a preview; Confirm converts.
   private wireAsk(): void {
     const ask = this.ask;
-    ask.up.replaceChildren(...UP_AXES.map((axis) => new Option(axis, axis)));
     ask.source.replaceChildren(
       new Option(this.copy.noPreset, ''),
       ...SOURCE_PRESETS.map((preset) => new Option(preset.label, preset.id)),
     );
     ask.source.addEventListener('change', () => void this.setPreset(ask.source.value || null));
-    ask.up.addEventListener('change', () =>
-      this.answerQuestion({
-        kind: 'up',
-        orientation: { up: ask.up.value as UpAxis },
-        confirm: false,
-      }),
-    );
+    for (const button of ask.up.querySelectorAll<HTMLButtonElement>('[data-up]')) {
+      // The axis on screen pressed again changes nothing, as a select's change never fired for it.
+      button.addEventListener('click', () => {
+        if (button.getAttribute('aria-pressed') === 'true') return;
+        this.answerQuestion({
+          kind: 'up',
+          orientation: { up: button.dataset.up as UpAxis },
+          confirm: false,
+        });
+      });
+    }
     for (const button of ask.turn.querySelectorAll<HTMLButtonElement>('[data-turn]')) {
       button.addEventListener('click', () =>
         this.turn(button.dataset.turn as TurnAxis, Number(button.dataset.deg ?? TURN_STEP_DEG)),
