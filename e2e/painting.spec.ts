@@ -441,3 +441,99 @@ test.describe('on a phone', () => {
     expect((await paintNow(page)).painted).toBe(0);
   });
 });
+
+test('undoes and redoes strokes to the same bytes, back to the paint as opened', async ({
+  page,
+}) => {
+  await convert(page, generateFigure(true));
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    const opened = painting.testPaint('x-');
+    await painting.open('x-');
+    const view = painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const at = (x: number, y: number): [number, number, number] =>
+      view.texelAt(...view.screenOf([x, y, 6]))!.point;
+    const hash = async (): Promise<number> => {
+      const { data } = await view.paint();
+      let h = 0;
+      for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
+      return h;
+    };
+    const same = async (expected: Uint8Array): Promise<boolean> => {
+      const { data } = await view.paint();
+      return data.every((value, k) => value === expected[k]);
+    };
+    for (const [colour, y] of [
+      ['#ff0000', 12],
+      ['#00ff00', 14],
+      ['#0000ff', 16],
+    ] as const) {
+      view.setColour(colour);
+      await view.stroke([at(-3, y), at(0, y + 1), at(3, y)]);
+    }
+    const three = await hash();
+    await view.undo();
+    const two = await hash();
+    await view.redo();
+    const redone = await hash();
+    const counts = [view.state.steps, view.state.undone];
+    for (let k = 0; k < 3; k++) await view.undo();
+    const backToOpened = await same(opened.data);
+    await view.undo();
+    const stillOpened = await same(opened.data);
+    const afterFourth = [view.state.steps, view.state.undone];
+    // A stroke after an undo drops what could have been redone.
+    await view.redo();
+    await view.redo();
+    await view.undo();
+    await view.stroke([at(-1, 13), at(1, 13)]);
+    return {
+      three,
+      two,
+      redone,
+      counts,
+      backToOpened,
+      stillOpened,
+      afterFourth,
+      end: [view.state.steps, view.state.undone],
+    };
+  });
+  expect(outcome.two).not.toBe(outcome.three);
+  expect(outcome.redone).toBe(outcome.three);
+  expect(outcome.counts).toEqual([3, 0]);
+  expect(outcome.backToOpened).toBe(true);
+  expect(outcome.stillOpened).toBe(true);
+  expect(outcome.afterFourth).toEqual([0, 3]);
+  expect(outcome.end).toEqual([2, 0]);
+});
+
+test('keeps at least UNDO_STEPS strokes to undo', async ({ page }) => {
+  await convert(page, generateFigure(true));
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const point = view.texelAt(...view.screenOf([0, 14, 6]))!.point;
+    view.setBrush({ sizeMm: 1 });
+    // 55 strokes and 10 more: past the oldest keyframe's drop (design note §8).
+    for (let k = 0; k < 65; k++) {
+      view.setColour(`#${(k * 3).toString(16).padStart(2, '0')}0000`);
+      await view.stroke([point]);
+    }
+    let undone = 0;
+    for (let k = 0; k < 70; k++) {
+      const before = view.state.steps;
+      await view.undo();
+      if (view.state.steps === before) break;
+      undone++;
+    }
+    return { undone, history: view.history().length };
+  });
+  expect(outcome.undone).toBeGreaterThanOrEqual(50);
+  expect(outcome.undone).toBeLessThan(65);
+  expect(outcome.history).toBe(65 - outcome.undone);
+});

@@ -35,18 +35,22 @@ import {
   PAINT_DILATION_RINGS,
   PaintPasses,
 } from './passes';
+import { KEYFRAME_EVERY, PaintHistory, UNDO_STEPS } from './history';
 import { PaintScene } from './scene';
 import { BUILT_TOOLS, toolPass } from './tools';
 
-export { DABS_PER_PASS, DEPTH_BIAS_MM, FACING_MIN_COS, PAINT_DILATION_RINGS };
+export {
+  DABS_PER_PASS,
+  DEPTH_BIAS_MM,
+  FACING_MIN_COS,
+  PAINT_DILATION_RINGS,
+  KEYFRAME_EVERY,
+  UNDO_STEPS,
+};
 
 /** The brush's diameter on the surface, in mm, at least and at most. _(proposal)_ */
 export const BRUSH_MIN_MM = 0.5;
 export const BRUSH_MAX_MM = 16;
-/** A keyframe of the paint after every this many steps (§8). _(proposal)_ */
-export const KEYFRAME_EVERY = 10;
-/** Steps that can be undone, at least (§8). _(proposal)_ */
-export const UNDO_STEPS = 50;
 /** The cursor ring is never drawn smaller than this, in CSS pixels. _(proposal)_ */
 export const CURSOR_MIN_PX = 4;
 /** A frame longer than this, in ms, is counted as slow: 30 frames a second. _(proposal)_ */
@@ -180,7 +184,9 @@ class Painting implements PaintingView {
   private readonly cursor: HTMLDivElement;
   private opened: Opened | null = null;
   private live: LiveStroke | null = null;
-  private steps: PaintStep[] = [];
+  /** The steps and the keyframes (§8): made at `open`. */
+  private timeline: PaintHistory | null = null;
+  private readonly keyframes = new Map<number, THREE.WebGLRenderTarget>();
   private tool: ToolId = 'flat';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
   private colour = DEFAULT_COLOUR;
@@ -221,8 +227,8 @@ class Painting implements PaintingView {
       brush: { ...this.brush },
       colour: this.colour,
       navigating: this.scene.isNavigating,
-      steps: this.steps.length,
-      undone: 0,
+      steps: this.timeline?.applied ?? 0,
+      undone: this.timeline?.undone ?? 0,
       regions: this.opened?.regions ? ['base', 'figure'] : [],
       painting: this.live !== null,
       perf: this.perf,
@@ -272,7 +278,15 @@ class Painting implements PaintingView {
       shown,
       uniforms,
     };
-    this.steps = [];
+    this.timeline = new PaintHistory({
+      snapshot: (at) => this.keyframes.set(at, this.passes.snapshot()),
+      restore: (at) => this.passes.restore(this.keyframes.get(at)!),
+      apply: (step) => this.replay(step),
+      drop: (at) => {
+        this.keyframes.get(at)?.dispose();
+        this.keyframes.delete(at);
+      },
+    });
     this.perf = NO_PERF;
     this.scene.show(shown, [size.x, size.y, size.z]);
     this.passes.warm(this.scene.strokeCamera(), BUILT_TOOLS);
@@ -289,7 +303,8 @@ class Painting implements PaintingView {
     disposeBakedMaterial(opened.material);
     opened.geometry.dispose();
     this.opened = null;
-    this.steps = [];
+    this.timeline?.dispose();
+    this.timeline = null;
     this.cursor.hidden = true;
     this.scene.controls.enabled = true;
     this.emit();
@@ -335,12 +350,18 @@ class Painting implements PaintingView {
     return Promise.reject(new Error('The fill is built in a later step'));
   }
 
-  undo(): Promise<void> {
-    return Promise.reject(new Error('Undo is built in a later step'));
+  async undo(): Promise<void> {
+    this.commitLive();
+    if (this.timeline?.undo() == null) return;
+    this.emit();
+    await this.scene.nextFrame();
   }
 
-  redo(): Promise<void> {
-    return Promise.reject(new Error('Redo is built in a later step'));
+  async redo(): Promise<void> {
+    this.commitLive();
+    if (!this.timeline?.redo()) return;
+    this.emit();
+    await this.scene.nextFrame();
   }
 
   async paint(): Promise<Albedo> {
@@ -350,7 +371,7 @@ class Painting implements PaintingView {
   }
 
   history(): PaintStep[] {
-    return this.steps.map((step) => structuredClone(step));
+    return (this.timeline?.record() ?? []).map((step) => structuredClone(step));
   }
 
   async stroke(points: Vec3[], pressure?: number[]): Promise<void> {
@@ -493,10 +514,22 @@ class Painting implements PaintingView {
     if (live.step.dabs.length === 0) this.passes.cancel();
     else {
       this.passes.commit();
-      this.steps.push(live.step);
+      this.timeline?.push(live.step);
     }
     this.perf = perfOf(live.frames);
     this.emit();
+  }
+
+  /**
+   * A step applied again, exactly as the first time (§8): a stroke renders its depth map from its
+   * own camera at its own viewport and draws all its dabs; the result is committed.
+   */
+  private replay(step: PaintStep): void {
+    if (step.kind !== 'stroke') throw new Error('A fill is replayed in a later step');
+    this.passes.beginStroke(step.camera);
+    this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
+    this.passes.composite(step.tool, parseHexColour(step.colour), step.brush.opacity);
+    this.passes.commit();
   }
 
   /** The stroke on the canvas is dropped (a second finger arrived, the pointer was cancelled): no step. */
