@@ -9,7 +9,9 @@
     "./three": "./src/lib/three.ts",
     "./dev": "./src/lib/dev.ts",
     "./questions": "./src/lib/questions.ts",
-    "./questions.css": "./src/lib/questions.css"
+    "./questions.css": "./src/lib/questions.css",
+    "./painting": "./src/lib/painting.ts",
+    "./painting.css": "./src/lib/painting.css"
   },
   "engines": {
     "node": ">=20.19"

@@ -192,9 +192,10 @@ export function ownerMap(mask: Uint8Array, size: number, rings: number): Int32Ar
   }
   for (let k = 0; k < ring.length; k += 2) owner[ring[k]!] = ring[k + 1]!;
   // Rings 2 … : a neighbour of the ring before, its owner taken.
+  const previous = new Uint8Array(size * size);
   for (let pass = 1; pass < rings && ring.length > 0; pass++) {
-    const previous = new Set<number>();
-    for (let k = 0; k < ring.length; k += 2) previous.add(ring[k]!);
+    previous.fill(0);
+    for (let k = 0; k < ring.length; k += 2) previous[ring[k]!] = 1;
     const next: number[] = [];
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
@@ -205,7 +206,7 @@ export function ownerMap(mask: Uint8Array, size: number, rings: number): Int32Ar
           const sy = y + dy;
           if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
           const from = sy * size + sx;
-          if (!previous.has(from)) continue;
+          if (!previous[from]) continue;
           next.push(texel, owner[from]!);
           break;
         }
