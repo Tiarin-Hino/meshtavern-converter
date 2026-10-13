@@ -95,7 +95,7 @@ export function createBakedMaterial(
 ): THREE.MeshStandardMaterial {
   const paint = options.map ?? null;
   const material = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color: new THREE.Color(1, 1, 1),
     roughness: 0.75,
     metalness: 0,
     normalMap: texture,

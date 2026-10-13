@@ -106,6 +106,7 @@ describe('the library entries', () => {
     expect(Object.keys(three).sort()).toEqual([
       'MINI_METALNESS',
       'MINI_ROUGHNESS',
+      'SCENE_COLOURS_FALLBACK',
       'THUMBNAIL_AZIMUTH_DEG',
       'THUMBNAIL_ELEVATION_DEG',
       'THUMBNAIL_FOV_DEG',
@@ -121,6 +122,7 @@ describe('the library entries', () => {
       'disposeBakedMaterial',
       'ownCopy',
       'placeCameraOnSphere',
+      'readSceneColours',
       'renderThumbnail',
       'transcodeDetail',
       'updateLookUniforms',

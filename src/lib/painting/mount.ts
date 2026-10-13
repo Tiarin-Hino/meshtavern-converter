@@ -3,6 +3,7 @@ import type { Vec3 } from '../pipeline/base';
 import {
   DAB_SPACING,
   DEFAULT_BRUSH,
+  DEFAULT_PAINT_COLOUR,
   MOUSE_PRESSURE,
   PAINT_SIZE,
   TOOL_IDS,
@@ -64,8 +65,6 @@ export const BRUSH_MAX_MM = 16;
 export const CURSOR_MIN_PX = 4;
 /** A frame longer than this, in ms, is counted as slow: 30 frames a second. _(proposal)_ */
 export const FRAME_BUDGET_MS = 33;
-/** The colour a view starts with. */
-const DEFAULT_COLOUR = '#b03030';
 
 export interface PaintingOptions {
   /** The view's canvas fills this element: give it a size. */
@@ -200,7 +199,7 @@ class Painting implements PaintingView {
   private readonly keyframes = new Map<number, THREE.WebGLRenderTarget>();
   private tool: ToolId = 'flat';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
-  private colour = DEFAULT_COLOUR;
+  private colour = DEFAULT_PAINT_COLOUR;
   private perf: PaintPerf = NO_PERF;
   private current: PaintingState;
   /** The pointers down on the canvas, and the one painting the stroke on it. */

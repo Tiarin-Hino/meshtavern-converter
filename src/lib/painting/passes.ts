@@ -15,6 +15,7 @@ import {
 import { CAVITY_GAIN } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
+import { BLACK } from '../three/scene-colours';
 import { dabGain, strokeOpacity, toolPass } from './tools';
 
 /**
@@ -297,11 +298,11 @@ const raw = (
   return material;
 };
 
-const textureTarget = (format: 'srgb' | 'rgba' | 'red'): THREE.WebGLRenderTarget => {
+const textureTarget = (format: 'srgb' | 'rgba'): THREE.WebGLRenderTarget => {
   const target = new THREE.WebGLRenderTarget(PAINT_SIZE, PAINT_SIZE, {
     depthBuffer: false,
     generateMipmaps: false,
-    format: format === 'red' ? THREE.RedFormat : THREE.RGBAFormat,
+    format: THREE.RGBAFormat,
     type: THREE.UnsignedByteType,
     colorSpace: format === 'srgb' ? THREE.SRGBColorSpace : THREE.NoColorSpace,
     minFilter: format === 'srgb' ? THREE.LinearFilter : THREE.NearestFilter,
@@ -784,7 +785,7 @@ export class PaintPasses {
     renderer.setRenderTarget(target);
     if (clear === 'stencil') renderer.clear(false, false, true);
     else if (clear) {
-      renderer.setClearColor(0x000000, 0);
+      renderer.setClearColor(BLACK, 0);
       renderer.clear(true, true, target.stencilBuffer);
     }
     if (scene) renderer.render(scene, this.camera);
