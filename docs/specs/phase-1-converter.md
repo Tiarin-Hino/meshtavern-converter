@@ -10,7 +10,7 @@ Turn the spike into the component the MeshTavern table will use to take in minis
 
 ## Decisions taken by the PM for this phase (2026-09-20)
 
-- **No public launch in Phase 1.** The converter stays unpublished until the table exists. The source repository is public already; "launch" means a deployed page and telling people about it.
+- **No public launch in Phase 1.** The converter stays unpublished until the table exists. The source repository is public already; "launch" means a deployed page and telling people about it. **Reversed on 2026-10-13 (PM):** the page is published before the table, with the mini painter on it (the engine of #126 to #128 and a painter's panel as a library entry, a painting saved as a paint file of its strokes that reopens here and replays in the table later), as a free tool for the community; public use is real testing of the converter while the table is built. #47 is the publishing task again. The three decisions below stand.
 - When it is published, it goes to **GitHub Pages**.
 - **Downloads offer the table and far levels only.** The close level is shown on screen but not exported, in line with what may leave a device.
 - **The page collects nothing**: no analytics, no email field.
@@ -19,13 +19,13 @@ Turn the spike into the component the MeshTavern table will use to take in minis
 
 - The PM and the team, now: converting their own minis, judging looks, testing devices.
 - The table application, in Phase 2: it embeds this converter as its "add a mini" step.
-- Hobbyists, later, when the page is published.
+- Hobbyists, when the page is published with the painter (PM decision 2026-10-13, above): converting their own minis and trying a paint scheme before the printed mini is painted.
 
 ## Scope
 
 In: the stories below; the release blockers carried over from Phase 0 (#33, #35, #38); a stable way for another application to call the converter; a faster unwrap (#34, moved into this phase on 2026-09-21, see story 9).
 
-Out: publishing (#47 leaves this phase and waits for the table); accounts, storage, sharing, the table; painting; exporters for other VTTs (Phase 1.5); export of baked minis (#36, only needed once something outside our own app consumes them).
+Out: publishing (#47 left this phase on 2026-09-20 to wait for the table; since 2026-10-13 it follows the painter on the page instead, outside this phase's epic); accounts, storage, sharing, the table; painting (the engine came as #125 to #128 after this phase, the page's painter and the paint file follow #47's reopening); exporters for other VTTs (Phase 1.5); export of baked minis (#36, only needed once something outside our own app consumes them).
 
 ## Stories, in proposed order
 
