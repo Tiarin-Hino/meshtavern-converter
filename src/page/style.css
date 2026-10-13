@@ -155,6 +155,16 @@ h1 {
   inset: 0;
 }
 
+/* The team's Paint tool (#127): the painting view over the viewport, the same box. */
+#paint-view {
+  position: absolute;
+  inset: 0;
+}
+
+#dev-paint label {
+  display: block;
+}
+
 #levels {
   position: absolute;
   bottom: 16px;

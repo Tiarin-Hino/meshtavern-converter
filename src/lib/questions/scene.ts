@@ -5,6 +5,7 @@ import { DEFAULT_LOOK } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Rotation } from '../pipeline/rotation';
 import { GRID_SQUARE_MM } from '../pipeline/size';
+import { placeCameraOnSphere } from '../three/camera';
 import { addTableLights, MINI_METALNESS, MINI_ROUGHNESS } from '../three/thumbnail';
 import { chunkRanges } from './mesh-chunks';
 
@@ -389,9 +390,9 @@ export class QuestionScene {
     };
   }
 
-  // setTurn, setTurnGizmo and setCamera are the viewer's (src/page/viewer.ts), copied: the page's
-  // viewer turns and frames a converted mini, this scene a question (#119 design note §7.2). Keep
-  // the two copies doing the same.
+  // setTurn and setTurnGizmo are the viewer's (src/page/viewer.ts), copied: the page's viewer turns
+  // a converted mini, this scene a question (#119 design note §7.2). Keep the two copies doing the
+  // same. Both frame with placeCameraOnSphere (three/camera.ts, #127).
 
   /**
    * Turns the meshes by `turn` (scene axes, about the middle of their height) to preview a
@@ -447,20 +448,7 @@ export class QuestionScene {
    * 2 = twice as close. Fixed positions make screenshots comparable.
    */
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void {
-    const radius = Math.max(this.size.x, this.size.y, this.size.z, 1);
-    const distance = (radius * 2.3) / zoom;
-    const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
-    const elevation = THREE.MathUtils.degToRad(elevationDeg);
-    const target = new THREE.Vector3(0, this.size.y * (zoom > 1 ? 0.7 : 0.5), 0);
-    this.controls.target.copy(target);
-    this.camera.position.set(
-      target.x + distance * Math.cos(elevation) * Math.sin(azimuth),
-      target.y + distance * Math.sin(elevation),
-      target.z + distance * Math.cos(elevation) * Math.cos(azimuth),
-    );
-    this.camera.near = radius / 100;
-    this.camera.far = radius * 100;
-    this.camera.updateProjectionMatrix();
+    placeCameraOnSphere(this.camera, this.controls, this.size, azimuthDeg, elevationDeg, zoom);
   }
 
   /** Removes the question's meshes and releases their GPU buffers; the loop stops. */

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as dev from './dev';
 import * as lib from './index';
+import * as painting from './painting';
 import * as questions from './questions';
 import * as three from './three';
 
@@ -18,8 +19,12 @@ describe('the library entries', () => {
       'ConversionCancelled',
       'ConversionProblem',
       'Converter',
+      'DAB_SPACING',
+      'DEFAULT_BRUSH',
       'DEFAULT_LOOK',
       'DISC_HEIGHT_MAX_MM',
+      'FILL_ANGLE_DEG',
+      'FILL_CREASE_CAVITY',
       'GRID_SQUARE_MM',
       'IDENTITY',
       'LOD_SPECS',
@@ -28,11 +33,14 @@ describe('the library entries', () => {
       'MAX_PARTS',
       'MAX_STROKES',
       'PAINT_REACH_MM',
+      'PAINT_SIZE',
       'PROBLEM_MESSAGES',
+      'REGION_REACH_MM',
       'SIZES',
       'SNIFF_BYTES',
       'SOURCE_PRESETS',
       'STEPS',
+      'TOOL_IDS',
       'TOP_CONE_DEG',
       'TOP_SHARE',
       'UNIT_FACTORS',
@@ -40,6 +48,7 @@ describe('the library entries', () => {
       'checkFits',
       'encodeGlb',
       'estimateConversionBytes',
+      'fillRegion',
       'findSourcePreset',
       'footprintMm',
       'fromAxisAngle',
@@ -52,9 +61,12 @@ describe('the library entries', () => {
       'readKtx2Header',
       'readStlFile',
       'readStlFiles',
+      'regionsOf',
       'sizeLabel',
       'sniffStl',
+      'spaceDabs',
       'toProblem',
+      'toolMask',
       'turnAngleDeg',
       'vertexColours',
     ]);
@@ -97,6 +109,7 @@ describe('the library entries', () => {
       'createLookUniforms',
       'disposeBakedMaterial',
       'ownCopy',
+      'placeCameraOnSphere',
       'renderThumbnail',
       'transcodeDetail',
       'updateLookUniforms',
@@ -127,6 +140,38 @@ describe('the library entries', () => {
       'mountQuestions',
       'partName',
     ]);
+  });
+
+  it('painting.ts exports exactly the painting view and its words (#127)', () => {
+    expect(Object.keys(painting).sort()).toEqual([
+      'BRUSH_MAX_MM',
+      'BRUSH_MIN_MM',
+      'CURSOR_MIN_PX',
+      'DABS_PER_PASS',
+      'DEPTH_BIAS_MM',
+      'FACING_MIN_COS',
+      'FRAME_BUDGET_MS',
+      'KEYFRAME_EVERY',
+      'PAINT_COPY',
+      'PAINT_DILATION_RINGS',
+      'UNDO_STEPS',
+      'mountPainting',
+    ]);
+  });
+
+  it('package.json points at every entry and stylesheet', () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+    );
+    expect(manifest.exports).toEqual({
+      '.': './src/lib/index.ts',
+      './three': './src/lib/three.ts',
+      './dev': './src/lib/dev.ts',
+      './questions': './src/lib/questions.ts',
+      './questions.css': './src/lib/questions.css',
+      './painting': './src/lib/painting.ts',
+      './painting.css': './src/lib/painting.css',
+    });
   });
 
   it('index.ts and everything it re-exports stay free of three.js', () => {

@@ -1,0 +1,28 @@
+/*
+ * The painting view (#127, docs/design/painting-engine.md §10.3): every rule under .mt-painting,
+ * the class mountPainting puts on the element it was given. The cursor's colour is the page's
+ * --accent through the question view's --q-accent, with the page's value as the fallback.
+ */
+
+.mt-painting {
+  position: relative;
+}
+
+.mt-painting canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.mt-painting-cursor {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid var(--q-accent, var(--accent, #7aa2f7));
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.mt-painting-cursor[hidden] {
+  display: none;
+}

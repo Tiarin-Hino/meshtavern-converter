@@ -33,6 +33,7 @@
       <div id="view">
         <canvas id="viewport"></canvas>
         <div id="question-view" data-in="asking"></div>
+        <div id="paint-view" data-dev hidden></div>
         <div id="levels" role="group" aria-label="Detail level" data-in="done" data-mini></div>
       </div>
       <section id="panel" aria-labelledby="heading">
@@ -200,6 +201,38 @@
           <img id="dev-thumbnail" width="128" height="128" alt="Thumbnail of the table level" />
           <figcaption id="dev-kind"></figcaption>
         </figure>
+        <details id="dev-paint" data-in="done" data-mini data-dev>
+          <summary>Paint (team tool, #127)</summary>
+          <button id="paint-open" type="button">Paint this mini</button>
+          <div id="paint-controls" hidden>
+            <div id="paint-tools" role="group" aria-label="Tool"></div>
+            <label>Size <input id="paint-size" type="range" step="0.5" /></label>
+            <label
+              >Hardness <input id="paint-hardness" type="range" min="0" max="1" step="0.05"
+            /></label>
+            <label
+              >Opacity <input id="paint-opacity" type="range" min="0" max="1" step="0.05"
+            /></label>
+            <label
+              >Tolerance <input id="paint-tolerance" type="range" min="0" max="1" step="0.05"
+            /></label>
+            <label>Colour <input id="paint-colour" type="color" /></label>
+            <div role="group" aria-label="Regions">
+              <button id="paint-base" type="button">The base</button>
+              <button id="paint-figure" type="button">The figure</button>
+            </div>
+            <div role="group" aria-label="History">
+              <button id="paint-undo" type="button">Undo</button>
+              <button id="paint-redo" type="button">Redo</button>
+              <button id="paint-navigate" type="button" aria-pressed="false">Turn the mini</button>
+            </div>
+            <div role="group" aria-label="Paint">
+              <button id="paint-save" type="button">Save</button>
+              <button id="paint-close" type="button">Close</button>
+            </div>
+          </div>
+          <p id="paint-perf"></p>
+        </details>
         <div id="stress" role="group" aria-label="Stress test" data-in="done" data-mini data-dev>
           <button type="button" data-count="100">100 minis</button>
           <button type="button" data-count="400">400 minis</button>

@@ -1,6 +1,8 @@
 import './style.css';
 // The question view's stylesheet (#119): a consumer imports it once, as the page does.
 import '../lib/questions.css';
+// The painting view's stylesheet (#127), for the team's Paint tool under ?dev.
+import '../lib/painting.css';
 import {
   encodeGlb,
   glbEncoderReady,
@@ -44,11 +46,16 @@ import {
   type MeetAction,
   type PartsOptions,
   type KindGuess,
+  type Albedo,
+  PAINT_SIZE,
+  regionsOf,
 } from '../lib';
 import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
+import { createPaintTool, type MiniForPainting, type PaintHooks } from './paint-tool';
+import type { PaintingState } from '../lib/painting';
 import { parsePageOptions } from './options';
 import {
   describePairWarning,
@@ -107,6 +114,8 @@ interface AppState {
   stats: ConversionStats | null;
   /** Character or prop, as the last conversion guessed or was told (#99). */
   kind: KindGuess | null;
+  /** The team's Paint tool under ?dev (#127): the painting view's state, null before it was opened. */
+  painting: PaintingState | null;
   /** Why the last file did not become a mini, as the user reads it. */
   error: string | null;
   /** The same as a code, and what happened technically, for tests and developers. */
@@ -183,6 +192,15 @@ declare global {
     /** Test and agent hook: the canvas has no accessibility tree, so state is asserted through this. */
     __mt: {
       state: AppState;
+      /**
+       * The team's Paint tool (#127, under ?dev): opens the painting view on the converted mini,
+       * with the test paint `paint` (#125's) to continue from, and gives the view for the tests.
+       */
+      painting: Omit<PaintHooks, 'open'> & {
+        open: (paint?: TestPaint) => Promise<void>;
+        /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
+        testPaint: (paint: TestPaint) => Albedo;
+      };
       loadDemo: () => Promise<void>;
       /** Converts a generated sheet of `quadsPerSide`² × 2 triangles; 1000 gives a 100 MB STL. */
       loadGenerated: (quadsPerSide: number, sizing?: SizingOptions) => Promise<void>;
@@ -408,6 +426,7 @@ const state: AppState = {
   progressLog: [],
   stats: null,
   kind: null,
+  painting: null,
   error: null,
   errorCode: null,
   errorDetail: null,
@@ -1234,6 +1253,42 @@ function testPaintTexture(mesh: IndexedMesh, paint: TestPaint): Texture {
   return texture;
 }
 
+/** The test paint (#125) at the painting engine's size, for opening the Paint tool on a paint (#127). */
+function testPaintAlbedo(mesh: IndexedMesh, paint: TestPaint): Albedo {
+  const where = (x: number): boolean => (paint === 'all' ? true : paint === 'x+' ? x > 0 : x < 0);
+  return paintWhere(mesh, PAINT_SIZE, where, TEST_PAINT_RED);
+}
+
+/** The converted mini as the Paint tool takes it (#127): the baked table level, its texture, the look, the regions. */
+function miniForPainting(): MiniForPainting | null {
+  if (!baked || !state.stats || state.imported) return null;
+  // Uncompressed (?ktx=off) the page keeps texels: a texture is made for the view and released.
+  const made =
+    baked.texture instanceof Uint8Array
+      ? createDetailTexture(baked.texture, baked.resolution)
+      : null;
+  return {
+    mesh: baked.mesh,
+    texture: made ?? (baked.texture as Texture),
+    look: state.look,
+    regions: regionsOf(baked.mesh, {
+      source: levels[0],
+      figureTriangles: state.stats.pair?.figureTriangles,
+      sizing: state.stats.sizing,
+      kind: state.kind ?? undefined,
+    }),
+    release: () => made?.dispose(),
+  };
+}
+
+const paintTool = createPaintTool(
+  document.querySelector<HTMLElement>('#paint-view')!,
+  miniForPainting,
+  (painting) => {
+    state.painting = painting;
+  },
+);
+
 const devThumbnail = document.querySelector<HTMLImageElement>('#dev-thumbnail');
 const devKind = document.querySelector<HTMLElement>('#dev-kind');
 
@@ -1654,6 +1709,14 @@ document.body.addEventListener('drop', (event) => {
 
 window.__mt = {
   state,
+  painting: {
+    ...paintTool,
+    open: (paint) => paintTool.open(paint && baked ? testPaintAlbedo(baked.mesh, paint) : null),
+    testPaint: (paint) => {
+      if (!baked) throw new Error('No baked mini');
+      return testPaintAlbedo(baked.mesh, paint);
+    },
+  },
   loadDemo: () => {
     sources = [{ name: 'demo.stl', read: async () => demoStl() }];
     choices = noChoices();
