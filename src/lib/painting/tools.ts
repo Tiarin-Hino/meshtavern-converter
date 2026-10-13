@@ -1,4 +1,4 @@
-import { TOOL_IDS, type BrushSettings, type ToolId } from '../pipeline/brush';
+import type { BrushSettings, ToolId } from '../pipeline/brush';
 import {
   AIR_DIR_EDGE,
   AIR_DIR_SOFTNESS,
@@ -28,7 +28,7 @@ export interface ToolPass {
   /**
    * The body of `float mtMask( float cavity, float occlusion, vec3 normal )`: cavity −1 crease …
    * +1 edge (the detail texture's, as the material decodes it), occlusion 0 buried … 1 open, the
-   * object-space normal (not necessarily of unit length). It may read the uniforms `uReach` (the
+   * object-space normal (not necessarily of unit length). It may read the uniforms `uPressure` (the
    * brush's `opacity`) and `uDirection` (the brush's `direction` in xyz, w 1, or w 0 for none).
    * Written so that it is also JavaScript once `float` is `let` (tools.test.ts).
    */
@@ -58,7 +58,7 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
   dry: {
     blend: 'max',
     composite: 'over',
-    mask: `float threshold = ${f(DRY_THRESHOLD)} * ( 1.0 - uReach );
+    mask: `float threshold = ${f(DRY_THRESHOLD)} * ( 1.0 - uPressure );
   return smoothstep( threshold, threshold + ${f(DRY_SOFTNESS)}, cavity );`,
   },
   airbrush: {
@@ -71,11 +71,9 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
   },
 };
 
-/** The tools this build paints with: all of them since #128. */
-export const BUILT_TOOLS: readonly ToolId[] = TOOL_IDS.filter((tool) => tool in TOOL_PASSES);
-
+/** A tool's pass; a name that is no tool (a string from a consumer's JavaScript) is refused. */
 export function toolPass(tool: ToolId): ToolPass {
-  const pass = TOOL_PASSES[tool] as ToolPass | undefined;
+  const pass = Object.hasOwn(TOOL_PASSES, tool) ? TOOL_PASSES[tool] : undefined;
   if (!pass) throw new RangeError(`There is no ${String(tool)} tool`);
   return pass;
 }

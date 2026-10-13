@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BRUSH, TOOL_IDS, toolMask, type BrushSettings } from '../pipeline/brush';
 import { AIR_FLOW_GAIN, AIR_HARDNESS, DRY_OPACITY } from '../pipeline/look';
-import { BUILT_TOOLS, dabGain, strokeOpacity, TOOL_PASSES, toolPass } from './tools';
+import { dabGain, strokeOpacity, TOOL_PASSES, toolPass } from './tools';
 
 // The masks' GLSL and their CPU twin `toolMask` (design note §6). The GLSL is run as JavaScript:
 // `float` becomes `let`, and the few GLSL functions it uses are given, so the shader's text and
@@ -28,7 +28,7 @@ function maskAsJs(
     'cavity',
     'occlusion',
     'normal',
-    'uReach',
+    'uPressure',
     'uDirection',
     ...Object.keys(glsl),
     body,
@@ -50,7 +50,7 @@ describe('the tools', () => {
       [0.98, 0.15, 0],
       [0, 0.45, 0.02],
     ];
-    for (const tool of BUILT_TOOLS) {
+    for (const tool of TOOL_IDS) {
       const gpu = maskAsJs(TOOL_PASSES[tool].mask);
       for (const cavity of [-1, -0.6, -0.1, 0, 0.05, 0.15, 0.3, 0.5, 0.75, 1])
         for (const occlusion of [0, 0.3, 0.7, 1])
@@ -66,8 +66,7 @@ describe('the tools', () => {
     }
   });
 
-  it('builds every tool', () => {
-    expect([...BUILT_TOOLS]).toEqual([...TOOL_IDS]);
+  it('refuses a name that is no tool', () => {
     expect(toolPass('eraser').composite).toBe('erase');
     expect(toolPass('flat').blend).toBe('max');
     expect(() => toolPass('glaze' as never)).toThrow(RangeError);

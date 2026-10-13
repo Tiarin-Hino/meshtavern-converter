@@ -30,7 +30,7 @@ export interface BrushSettings {
   sizeMm: number;
   /** 0 soft … 1 hard: where the dab's falloff begins, as a share of its radius. */
   hardness: number;
-  /** 0–1: the stroke's opacity (flat, eraser, fill), strength (wash), flow (ink, airbrush), or the dry brush's reach. */
+  /** 0–1: the stroke's opacity (flat, eraser, fill), strength (wash), flow (ink, airbrush), or the dry brush's pressure. */
   opacity: number;
   /** The fill's tolerance, 0 strict … 1 loose, scaling both bounds (§7.1). */
   tolerance: number;

@@ -231,7 +231,7 @@ uniform sampler2D uAtlas;
 uniform sampler2D uDetail;
 uniform vec3 uColour;
 uniform float uOpacity;
-uniform float uReach;
+uniform float uPressure;
 uniform vec4 uDirection;
 out vec4 fragColor;
 
@@ -438,7 +438,7 @@ export class PaintPasses {
     uDetail: { value: null as THREE.Texture | null },
     uColour: { value: new THREE.Vector3() },
     uOpacity: { value: 1 },
-    uReach: { value: 1 },
+    uPressure: { value: 1 },
     uDirection: { value: new THREE.Vector4() },
   };
 
@@ -614,7 +614,7 @@ export class PaintPasses {
     }
     this.compositeUniforms.uColour.value.set(...colour);
     this.compositeUniforms.uOpacity.value = Math.max(0, Math.min(1, strokeOpacity(tool, brush)));
-    this.compositeUniforms.uReach.value = Math.max(0, Math.min(1, brush.opacity));
+    this.compositeUniforms.uPressure.value = Math.max(0, Math.min(1, brush.opacity));
     const direction = unitDirection(brush.direction);
     if (direction) this.compositeUniforms.uDirection.value.set(...direction, 1);
     else this.compositeUniforms.uDirection.value.set(0, 0, 0, 0);

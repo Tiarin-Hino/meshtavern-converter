@@ -5,6 +5,7 @@ import {
   DEFAULT_BRUSH,
   MOUSE_PRESSURE,
   PAINT_SIZE,
+  TOOL_IDS,
   spaceDabs,
   unitDirection,
   type BrushSettings,
@@ -45,7 +46,7 @@ import {
 } from './passes';
 import { KEYFRAME_EVERY, PaintHistory, UNDO_STEPS } from './history';
 import { PaintScene } from './scene';
-import { BUILT_TOOLS, toolPass } from './tools';
+import { toolPass } from './tools';
 
 export {
   DABS_PER_PASS,
@@ -330,7 +331,7 @@ class Painting implements PaintingView {
     });
     this.perf = NO_PERF;
     this.scene.show(shown, [size.x, size.y, size.z]);
-    this.passes.warm(this.scene.strokeCamera(), BUILT_TOOLS);
+    this.passes.warm(this.scene.strokeCamera(), TOOL_IDS);
     await this.scene.nextFrame();
     this.emit();
   }
