@@ -1,0 +1,238 @@
+import type { Vec3 } from './base';
+
+/**
+ * The painting engine's data (issue #127, design note `docs/design/painting-engine.md` §4): what a
+ * stroke and a fill are, as plain numbers a consumer can keep, and the parts of the engine that
+ * need no GPU: spacing dabs along a stroke, the owner map that fills the gutter, the tools' masks.
+ * No DOM, no three.js: the view (`src/lib/painting/`) draws with these, and Node tests them.
+ */
+
+/** The paint's side in texels, whatever the detail texture's size (#127). _(proposal)_ */
+export const PAINT_SIZE = 1024;
+
+/** The tools, in the order a panel offers them. `wash` … `airbrush` are #128's. */
+export const TOOL_IDS = ['flat', 'fill', 'eraser', 'wash', 'ink', 'dry', 'airbrush'] as const;
+export type ToolId = (typeof TOOL_IDS)[number];
+
+/** Every slider there is; each tool reads the ones it has (§6). The consumer shows only those. */
+export interface BrushSettings {
+  /** The brush's diameter on the surface, in mm. */
+  sizeMm: number;
+  /** 0 soft … 1 hard: where the dab's falloff begins, as a share of its radius. */
+  hardness: number;
+  /** 0–1: the stroke's opacity (flat, eraser, fill), strength (wash), flow (ink, airbrush), or the dry brush's reach. */
+  opacity: number;
+  /** The fill's tolerance, 0 strict … 1 loose, scaling both bounds (§7.1). */
+  tolerance: number;
+  /** The airbrush's direction mask: a unit vector in mesh space it sprays from, or null for none (#128). */
+  direction: Vec3 | null;
+}
+
+/** _(proposal)_ */
+export const DEFAULT_BRUSH: BrushSettings = {
+  sizeMm: 2,
+  hardness: 0.8,
+  opacity: 1,
+  tolerance: 0.5,
+  direction: null,
+};
+
+/** Dabs along a stroke are at most this far apart, as a share of the brush's diameter. _(proposal)_ */
+export const DAB_SPACING = 0.25;
+
+/** The camera a stroke was painted from: what decides which texels it reached (§5.2). */
+export interface StrokeCamera {
+  position: Vec3;
+  target: Vec3;
+  fovDeg: number;
+  near: number;
+  far: number;
+  /** The drawing buffer's size in device pixels: the depth map's size. */
+  viewport: [number, number];
+}
+
+export interface PaintStroke {
+  kind: 'stroke';
+  tool: Exclude<ToolId, 'fill'>;
+  /** sRGB hex, as the look's base. */
+  colour: string;
+  brush: BrushSettings;
+  camera: StrokeCamera;
+  /** Four numbers a dab: x, y, z on the surface in mesh mm, and the pointer's pressure (0.5 for a mouse). */
+  dabs: number[];
+}
+
+/** Where a fill starts: a triangle under the finger, or a ready region (§7.2). */
+export type FillSeed =
+  { kind: 'picked'; triangle: number; point: Vec3 } | { kind: 'base' } | { kind: 'figure' };
+
+export interface PaintFill {
+  kind: 'fill';
+  tool: 'fill';
+  colour: string;
+  /** `opacity` and `tolerance` are read; the region is found again from the seed on replay. */
+  brush: BrushSettings;
+  seed: FillSeed;
+}
+
+/** One step of the history: what undo takes back and redo puts again. */
+export type PaintStep = PaintStroke | PaintFill;
+
+/** The pressure recorded for a pointer that reports none (a mouse). */
+export const MOUSE_PRESSURE = 0.5;
+
+/** A point on the surface where a pointer sample hit the mesh, or null where it missed (a lift). */
+export type DabHit = { point: Vec3; pressure: number } | null;
+
+/**
+ * The dabs of a stroke, four numbers each (x, y, z, pressure), from the pointer's hits on the
+ * surface (§4): the first hit of a run is a dab, and along the straight line to each next hit a
+ * dab is laid every `spacingMm`, the hit itself last when the remainder is shorter, so two
+ * consecutive dabs are never further apart than the spacing. A miss (null) lifts the brush:
+ * nothing is laid across it, and the next hit starts a new run. Pressure is interpolated.
+ *
+ * `from` continues a stroke already under way: the hits are the new samples, `from` the last
+ * dab laid (its four numbers), so a stroke spaced in pieces lays the dabs it would whole.
+ */
+export function spaceDabs(
+  hits: readonly DabHit[],
+  spacingMm: number,
+  from: readonly number[] | null = null,
+): number[] {
+  if (!(spacingMm > 0)) throw new RangeError('The dab spacing must be positive');
+  const dabs: number[] = [];
+  let last: number[] | null = from ? [...from] : null;
+  for (const hit of hits) {
+    if (!hit) {
+      last = null;
+      continue;
+    }
+    const [x, y, z] = hit.point;
+    if (!last) {
+      dabs.push(x, y, z, hit.pressure);
+      last = [x, y, z, hit.pressure];
+      continue;
+    }
+    const [lx, ly, lz, lp] = last as [number, number, number, number];
+    const length = Math.hypot(x - lx, y - ly, z - lz);
+    if (length === 0) continue;
+    const steps = Math.ceil(length / spacingMm);
+    for (let k = 1; k <= steps; k++) {
+      const t = k / steps;
+      dabs.push(
+        lx + (x - lx) * t,
+        ly + (y - ly) * t,
+        lz + (z - lz) * t,
+        lp + (hit.pressure - lp) * t,
+      );
+    }
+    last = [x, y, z, hit.pressure];
+  }
+  return dabs;
+}
+
+/** What the atlas says of a texel (§5.1): in an island, crossed by an island's border, or the gutter. */
+export const ISLAND_TEXEL = 2;
+export const BORDER_TEXEL = 1;
+export const GUTTER_TEXEL = 0;
+/** An owner map's entry for a texel no island's paint reaches. */
+export const NO_OWNER = -1;
+
+const NEIGHBOURS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
+
+/**
+ * The owner map (§5.1, §5.4): for every texel of a `size` square atlas the texel it takes its
+ * paint from. A texel of an island (`ISLAND_TEXEL`) or crossed by an island's border
+ * (`BORDER_TEXEL`) owns itself. A gutter texel next to one (ring 1) takes that neighbour, a texel
+ * inside an island before a border texel; a gutter texel of ring k > 1 takes the owner of a
+ * neighbour of ring k − 1, so every owner is an island's own texel, never a gutter texel. Texels
+ * beyond `rings` own nothing (`NO_OWNER`). Neighbours are the four sides, tried in a fixed order.
+ */
+export function ownerMap(mask: Uint8Array, size: number, rings: number): Int32Array {
+  if (mask.length !== size * size) throw new RangeError(`A ${size}² mask is ${size * size} texels`);
+  const owner = new Int32Array(size * size).fill(NO_OWNER);
+  for (let texel = 0; texel < owner.length; texel++)
+    if (mask[texel] !== GUTTER_TEXEL) owner[texel] = texel;
+  let ring: number[] = [];
+  // Ring 1: the islands' own texels first, then their borders.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const texel = y * size + x;
+      if (owner[texel] !== NO_OWNER) continue;
+      let border = NO_OWNER;
+      let inside = NO_OWNER;
+      for (const [dx, dy] of NEIGHBOURS) {
+        const sx = x + dx;
+        const sy = y + dy;
+        if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
+        const from = sy * size + sx;
+        if (mask[from] === ISLAND_TEXEL) {
+          inside = from;
+          break;
+        }
+        if (mask[from] === BORDER_TEXEL && border === NO_OWNER) border = from;
+      }
+      const chosen = inside !== NO_OWNER ? inside : border;
+      if (chosen !== NO_OWNER) ring.push(texel, chosen);
+    }
+  }
+  for (let k = 0; k < ring.length; k += 2) owner[ring[k]!] = ring[k + 1]!;
+  // Rings 2 … : a neighbour of the ring before, its owner taken.
+  for (let pass = 1; pass < rings && ring.length > 0; pass++) {
+    const previous = new Set<number>();
+    for (let k = 0; k < ring.length; k += 2) previous.add(ring[k]!);
+    const next: number[] = [];
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const texel = y * size + x;
+        if (owner[texel] !== NO_OWNER) continue;
+        for (const [dx, dy] of NEIGHBOURS) {
+          const sx = x + dx;
+          const sy = y + dy;
+          if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
+          const from = sy * size + sx;
+          if (!previous.has(from)) continue;
+          next.push(texel, owner[from]!);
+          break;
+        }
+      }
+    }
+    for (let k = 0; k < next.length; k += 2) owner[next[k]!] = next[k + 1]!;
+    ring = next;
+  }
+  return owner;
+}
+
+/**
+ * How much of a tool's paint lands on a texel, 0–1 (§6): the CPU twin of the mask GLSL in
+ * `src/lib/painting/tools.ts`, which `tools.test.ts` keeps in step. `cavity` is the detail
+ * texture's, decoded as the material does (−1 crease … +1 edge), `occlusion` the vertex
+ * occlusion (0 buried … 1 open), `normal` the detail texture's object-space normal. The flat
+ * brush, the eraser and the fill paint every texel they cover; the hobby brushes of #128 read
+ * the surface.
+ */
+export function toolMask(
+  tool: ToolId,
+  cavity: number,
+  occlusion: number,
+  normal: Vec3,
+  brush: BrushSettings,
+): number {
+  void cavity;
+  void occlusion;
+  void normal;
+  void brush;
+  switch (tool) {
+    case 'flat':
+    case 'eraser':
+    case 'fill':
+      return 1;
+    default:
+      throw new Error(`The ${tool} tool is not built yet (#128)`);
+  }
+}

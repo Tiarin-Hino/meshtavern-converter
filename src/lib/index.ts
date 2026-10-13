@@ -136,6 +136,23 @@ export {
 } from './pipeline/look';
 // Paint (issue #125): the far and close levels take the table level's paint per vertex.
 export { PAINT_REACH_MM, paintAtVertices, type Albedo } from './pipeline/paint';
+// The painting engine's data (issue #127): strokes and fills as plain numbers a consumer can keep,
+// and the parts that need no GPU. The view that paints is ./painting.ts.
+export {
+  PAINT_SIZE,
+  TOOL_IDS,
+  DEFAULT_BRUSH,
+  DAB_SPACING,
+  spaceDabs,
+  toolMask,
+  type ToolId,
+  type BrushSettings,
+  type PaintStep,
+  type PaintStroke,
+  type PaintFill,
+  type StrokeCamera,
+  type FillSeed,
+} from './pipeline/brush';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';
