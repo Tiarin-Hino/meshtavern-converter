@@ -3,7 +3,7 @@ title: The page is published before the table, with the painter on it
 date: 2026-10-13
 phase: 1
 issues: [47]
-prs: []
+prs: [140]
 topics: [planning, page, painting]
 ---
 
