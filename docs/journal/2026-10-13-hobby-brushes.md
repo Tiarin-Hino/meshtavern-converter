@@ -3,7 +3,7 @@ title: The hobby brushes
 date: 2026-10-13
 phase: 2
 issues: [128]
-prs: []
+prs: [132]
 topics: [look, textures, testing, performance]
 ---
 
