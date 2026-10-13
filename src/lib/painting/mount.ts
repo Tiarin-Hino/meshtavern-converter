@@ -9,12 +9,18 @@ import {
   type BrushSettings,
   type DabHit,
   type PaintRegions,
+  type FillSeed,
+  type PaintFill,
   type PaintStep,
   type PaintStroke,
   type ToolId,
 } from '../pipeline/brush';
 import { TriangleBvh } from '../pipeline/bvh';
-import { triangleAdjacency, type TriangleAdjacency } from '../pipeline/fill';
+import {
+  fillRegion as floodRegion,
+  triangleAdjacency,
+  type TriangleAdjacency,
+} from '../pipeline/fill';
 import { DEFAULT_LOOK, parseHexColour, type Look } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
@@ -346,8 +352,27 @@ class Painting implements PaintingView {
     this.emit();
   }
 
-  fillRegion(): Promise<void> {
-    return Promise.reject(new Error('The fill is built in a later step'));
+  fillRegion(region: 'base' | 'figure'): Promise<void> {
+    if (!this.opened?.regions)
+      return Promise.reject(new RangeError('This mini has no ready regions to fill'));
+    return this.fill({ kind: region });
+  }
+
+  /** A fill (§7): one step, its region found from its seed, applied as a replay would. */
+  private async fill(seed: FillSeed): Promise<void> {
+    this.commitLive();
+    if (!this.opened || !this.timeline) return;
+    const step: PaintFill = {
+      kind: 'fill',
+      tool: 'fill',
+      colour: this.colour,
+      brush: { ...this.brush },
+      seed,
+    };
+    this.replay(step);
+    this.timeline.push(step);
+    this.emit();
+    await this.scene.nextFrame();
   }
 
   async undo(): Promise<void> {
@@ -525,9 +550,20 @@ class Painting implements PaintingView {
    * own camera at its own viewport and draws all its dabs; the result is committed.
    */
   private replay(step: PaintStep): void {
-    if (step.kind !== 'stroke') throw new Error('A fill is replayed in a later step');
-    this.passes.beginStroke(step.camera);
-    this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
+    const opened = this.opened;
+    if (!opened) return;
+    if (step.kind === 'stroke') {
+      this.passes.beginStroke(step.camera);
+      this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
+    } else {
+      const triangles = floodRegion(opened.mesh, step.seed, {
+        tolerance: step.brush.tolerance,
+        regions: opened.regions,
+        adjacency: opened.adjacency,
+      });
+      this.passes.clearStroke();
+      this.passes.drawRegion(opened.mesh, triangles);
+    }
     this.passes.composite(step.tool, parseHexColour(step.colour), step.brush.opacity);
     this.passes.commit();
   }
@@ -618,11 +654,9 @@ class Painting implements PaintingView {
     style.height = `${size}px`;
   }
 
-  /** A tap with the fill tool (§9): built in a later step. */
+  /** A tap with the fill tool (§9): the region the flood finds from the triangle under it. */
   private fillAt(triangle: number, point: Vec3): Promise<void> {
-    void triangle;
-    void point;
-    return Promise.resolve();
+    return this.fill({ kind: 'picked', triangle, point });
   }
 }
 

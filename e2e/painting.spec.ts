@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { encodeBinaryStl } from '../src/lib/dev';
-import { generateFigure, generatePlate } from '../src/regression/shapes';
+import {
+  generateFigure,
+  generatePlate,
+  generatePuddleFigure,
+  generateRecessBase,
+} from '../src/regression/shapes';
 
 /**
  * The painting engine (#127, design note `docs/design/painting-engine.md` §13), through the team's
@@ -63,15 +68,17 @@ async function strokeAndLook(
     camera: [number, number, number];
     along: [number, number, number][];
     sizeMm: number;
+    /** The brush, or the eraser on the paint the view is open with. */
+    tool?: 'flat' | 'eraser';
     lookFrom?: [number, number, number];
     grid: { from: [number, number, number]; to: [number, number, number]; steps: number };
   },
 ): Promise<Seen[]> {
-  return page.evaluate(async ({ camera, along, sizeMm, lookFrom, grid }) => {
+  return page.evaluate(async ({ camera, along, sizeMm, tool = 'flat', lookFrom, grid }) => {
     const painting = window.__mt.painting;
-    await painting.open();
+    if (tool === 'flat') await painting.open();
     const view = painting.view();
-    view.setTool('flat');
+    view.setTool(tool);
     view.setBrush({ sizeMm, hardness: 0.8, opacity: 1 });
     view.setColour('#ff0000');
     view.setCamera(...camera);
@@ -114,16 +121,19 @@ async function strokeAndLook(
   }, options);
 }
 
-test('paints a stroke where its dabs are and leaves the far side bare', async ({ page }) => {
-  await convert(page, generateFigure(true));
-  // The figure's chest, 14 mm up, its front 4 mm out in +z; the stroke across it at a 2 mm brush.
-  const along: [number, number, number][] = [-2, -1, 0, 1, 2].map((x) => [x, 14, 6]);
-  const front = await strokeAndLook(page, {
+/** A stroke across the figure's chest, 14 mm up, its front 4 mm out in +z, at a 2 mm brush. */
+const strokeAndLookWith = (page: Page, tool: 'flat' | 'eraser'): Promise<Seen[]> =>
+  strokeAndLook(page, {
     camera: [0, 5, 1.6],
-    along,
+    along: [-2, -1, 0, 1, 2].map((x) => [x, 14, 6]),
     sizeMm: 2,
+    tool,
     grid: { from: [-3.5, 11.5, 6], to: [3.5, 16.5, 6], steps: 24 },
   });
+
+test('paints a stroke where its dabs are and leaves the far side bare', async ({ page }) => {
+  await convert(page, generateFigure(true));
+  const front = await strokeAndLookWith(page, 'flat');
   const near = front.filter((seen) => seen.distance < 0.7);
   const far = front.filter((seen) => seen.distance > 1.15);
   expect(near.length).toBeGreaterThan(20);
@@ -536,4 +546,125 @@ test('keeps at least UNDO_STEPS strokes to undo', async ({ page }) => {
   expect(outcome.undone).toBeGreaterThanOrEqual(50);
   expect(outcome.undone).toBeLessThan(65);
   expect(outcome.history).toBe(65 - outcome.undone);
+});
+
+/** The paint's alpha under canvas points of `points` (on the mini, from the camera given), and the points hit. */
+async function alphasAt(
+  page: Page,
+  camera: [number, number, number],
+  points: [number, number, number][],
+): Promise<{ alpha: number; y: number }[]> {
+  return page.evaluate(
+    async ({ camera, points }) => {
+      const view = window.__mt.painting.view();
+      const { data } = await view.paint();
+      view.setCamera(...camera);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return points.flatMap((point) => {
+        const hit = view.texelAt(...view.screenOf(point));
+        if (!hit) return [];
+        const [x, y] = hit.texel;
+        return [{ alpha: data[(y * 1024 + x) * 4 + 3]!, y: hit.point[1] }];
+      });
+    },
+    { camera, points },
+  );
+}
+
+/** Points on a ring around the vertical axis at height `y`, `r` out. */
+const ring = (r: number, y: number, count = 24): [number, number, number][] =>
+  Array.from({ length: count }, (_, k) => [
+    r * Math.cos((2 * Math.PI * k) / count),
+    y,
+    r * Math.sin((2 * Math.PI * k) / count),
+  ]);
+
+test('fills the figure from a tap with the fill tool, and not its base', async ({ page }) => {
+  await convert(page, generateFigure(true));
+  await page.evaluate(() => window.__mt.painting.open());
+  const path = await chestPath(page);
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  await page.evaluate(() => {
+    const view = window.__mt.painting.view();
+    view.setTool('fill');
+    view.setColour('#3060ff');
+  });
+  await page.mouse.click(box.x + path[15]![0], box.y + path[15]![1]);
+  await page.waitForFunction(() => window.__mt.painting.view().state.steps === 1);
+  const history = await page.evaluate(() => window.__mt.painting.view().history());
+  expect(history).toHaveLength(1);
+  expect(history[0]!.kind).toBe('fill');
+  // The chest, from the front: filled. The disc's top around the feet, from above: bare.
+  const chest = await alphasAt(
+    page,
+    [0, 5, 1.6],
+    Array.from({ length: 25 }, (_, k) => [-2 + (k % 5), 11 + Math.floor(k / 5), 6]),
+  );
+  expect(chest.length).toBeGreaterThan(20);
+  expect(chest.filter((seen) => seen.alpha !== 255)).toEqual([]);
+  const disc = await alphasAt(page, [0, 70, 1], [...ring(8, 3, 16), ...ring(11, 3, 16)]);
+  expect(disc.length).toBe(32);
+  expect(disc.filter((seen) => seen.alpha !== 0)).toEqual([]);
+});
+
+test('fills the base of a pair as a ready region, and not the figure', async ({ page }) => {
+  await page.goto('/?dev&ask=off');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await page.setInputFiles('#file', [
+    file('figure.stl', generatePuddleFigure(12)),
+    file('recess-base.stl', generateRecessBase()),
+  ]);
+  await page.waitForFunction(
+    () => window.__mt.state.stats?.pair != null && !window.__mt.state.busy,
+    undefined,
+    {
+      timeout: 180_000,
+    },
+  );
+  await page.evaluate(() => window.__mt.painting.open());
+  const state = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    view.setColour('#806040');
+    await view.fillRegion('base');
+    return view.state;
+  });
+  expect(state.regions).toEqual(['base', 'figure']);
+  expect(state.steps).toBe(1);
+  // The base's top outside the recess (4 mm up, 7–16 mm out): filled. The figure's head: bare.
+  const seen = await alphasAt(page, [0, 89, 1], [...ring(10, 4, 16), ...ring(14, 4, 16)]);
+  // From above, the figure's arms hide a few of the inner ring's points.
+  const base = seen.filter((point) => point.y < 4.5);
+  expect(base.length).toBeGreaterThan(24);
+  expect(base.filter((point) => point.alpha !== 255)).toEqual([]);
+  const head = await alphasAt(
+    page,
+    [0, 5, 1.6],
+    Array.from({ length: 9 }, (_, k) => [-1 + (k % 3), 27 + Math.floor(k / 3), 6]),
+  );
+  expect(head.length).toBeGreaterThan(5);
+  expect(head.filter((seen) => seen.alpha !== 0)).toEqual([]);
+  // Undone, the base is bare; redone, the fill is found again from its seed, the same bytes.
+  const replayed = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const before = (await view.paint()).data;
+    await view.undo();
+    const bare = (await view.paint()).data.every((value, k) => k % 4 !== 3 || value === 0);
+    await view.redo();
+    const after = (await view.paint()).data;
+    return { bare, same: after.every((value, k) => value === before[k]) };
+  });
+  expect(replayed).toEqual({ bare: true, same: true });
+});
+
+test('erases back to bare where the eraser goes, and only there', async ({ page }) => {
+  await convert(page, generateFigure(true));
+  await page.evaluate(() => window.__mt.painting.open('all'));
+  const front = await strokeAndLookWith(page, 'eraser');
+  const near = front.filter((seen) => seen.distance < 0.7);
+  const far = front.filter((seen) => seen.distance > 1.15);
+  expect(near.length).toBeGreaterThan(20);
+  expect(far.length).toBeGreaterThan(100);
+  expect(near.filter((seen) => seen.alpha !== 0)).toEqual([]);
+  expect(far.filter((seen) => seen.alpha !== 255)).toEqual([]);
+  expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
 });
