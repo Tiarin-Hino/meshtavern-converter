@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test as base, type Page } from '@playwright/test';
 import { encodeBinaryStl } from '../src/lib/dev';
 import {
   generateFigure,
@@ -32,10 +32,169 @@ async function convert(page: Page, soup: Float32Array, name = 'figure.stl'): Pro
   expect(await page.evaluate(() => window.__mt.state.baked)).not.toBeNull();
 }
 
+/**
+ * The generated figure on its base, converted once per worker and shared by the tests that paint
+ * it: each conversion bakes and compresses in software rendering, and thirteen of them loaded the
+ * CI runner enough to time out a test of another file running beside them. Each test gets the
+ * page with the view closed and its tool, brush, colour, camera and navigation as a new view has
+ * them.
+ */
+const test = base.extend<{ figurePage: Page }, { figure: Page }>({
+  figure: [
+    async ({ browser }, use, workerInfo) => {
+      const { baseURL, viewport } = workerInfo.project.use;
+      const page = await browser.newPage({ baseURL, viewport });
+      await convert(page, generateFigure(true));
+      await use(page);
+      await page.close();
+    },
+    { scope: 'worker', timeout: 300_000 },
+  ],
+  figurePage: async ({ figure }, use) => {
+    await figure.evaluate(async () => {
+      const painting = window.__mt.painting;
+      await painting.open();
+      const view = painting.view();
+      view.setTool('flat');
+      view.setBrush({ sizeMm: 2, hardness: 0.8, opacity: 1, tolerance: 0.5, direction: null });
+      view.setColour('#b03030');
+      view.setNavigating(false);
+      view.setCamera(34, 22, 1);
+      painting.close();
+    });
+    await use(figure);
+  },
+});
+
 test.describe.configure({ timeout: 300_000 });
 
-test('gives back the paint it was opened with, byte for byte', async ({ page }) => {
-  await convert(page, generateFigure(true));
+// The tests with a mini of their own come first: once the shared figure's page exists, it keeps
+// drawing beside them and slows them down severalfold in software rendering.
+
+test('leaves a plate’s underside bare under a brush wider than the plate is thick', async ({
+  page,
+}) => {
+  // A 30 mm plate 2 mm thick, painted on its top at an 8 mm brush: the underside lies within the
+  // dab's sphere, but not in sight of the stroke's camera.
+  await convert(
+    page,
+    generatePlate(30, 2, 1, () => false),
+    'plate.stl',
+  );
+  // A bare plate has no base to stand on: it is laid flat, as its file has it, and 2 mm tall it
+  // would be guessed to be in inches.
+  await page.evaluate(() => window.__mt.setUp('+z'));
+  await page.evaluate(() => window.__mt.setSizing({ units: 'mm' }));
+  expect(await page.evaluate(() => window.__mt.state.stats!.sizeMm[1])).toBeCloseTo(2, 1);
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setBrush({ sizeMm: 8, hardness: 0.8, opacity: 1 });
+    view.setColour('#ff0000');
+    view.setCamera(0, 80, 1);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const top = view.texelAt(...view.screenOf([0, 2, 0]))!;
+    await view.stroke([top.point]);
+    const { data } = await view.paint();
+    const alphaAt = (hit: { texel: [number, number] }): number =>
+      data[(hit.texel[1] * 1024 + hit.texel[0]) * 4 + 3]!;
+    view.setCamera(0, -80, 1);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const under: number[] = [];
+    for (let i = -4; i <= 4; i++)
+      for (let j = -4; j <= 4; j++) {
+        const hit = view.texelAt(...view.screenOf([i * 0.5 + 0.25, 0, j * 0.5 + 0.25]));
+        if (hit && hit.point[1] < 0.1) under.push(alphaAt(hit));
+      }
+    return { top: [top.point[1], alphaAt(top)], under };
+  });
+  expect(outcome.top[0]).toBeCloseTo(2, 1);
+  expect(outcome.top[1]).toBe(255);
+  expect(outcome.under.length).toBe(81);
+  expect(outcome.under.filter((alpha) => alpha !== 0)).toEqual([]);
+});
+
+test.describe('on a phone', () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+
+  test('drops a finger’s stroke when a second finger arrives', async ({ page }) => {
+    await convert(page, generateFigure(true));
+    await page.evaluate(() => window.__mt.painting.open());
+    const path = await chestPath(page);
+    const box = (await page.locator('#paint-view canvas').boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: [number, number][]) =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: points.map(([x, y], id) => ({ x: box.x + x, y: box.y + y, id })),
+      });
+    // One finger across the chest: a stroke on the canvas.
+    await touch('touchStart', [path[0]!]);
+    for (const point of path.slice(1, 15)) await touch('touchMove', [point]);
+    await page.waitForFunction(() => window.__mt.painting.view().state.painting);
+    // A second finger above the first (the page's level buttons lie over the canvas's foot): the
+    // person meant to pinch.
+    const second: [number, number] = [path[14]![0], path[14]![1] - 80];
+    await touch('touchStart', [path[14]!, second]);
+    await touch('touchMove', [path[15]!, [second[0], second[1] + 20]]);
+    await touch('touchEnd', []);
+    await page.waitForFunction(() => !window.__mt.painting.view().state.painting);
+    expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(0);
+    expect((await paintNow(page)).painted).toBe(0);
+  });
+});
+
+test('fills the base of a pair as a ready region, and not the figure', async ({ page }) => {
+  await page.goto('/?dev&ask=off');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await page.setInputFiles('#file', [
+    file('figure.stl', generatePuddleFigure(12)),
+    file('recess-base.stl', generateRecessBase()),
+  ]);
+  await page.waitForFunction(
+    () => window.__mt.state.stats?.pair != null && !window.__mt.state.busy,
+    undefined,
+    {
+      timeout: 180_000,
+    },
+  );
+  await page.evaluate(() => window.__mt.painting.open());
+  const state = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    view.setColour('#806040');
+    await view.fillRegion('base');
+    return view.state;
+  });
+  expect(state.regions).toEqual(['base', 'figure']);
+  expect(state.steps).toBe(1);
+  // The base's top outside the recess (4 mm up, 7–16 mm out): filled. The figure's head: bare.
+  const seen = await alphasAt(page, [0, 89, 1], [...ring(10, 4, 16), ...ring(14, 4, 16)]);
+  // From above, the figure's arms hide a few of the inner ring's points.
+  const base = seen.filter((point) => point.y < 4.5);
+  expect(base.length).toBeGreaterThan(24);
+  expect(base.filter((point) => point.alpha !== 255)).toEqual([]);
+  const head = await alphasAt(
+    page,
+    [0, 5, 1.6],
+    Array.from({ length: 9 }, (_, k) => [-1 + (k % 3), 27 + Math.floor(k / 3), 6]),
+  );
+  expect(head.length).toBeGreaterThan(5);
+  expect(head.filter((seen) => seen.alpha !== 0)).toEqual([]);
+  // Undone, the base is bare; redone, the fill is found again from its seed, the same bytes.
+  const replayed = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const before = (await view.paint()).data;
+    await view.undo();
+    const bare = (await view.paint()).data.every((value, k) => k % 4 !== 3 || value === 0);
+    await view.redo();
+    const after = (await view.paint()).data;
+    return { bare, same: after.every((value, k) => value === before[k]) };
+  });
+  expect(replayed).toEqual({ bare: true, same: true });
+});
+
+test('gives back the paint it was opened with, byte for byte', async ({ figurePage: page }) => {
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     const given = painting.testPaint('x+');
@@ -55,9 +214,8 @@ test('gives back the paint it was opened with, byte for byte', async ({ page }) 
 });
 
 test('stays closed when closed while it opens, and the later of two opens wins', async ({
-  page,
+  figurePage: page,
 }) => {
-  await convert(page, generateFigure(true));
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
@@ -184,8 +342,9 @@ const strokeAndLookWith = (page: Page, tool: 'flat' | 'eraser'): Promise<Seen[]>
     grid: { from: [-3.5, 11.5, 6], to: [3.5, 16.5, 6], steps: 24 },
   });
 
-test('paints a stroke where its dabs are and leaves the far side bare', async ({ page }) => {
-  await convert(page, generateFigure(true));
+test('paints a stroke where its dabs are and leaves the far side bare', async ({
+  figurePage: page,
+}) => {
   const front = await strokeAndLookWith(page, 'flat');
   const near = front.filter((seen) => seen.distance < 0.7);
   const far = front.filter((seen) => seen.distance > 1.15);
@@ -214,52 +373,7 @@ test('paints a stroke where its dabs are and leaves the far side bare', async ({
   expect(back.filter((alpha) => alpha !== 0)).toEqual([]);
 });
 
-test('leaves a plate’s underside bare under a brush wider than the plate is thick', async ({
-  page,
-}) => {
-  // A 30 mm plate 2 mm thick, painted on its top at an 8 mm brush: the underside lies within the
-  // dab's sphere, but not in sight of the stroke's camera.
-  await convert(
-    page,
-    generatePlate(30, 2, 1, () => false),
-    'plate.stl',
-  );
-  // A bare plate has no base to stand on: it is laid flat, as its file has it, and 2 mm tall it
-  // would be guessed to be in inches.
-  await page.evaluate(() => window.__mt.setUp('+z'));
-  await page.evaluate(() => window.__mt.setSizing({ units: 'mm' }));
-  expect(await page.evaluate(() => window.__mt.state.stats!.sizeMm[1])).toBeCloseTo(2, 1);
-  const outcome = await page.evaluate(async () => {
-    const painting = window.__mt.painting;
-    await painting.open();
-    const view = painting.view();
-    view.setBrush({ sizeMm: 8, hardness: 0.8, opacity: 1 });
-    view.setColour('#ff0000');
-    view.setCamera(0, 80, 1);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    const top = view.texelAt(...view.screenOf([0, 2, 0]))!;
-    await view.stroke([top.point]);
-    const { data } = await view.paint();
-    const alphaAt = (hit: { texel: [number, number] }): number =>
-      data[(hit.texel[1] * 1024 + hit.texel[0]) * 4 + 3]!;
-    view.setCamera(0, -80, 1);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    const under: number[] = [];
-    for (let i = -4; i <= 4; i++)
-      for (let j = -4; j <= 4; j++) {
-        const hit = view.texelAt(...view.screenOf([i * 0.5 + 0.25, 0, j * 0.5 + 0.25]));
-        if (hit && hit.point[1] < 0.1) under.push(alphaAt(hit));
-      }
-    return { top: [top.point[1], alphaAt(top)], under };
-  });
-  expect(outcome.top[0]).toBeCloseTo(2, 1);
-  expect(outcome.top[1]).toBe(255);
-  expect(outcome.under.length).toBe(81);
-  expect(outcome.under.filter((alpha) => alpha !== 0)).toEqual([]);
-});
-
-test('paints both sides of a seam and the gutter beside each', async ({ page }) => {
-  await convert(page, generateFigure(true));
+test('paints both sides of a seam and the gutter beside each', async ({ figurePage: page }) => {
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     await painting.open();
@@ -367,9 +481,8 @@ async function chestPath(page: Page): Promise<[number, number][]> {
 }
 
 test('paints the same texels from a canvas path as from its points on the surface', async ({
-  page,
+  figurePage: page,
 }) => {
-  await convert(page, generateFigure(true));
   await page.evaluate(() => window.__mt.painting.open());
   const path = await chestPath(page);
   await page.evaluate(async (path) => {
@@ -399,8 +512,7 @@ test('paints the same texels from a canvas path as from its points on the surfac
   expect(fromPoints).toEqual(fromPath);
 });
 
-test('paints with the left button, orbits with the right', async ({ page }) => {
-  await convert(page, generateFigure(true));
+test('paints with the left button, orbits with the right', async ({ figurePage: page }) => {
   await page.evaluate(() => window.__mt.painting.open());
   const path = await chestPath(page);
   const box = (await page.locator('#paint-view canvas').boundingBox())!;
@@ -432,9 +544,8 @@ test('paints with the left button, orbits with the right', async ({ page }) => {
 });
 
 test('draws the brush’s ring under the pointer, and turns the mini instead while navigating', async ({
-  page,
+  figurePage: page,
 }) => {
-  await convert(page, generateFigure(true));
   await page.evaluate(() => window.__mt.painting.open());
   const path = await chestPath(page);
   const box = (await page.locator('#paint-view canvas').boundingBox())!;
@@ -475,40 +586,9 @@ test('draws the brush’s ring under the pointer, and turns the mini instead whi
   ).not.toBe(before);
 });
 
-test.describe('on a phone', () => {
-  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
-
-  test('drops a finger’s stroke when a second finger arrives', async ({ page }) => {
-    await convert(page, generateFigure(true));
-    await page.evaluate(() => window.__mt.painting.open());
-    const path = await chestPath(page);
-    const box = (await page.locator('#paint-view canvas').boundingBox())!;
-    const cdp = await page.context().newCDPSession(page);
-    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: [number, number][]) =>
-      cdp.send('Input.dispatchTouchEvent', {
-        type,
-        touchPoints: points.map(([x, y], id) => ({ x: box.x + x, y: box.y + y, id })),
-      });
-    // One finger across the chest: a stroke on the canvas.
-    await touch('touchStart', [path[0]!]);
-    for (const point of path.slice(1, 15)) await touch('touchMove', [point]);
-    await page.waitForFunction(() => window.__mt.painting.view().state.painting);
-    // A second finger above the first (the page's level buttons lie over the canvas's foot): the
-    // person meant to pinch.
-    const second: [number, number] = [path[14]![0], path[14]![1] - 80];
-    await touch('touchStart', [path[14]!, second]);
-    await touch('touchMove', [path[15]!, [second[0], second[1] + 20]]);
-    await touch('touchEnd', []);
-    await page.waitForFunction(() => !window.__mt.painting.view().state.painting);
-    expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(0);
-    expect((await paintNow(page)).painted).toBe(0);
-  });
-});
-
 test('undoes and redoes strokes to the same bytes, back to the paint as opened', async ({
-  page,
+  figurePage: page,
 }) => {
-  await convert(page, generateFigure(true));
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     const opened = painting.testPaint('x-');
@@ -572,8 +652,7 @@ test('undoes and redoes strokes to the same bytes, back to the paint as opened',
   expect(outcome.end).toEqual([2, 0]);
 });
 
-test('keeps at least UNDO_STEPS strokes to undo', async ({ page }) => {
-  await convert(page, generateFigure(true));
+test('keeps at least UNDO_STEPS strokes to undo', async ({ figurePage: page }) => {
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     await painting.open();
@@ -632,8 +711,9 @@ const ring = (r: number, y: number, count = 24): [number, number, number][] =>
     r * Math.sin((2 * Math.PI * k) / count),
   ]);
 
-test('fills the figure from a tap with the fill tool, and not its base', async ({ page }) => {
-  await convert(page, generateFigure(true));
+test('fills the figure from a tap with the fill tool, and not its base', async ({
+  figurePage: page,
+}) => {
   await page.evaluate(() => window.__mt.painting.open());
   const path = await chestPath(page);
   const box = (await page.locator('#paint-view canvas').boundingBox())!;
@@ -660,57 +740,7 @@ test('fills the figure from a tap with the fill tool, and not its base', async (
   expect(disc.filter((seen) => seen.alpha !== 0)).toEqual([]);
 });
 
-test('fills the base of a pair as a ready region, and not the figure', async ({ page }) => {
-  await page.goto('/?dev&ask=off');
-  await page.waitForFunction(() => window.__mt?.state.ready === true);
-  await page.setInputFiles('#file', [
-    file('figure.stl', generatePuddleFigure(12)),
-    file('recess-base.stl', generateRecessBase()),
-  ]);
-  await page.waitForFunction(
-    () => window.__mt.state.stats?.pair != null && !window.__mt.state.busy,
-    undefined,
-    {
-      timeout: 180_000,
-    },
-  );
-  await page.evaluate(() => window.__mt.painting.open());
-  const state = await page.evaluate(async () => {
-    const view = window.__mt.painting.view();
-    view.setColour('#806040');
-    await view.fillRegion('base');
-    return view.state;
-  });
-  expect(state.regions).toEqual(['base', 'figure']);
-  expect(state.steps).toBe(1);
-  // The base's top outside the recess (4 mm up, 7–16 mm out): filled. The figure's head: bare.
-  const seen = await alphasAt(page, [0, 89, 1], [...ring(10, 4, 16), ...ring(14, 4, 16)]);
-  // From above, the figure's arms hide a few of the inner ring's points.
-  const base = seen.filter((point) => point.y < 4.5);
-  expect(base.length).toBeGreaterThan(24);
-  expect(base.filter((point) => point.alpha !== 255)).toEqual([]);
-  const head = await alphasAt(
-    page,
-    [0, 5, 1.6],
-    Array.from({ length: 9 }, (_, k) => [-1 + (k % 3), 27 + Math.floor(k / 3), 6]),
-  );
-  expect(head.length).toBeGreaterThan(5);
-  expect(head.filter((seen) => seen.alpha !== 0)).toEqual([]);
-  // Undone, the base is bare; redone, the fill is found again from its seed, the same bytes.
-  const replayed = await page.evaluate(async () => {
-    const view = window.__mt.painting.view();
-    const before = (await view.paint()).data;
-    await view.undo();
-    const bare = (await view.paint()).data.every((value, k) => k % 4 !== 3 || value === 0);
-    await view.redo();
-    const after = (await view.paint()).data;
-    return { bare, same: after.every((value, k) => value === before[k]) };
-  });
-  expect(replayed).toEqual({ bare: true, same: true });
-});
-
-test('erases back to bare where the eraser goes, and only there', async ({ page }) => {
-  await convert(page, generateFigure(true));
+test('erases back to bare where the eraser goes, and only there', async ({ figurePage: page }) => {
   await page.evaluate(() => window.__mt.painting.open('all'));
   const front = await strokeAndLookWith(page, 'eraser');
   const near = front.filter((seen) => seen.distance < 0.7);

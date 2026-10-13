@@ -186,7 +186,15 @@ export class PaintScene {
     };
   }
 
+  /**
+   * Puts the camera on its sphere (`placeCameraOnSphere`). An orbit's momentum is spent first:
+   * with damping on, the controls keep turning after a drag, and while no mini is shown the loop
+   * does not run to let it die away, so it would turn the camera away from where it was put.
+   */
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void {
+    this.controls.enableDamping = false;
+    this.controls.update();
+    this.controls.enableDamping = true;
     placeCameraOnSphere(this.camera, this.controls, this.size, azimuthDeg, elevationDeg, zoom);
     this.controls.update();
   }
