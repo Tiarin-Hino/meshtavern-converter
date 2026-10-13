@@ -34,6 +34,12 @@ describe('the icon modules', () => {
     }
   });
 
+  it('name in index.html only icons the page has', () => {
+    const names = [...read('index.html').matchAll(/data-icon="([^"]+)"/g)].map((m) => m[1]!);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(Object.keys(PAGE_ICONS), name).toContain(name);
+  });
+
   it('ship the package’s licence beside the theme', () => {
     expect(read('public/theme/LICENSE-Lucide.txt')).toBe(
       read('node_modules/lucide-static/LICENSE'),

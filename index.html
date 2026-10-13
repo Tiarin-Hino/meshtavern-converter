@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title data-copy="title"></title>
+    <!--
+      MeshTavern's theme (#143), served from this origin under /theme/ (public/theme/): the switch's
+      script first, so the page paints in the stored theme at once, then the roles and the
+      components; the page's own stylesheet comes after them in Vite's bundle.
+    -->
+    <script src="/theme/theme.js"></script>
+    <link rel="stylesheet" href="/theme/tokens.css" />
+    <link rel="stylesheet" href="/theme/components.css" />
   </head>
   <!--
     The page has five states (empty, converting, asking, done, error) set on body[data-state] by
@@ -28,6 +36,41 @@
         tabindex="-1"
         aria-label="STL file"
       />
+      <!--
+        Light, dark or the system's setting, as on the application's pages: theme.js shows the
+        switch, presses the current choice and keeps a new one in this browser's localStorage
+        (mt-theme), never sent. Without the script there is no switch. data-icon names the icon
+        start-up draws into an element (src/page/icons.ts).
+      -->
+      <div class="segmented" role="group" aria-label="Theme" data-theme-switch hidden>
+        <button
+          class="btn btn-sm btn-icon"
+          type="button"
+          data-theme-choice="light"
+          data-icon="sun"
+          aria-label="Light"
+          aria-pressed="false"
+          title="Light"
+        ></button>
+        <button
+          class="btn btn-sm btn-icon"
+          type="button"
+          data-theme-choice="dark"
+          data-icon="moon"
+          aria-label="Dark"
+          aria-pressed="false"
+          title="Dark"
+        ></button>
+        <button
+          class="btn btn-sm btn-icon"
+          type="button"
+          data-theme-choice="system"
+          data-icon="monitor"
+          aria-label="System"
+          aria-pressed="false"
+          title="System"
+        ></button>
+      </div>
     </header>
     <main id="stage">
       <div id="view">
@@ -131,7 +174,7 @@
             <label class="check"
               ><input id="look-enabled" type="checkbox" checked /> Primed and washed</label
             >
-            <label>Base coat <input id="look-base" type="color" value="#9aa0a8" /></label>
+            <label>Base coat <input id="look-base" type="color" /></label>
             <label
               >Shadows <input id="look-occlusion" type="range" min="0" max="1" step="0.05"
             /></label>
@@ -252,7 +295,10 @@
           <button type="button" data-count="0">Single mini</button>
         </div>
       </section>
-      <div id="drop-frame" aria-hidden="true" data-copy="dropOverlay"></div>
+      <!-- The words on the application's banner, so they read over any state in both themes (#143). -->
+      <div id="drop-frame" aria-hidden="true">
+        <span class="banner" data-icon="upload"><span data-copy="dropOverlay"></span></span>
+      </div>
     </main>
     <footer id="dev-tools" data-dev>
       <p id="perf"></p>

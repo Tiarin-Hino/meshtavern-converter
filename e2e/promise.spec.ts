@@ -13,8 +13,12 @@ import { generateBumpySheet, encodeBinaryStl } from '../src/lib/dev';
 const MARKER = 'MESHTAVERN-E2E-NEVER-UPLOADED';
 /** Longer URLs could smuggle data in the address. _(proposal)_ */
 const MAX_URL_LENGTH = 2048;
-/** Where the page's own code, workers and WebAssembly are served from. */
-const OWN_FILES = /^\/(assets|basis)\//;
+/**
+ * Where the page's own code, workers and WebAssembly are served from, and its theme: the table
+ * application's stylesheets and fonts under /theme/ (#143). A font is fetched when the first
+ * glyph of its face is drawn, which can be after the file is picked.
+ */
+const OWN_FILES = /^\/(assets|basis|theme)\//;
 
 interface Recorded {
   url: string;
@@ -104,5 +108,16 @@ test('no request carries the file: the promise on the page is true', async ({ pa
     }
   }
   expect(sockets).toBe(0);
+  // The theme and both of its fonts came from this origin, not a font service (#143).
+  const paths = new Set(requests.map((r) => new URL(r.url).pathname));
+  for (const path of [
+    '/theme/theme.js',
+    '/theme/tokens.css',
+    '/theme/components.css',
+    '/theme/fonts/inter-latin-variable.woff2',
+    '/theme/fonts/fraunces-latin-variable.woff2',
+  ]) {
+    expect(paths, path).toContain(path);
+  }
   await expect(page.getByText(COPY.promise).filter({ visible: true }).first()).toBeVisible();
 });

@@ -83,6 +83,7 @@ import {
   pageStateOf,
   type PageState,
 } from './page-state';
+import { ICONS, type IconName } from './icons';
 import { Viewer, type BakedMini, type Perf } from './viewer';
 
 interface AppState {
@@ -1839,6 +1840,11 @@ benchCopy.addEventListener('click', () => {
 // The wording is in COPY (page-state.ts); data-copy names the string an element shows.
 for (const element of document.querySelectorAll<HTMLElement>('[data-copy]')) {
   element.textContent = COPY[element.dataset.copy as keyof typeof COPY];
+}
+// The icons are inline SVG (icons.ts, #143); data-icon names the one an element starts with
+// (icons.test.ts checks every name in index.html).
+for (const element of document.querySelectorAll<HTMLElement>('[data-icon]')) {
+  element.insertAdjacentHTML('afterbegin', ICONS[element.dataset.icon as IconName] ?? '');
 }
 /** Screens up to this width get the phone layout; the same number is in the media query of style.css. _(proposal)_ */
 const PHONE_MAX_WIDTH_PX = 600;
