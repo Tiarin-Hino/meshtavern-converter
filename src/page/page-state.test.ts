@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  axisLabel,
+  describeLookHint,
   describeMini,
+  describePairHint,
+  describeSizeHint,
+  describeUpHint,
   describeOrientation,
   describePendingPlacement,
   describeProgress,
@@ -182,5 +187,40 @@ describe('source presets in the words (#100)', () => {
   it('spreads the words of the questions into the page’s own (#119)', () => {
     expect(COPY).toMatchObject(QUESTION_COPY);
     expect(COPY.title).toBe('MeshTavern Converter');
+  });
+});
+
+describe('the hints of Adjust’s disclosures (#144)', () => {
+  const orientation: Orientation = {
+    up: '+z',
+    method: 'base',
+    confidence: 0.9,
+    rotation: [0, 0, 0, 1],
+    tiltDeg: 0,
+    setDownDeg: 0,
+  };
+
+  it('name the axis as its button does, and how it was decided', () => {
+    expect(axisLabel('+z')).toBe('+Z');
+    expect(axisLabel('-y')).toBe('−Y');
+    expect(describeUpHint(orientation)).toBe('+Z, from the base');
+    expect(describeUpHint({ ...orientation, up: '+y', method: 'tallest' })).toBe(
+      '+Y, the taller way',
+    );
+    expect(describeUpHint({ ...orientation, method: 'manual' })).toBe('+Z, chosen');
+    expect(describeUpHint({ ...orientation, method: 'manual' }, true)).toBe('+Z, from the source');
+  });
+
+  it('name the size and the units, the look, and the files', () => {
+    expect(describeSizeHint({ size: 'medium', units: 'mm' })).toBe('Medium, mm');
+    expect(describeSizeHint({ size: 'large', units: 'in' })).toBe('Large, inches');
+    expect(describeLookHint('Grey primer')).toBe('Grey primer');
+    expect(describeLookHint(null)).toBe('Your own');
+    expect(describePairHint(null)).toBe('one file');
+    expect(describePairHint({ parts: [0], pairing: { baseFile: 1 } })).toBe('with its base');
+    expect(describePairHint({ parts: [0, 1, 2], pairing: { baseFile: null } })).toBe('3 parts');
+    expect(describePairHint({ parts: [0, 1], pairing: { baseFile: 2 } })).toBe(
+      '2 parts and a base',
+    );
   });
 });

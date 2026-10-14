@@ -70,8 +70,13 @@ import {
   type TurnAxis,
 } from '../lib/questions';
 import {
+  axisLabel,
   COPY,
+  describeLookHint,
   describeMini,
+  describePairHint,
+  describeSizeHint,
+  describeUpHint,
   describeOrientation,
   describeProgress,
   describePendingPlacement,
@@ -80,10 +85,13 @@ import {
   describeUnits,
   describeWrongFile,
   LEVEL_LABELS,
+  MESHTAVERN_URL,
   pageStateOf,
   type PageState,
 } from './page-state';
 import { ICONS, type IconName } from './icons';
+import { createDialog } from './dialog';
+import { createMenu } from './menu';
 import { Viewer, type BakedMini, type Perf } from './viewer';
 
 interface AppState {
@@ -353,15 +361,34 @@ const fileNameLine = document.querySelector<HTMLElement>('#file-name')!;
 const chooseButton = document.querySelector<HTMLButtonElement>('#choose')!;
 const chooseAgain = document.querySelector<HTMLButtonElement>('#choose-again')!;
 const miniSize = document.querySelector<HTMLElement>('#mini-size')!;
-const adjust = document.querySelector<HTMLDetailsElement>('#adjust')!;
+const panel = document.querySelector<HTMLElement>('#panel')!;
+const sheetHandle = document.querySelector<HTMLButtonElement>('#sheet-handle')!;
+/** Adjust's four disclosures (#144): Up and turn, Size, Look, Base and parts. */
+const disclosures = {
+  orient: document.querySelector<HTMLDetailsElement>('#orient')!,
+  sizing: document.querySelector<HTMLDetailsElement>('#sizing')!,
+  look: document.querySelector<HTMLDetailsElement>('#look')!,
+  pair: document.querySelector<HTMLDetailsElement>('#pair')!,
+};
+/** The hint at the right of each disclosure's summary: what it holds now. */
+const hints = Object.fromEntries(
+  [...document.querySelectorAll<HTMLElement>('[data-hint]')].map((hint) => [
+    hint.dataset.hint!,
+    hint,
+  ]),
+) as Record<keyof typeof disclosures, HTMLElement>;
 const status = document.querySelector<HTMLElement>('#status')!;
-const progressBar = document.querySelector<HTMLProgressElement>('#progress')!;
+const statusText = status.querySelector<HTMLElement>('.status-text')!;
+/** The application's progress component: a bar whose fill is the share of the steps done. */
+const progressBar = document.querySelector<HTMLElement>('#progress')!;
+const progressFill = progressBar.querySelector<HTMLElement>('span')!;
 const cancelButton = document.querySelector<HTMLButtonElement>('#cancel')!;
 const statsList = document.querySelector<HTMLElement>('#stats')!;
 const fileInput = document.querySelector<HTMLInputElement>('#file')!;
 const levelButtons = document.querySelector<HTMLElement>('#levels')!;
 const stressButtons = document.querySelector<HTMLElement>('#stress')!;
-const upSelect = document.querySelector<HTMLSelectElement>('#up')!;
+/** The up axis after a conversion (#144): a segmented group of six buttons, as the question's. */
+const upButtons = document.querySelector<HTMLElement>('#up')!;
 const turnPanel = document.querySelector<HTMLElement>('#turn')!;
 const turnByHand = document.querySelector<HTMLInputElement>('#turn-by-hand')!;
 const turnPending = document.querySelector<HTMLElement>('#turn-pending')!;
@@ -371,7 +398,7 @@ const perfLine = document.querySelector<HTMLElement>('#perf')!;
 /** The source preset's select in Adjust; the question's is the view's (#100). */
 const sourceSelect = document.querySelector<HTMLSelectElement>('#source')!;
 const pairInputs = {
-  fieldset: document.querySelector<HTMLFieldSetElement>('#pair')!,
+  fieldset: disclosures.pair,
   addBase: document.querySelector<HTMLButtonElement>('#add-base')!,
   baseFile: document.querySelector<HTMLInputElement>('#base-file')!,
   files: document.querySelector<HTMLElement>('#pair-files')!,
@@ -406,6 +433,8 @@ const viewer = new Viewer(canvas);
 const view = mountQuestions({
   scene: document.querySelector<HTMLElement>('#question-view')!,
   controls: document.querySelector<HTMLElement>('#questions')!,
+  // Confirm beside the page's Cancel, in the panel's footer (design note look-and-feel.md §4.5).
+  footer: document.querySelector<HTMLElement>('#panel-footer')!,
   onChange: showAsked,
 });
 /** When the person picked the files, for `questionMs`; null once measured or when nothing is asked. */
@@ -543,6 +572,13 @@ let importedName: string | null = null;
 function render(): void {
   state.page = pageStateOf(state);
   document.body.dataset.state = state.page;
+  // The application's centred card, or its panel frame when done and at a question (#144).
+  const framed = state.page === 'done' || state.page === 'asking';
+  panel.classList.toggle('card', !framed);
+  panel.classList.toggle('panel', framed);
+  // In the card Cancel is the one button; in the panel's footer it stands beside Confirm.
+  cancelButton.classList.toggle('btn-ghost', framed);
+  if (!framed) expandSheet(false);
   if (state.imported) document.body.dataset.kind = 'glb';
   else delete document.body.dataset.kind;
   const name = state.fileName ?? '';
@@ -558,6 +594,34 @@ function render(): void {
   sourceSelect.value = state.preset ?? '';
   chooseAgain.textContent = state.page === 'error' ? COPY.chooseAnother : COPY.chooseFile;
   chooseButton.disabled = state.busy;
+}
+
+/** Writes the status line; a problem shows as the application's error callout, with its icon. */
+function setStatus(text: string, problem = false): void {
+  statusText.textContent = text;
+  status.classList.toggle('problem', problem);
+  status.classList.toggle('callout', problem);
+  status.classList.toggle('callout-error', problem);
+}
+
+/** The share of the conversion done on the progress bar; `silent`: the step says nothing of its own. */
+function showProgress(percent: number, silent = false): void {
+  progressFill.style.width = `${percent}%`;
+  progressBar.setAttribute('aria-valuenow', String(Math.round(percent)));
+  progressBar.toggleAttribute('data-silent', silent);
+}
+
+/** The bottom sheet on a phone (design note §4.8): its first screen, or expanded by its handle. */
+function expandSheet(expanded: boolean): void {
+  panel.toggleAttribute('data-expanded', expanded);
+  sheetHandle.setAttribute('aria-expanded', String(expanded));
+}
+
+/** The hints of Adjust's disclosures for the mini on screen; the look's follows its controls. */
+function showHints(stats: ConversionStats): void {
+  hints.orient.textContent = describeUpHint(stats.orientation, upFromPreset(choices.orientation));
+  hints.sizing.textContent = describeSizeHint(stats.sizing);
+  hints.pair.textContent = describePairHint(stats.pair);
 }
 
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
@@ -674,7 +738,7 @@ function showSizing(sizing: Sizing): void {
     warning?.kind === 'base-small-for-size' ? `Scale up to a ${target} mm base` : 'Scale to fit';
   if (warning) {
     const base = `The base (${warning.baseMm.toFixed(1)} mm)`;
-    sizingInputs.warning.querySelector('span')!.textContent =
+    sizingInputs.warning.querySelector('.callout-text')!.textContent =
       warning.kind === 'base-exceeds-footprint'
         ? `${base} is larger than ${sizeLabel(sizing.size)}, ${warning.footprintMm} mm.`
         : warning.kind === 'base-small-for-size'
@@ -748,6 +812,7 @@ function showLevelButtons(stats: ConversionStats): void {
     ...triangles.map((count, level) => {
       const button = document.createElement('button');
       button.type = 'button';
+      button.className = 'chip';
       button.textContent = LEVEL_LABELS[level] ?? `Level ${level}`;
       button.title = `${count.toLocaleString()} triangles`;
       button.addEventListener('click', () => showLevel(level));
@@ -756,6 +821,7 @@ function showLevelButtons(stats: ConversionStats): void {
   );
 }
 
+const lookBaseHex = document.querySelector<HTMLElement>('#look-base-hex')!;
 const lookInputs = {
   enabled: document.querySelector<HTMLInputElement>('#look-enabled')!,
   base: document.querySelector<HTMLInputElement>('#look-base')!,
@@ -767,10 +833,14 @@ const lookInputs = {
 // The starting points (#45): a button per preset, pressed while the controls are at its values.
 const presetButtons = LOOK_PRESETS.map((preset) => {
   const button = document.createElement('button');
+  const dot = document.createElement('span');
   button.type = 'button';
-  button.textContent = preset.label;
+  button.className = 'chip';
+  dot.className = 'chip-dot';
+  button.append(dot, preset.label);
   button.dataset.preset = preset.id;
-  button.style.setProperty('--coat', preset.look.base);
+  // The dot is the preset's base coat.
+  button.style.setProperty('--chip-color', preset.look.base);
   button.addEventListener('click', () => setLookPreset(preset.id));
   return button;
 });
@@ -783,7 +853,11 @@ function setLook(changes: Partial<Look>): void {
   lookInputs.occlusion.value = String(state.look.occlusion);
   lookInputs.wash.value = String(state.look.wash);
   lookInputs.edges.value = String(state.look.edges);
+  lookBaseHex.textContent = state.look.base;
   state.lookPreset = presetOf(state.look);
+  hints.look.textContent = describeLookHint(
+    LOOK_PRESETS.find((preset) => preset.id === state.lookPreset)?.label ?? null,
+  );
   for (const button of presetButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.preset === state.lookPreset));
   }
@@ -983,7 +1057,7 @@ function showAsked(shown: QuestionsState): void {
   if (state.busy) state.orientation = shown.turn;
   if (shown.question && state.busy) state.preset = shown.preset;
   if (shown.question && shown.question !== before) {
-    status.textContent = '';
+    setStatus('');
     const started = questionStartedAt;
     if (started !== null) {
       questionStartedAt = null;
@@ -1042,9 +1116,8 @@ async function convert(
     cancelled: false,
     progressLog: [],
   });
-  status.classList.remove('problem');
-  status.textContent = '';
-  progressBar.value = 0;
+  setStatus('');
+  showProgress(0);
   render();
   const stopWatching = watchFrames();
   try {
@@ -1053,9 +1126,8 @@ async function convert(
       (progress) => {
         state.progress = progress;
         if (progress.stepPercent === undefined) state.progressLog.push(progress);
-        progressBar.value = progress.percent;
-        progressBar.toggleAttribute('data-silent', progress.stepPercent === undefined);
-        status.textContent = describeProgress(progress);
+        showProgress(progress.percent, progress.stepPercent === undefined);
+        setStatus(describeProgress(progress));
       },
       {
         orientation: choices.orientation,
@@ -1129,13 +1201,14 @@ async function convert(
     showLevelButtons(stats);
     state.imported = null;
     importedName = null;
-    upSelect.value = stats.up;
+    showUp(stats.up);
     showTurn(null);
     showPlacement(null);
     showPairSection(stats);
     showSizing(stats.sizing);
-    // A size warning is never hidden behind a closed Adjust.
-    if (stats.sizing.warnings.length > 0) adjust.open = true;
+    showHints(stats);
+    // A size warning is never hidden behind a closed disclosure.
+    if (stats.sizing.warnings.length > 0) disclosures.sizing.open = true;
     // What is shown first is what the table will show: the table level, baked where it could be.
     const start = performance.now();
     showLevel(TABLE_LEVEL, true);
@@ -1147,21 +1220,21 @@ async function convert(
       setTimeout(resolve, FRAME_WAIT_MS);
     });
     stopWatching();
-    status.textContent = describeReady(stats);
+    setStatus(describeReady(stats));
     miniSize.textContent = describeMini(stats);
     showStats(stats);
     if (pageOptions.dev) void showDevThumbnail();
   } catch (error) {
     if (error instanceof ConversionCancelled) {
       state.cancelled = true;
-      status.textContent = COPY.cancelled;
+      setStatus(COPY.cancelled);
     } else {
       showProblem(fileName, error);
     }
   } finally {
     stopWatching();
     cancelButton.disabled = false;
-    progressBar.removeAttribute('data-silent');
+    showProgress(0);
     state.progress = null;
     state.busy = false;
     // Cancelled or failed at a question: its meshes leave the screen too.
@@ -1310,17 +1383,19 @@ async function showDevThumbnail(): Promise<void> {
 }
 
 async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
-  status.classList.remove('problem');
+  setStatus('');
   try {
     state.error = null;
     state.imported = await viewer.showGlb(glb);
     importedName = name;
     state.stressCount = 0;
     const size = state.imported.sizeMm.map((mm) => mm.toFixed(1)).join(' × ');
-    status.textContent = `${name}: ${state.imported.triangles.toLocaleString()} triangles, ${size} mm, ${(glb.byteLength / 1024).toFixed(0)} KB`;
+    setStatus(
+      `${name}: ${state.imported.triangles.toLocaleString()} triangles, ${size} mm, ${(glb.byteLength / 1024).toFixed(0)} KB`,
+    );
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
-    status.textContent = `${name} could not be opened: ${state.error}`;
+    setStatus(`${name} could not be opened: ${state.error}`);
   }
   render();
 }
@@ -1348,8 +1423,7 @@ function showProblem(fileName: string, error: unknown): void {
     errorCode: problem.code,
     errorDetail: problem.detail ?? null,
   });
-  status.textContent = problem.message;
-  status.classList.add('problem');
+  setStatus(problem.message, true);
   if (problem.detail) console.warn(`${fileName}: ${problem.code}: ${problem.detail}`);
   render();
 }
@@ -1363,12 +1437,11 @@ async function loadFiles(files: File[]): Promise<void> {
   if (files.length === 0 || state.busy) return;
   // The time to the question counts from here: reading the files from disk is part of it.
   const startedAt = performance.now();
-  status.classList.remove('problem');
+  setStatus('');
   const refuse = (fileName: string, error: string, errorCode: ProblemCode): void => {
     // The error card, like the refusals below, so the page state matches what is on screen.
     Object.assign(state, { fileName, error, errorCode, errorDetail: null });
-    status.textContent = error;
-    status.classList.add('problem');
+    setStatus(error, true);
     render();
   };
   const names = files.map((file) => file.name).join(' + ');
@@ -1502,7 +1575,7 @@ function showPairSection(stats: ConversionStats): void {
   pairInputs.files.textContent = `Base: ${base} · Figure: ${figure}`;
   const warning = describePairWarning(pair.pairing.warnings);
   pairInputs.warning.hidden = warning === null;
-  pairInputs.warning.textContent = warning ?? '';
+  pairInputs.warning.querySelector('.callout-text')!.textContent = warning ?? '';
   pairInputs.placement.textContent = describePlacement(pair.placement, stats.sizing.scale);
 }
 
@@ -1660,15 +1733,24 @@ for (const button of stressButtons.querySelectorAll<HTMLButtonElement>('button')
     startStress(count, button.dataset.lod === undefined ? null : Number(button.dataset.lod));
   });
 }
-upSelect.replaceChildren(
+upButtons.replaceChildren(
   ...UP_AXES.map((axis) => {
-    const option = document.createElement('option');
-    option.value = axis;
-    option.textContent = axis;
-    return option;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-sm';
+    button.dataset.up = axis;
+    button.textContent = axisLabel(axis);
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () => void setUp(axis));
+    return button;
   }),
 );
-upSelect.addEventListener('change', () => void setUp(upSelect.value as UpAxis));
+
+/** Presses the button of the axis the mini stands on. */
+function showUp(up: UpAxis): void {
+  for (const button of upButtons.querySelectorAll<HTMLElement>('[data-up]'))
+    button.setAttribute('aria-pressed', String(button.dataset.up === up));
+}
 for (const button of turnPanel.querySelectorAll<HTMLButtonElement>('[data-turn]')) {
   button.addEventListener('click', () =>
     turn(button.dataset.turn as TurnAxis, Number(button.dataset.deg ?? TURN_STEP_DEG)),
@@ -1685,6 +1767,53 @@ turnReset.addEventListener('click', () => showTurn(null));
 for (const button of [chooseButton, chooseAgain]) {
   button.addEventListener('click', () => fileInput.click());
 }
+
+/**
+ * The panel's Close (#144): back to the drop card, as before the first file. The mini leaves the
+ * screen and the page forgets its files and choices; nothing was stored anywhere else.
+ */
+function closeMini(): void {
+  if (state.busy || state.page !== 'done') return;
+  paintTool.close();
+  if (state.orientation.turn) showTurn(null);
+  if (state.pair) showPlacement(null);
+  turnByHand.checked = false;
+  viewer.setTurnGizmo(null);
+  viewer.setMoveGizmo(null);
+  viewer.clear();
+  sources = [];
+  choices = noChoices();
+  levels = [];
+  baked = null;
+  detailKtx2 = null;
+  importedName = null;
+  Object.assign(state, {
+    fileName: null,
+    stats: null,
+    kind: null,
+    imported: null,
+    baked: null,
+    showingBaked: false,
+    stressCount: 0,
+    shownLevel: 0,
+    preset: null,
+    cancelled: false,
+  });
+  setStatus(COPY.dropHint);
+  render();
+  chooseAgain.focus();
+}
+document.querySelector('#close')!.addEventListener('click', closeMini);
+sheetHandle.addEventListener('click', () => expandSheet(!panel.hasAttribute('data-expanded')));
+
+// The bar's Credits and, on a phone, its More menu (design note §4.1, §4.6).
+const credits = createDialog(document.querySelector<HTMLElement>('#credits')!);
+const moreButton = document.querySelector<HTMLElement>('#more')!;
+createMenu(moreButton, document.querySelector<HTMLElement>('#more-menu')!);
+document
+  .querySelector('#credits-open')!
+  .addEventListener('click', (event) => credits.open(event.currentTarget as HTMLElement));
+document.querySelector('#more-credits')!.addEventListener('click', () => credits.open(moreButton));
 // Dropping works in every state; while a file is dragged over the page, a frame says so.
 // dragenter and dragleave fire for every child element too, so they are counted.
 let dragDepth = 0;
@@ -1837,10 +1966,18 @@ benchCopy.addEventListener('click', () => {
   benchResult.select();
 });
 
-// The wording is in COPY (page-state.ts); data-copy names the string an element shows.
+// The wording is in COPY (page-state.ts); data-copy names the string an element shows,
+// data-copy-label the name of a control that shows only an icon.
 for (const element of document.querySelectorAll<HTMLElement>('[data-copy]')) {
   element.textContent = COPY[element.dataset.copy as keyof typeof COPY];
 }
+for (const element of document.querySelectorAll<HTMLElement>('[data-copy-label]')) {
+  const label = COPY[element.dataset.copyLabel as keyof typeof COPY];
+  element.setAttribute('aria-label', label);
+  element.title = label;
+}
+for (const link of document.querySelectorAll<HTMLAnchorElement>('#meshtavern, #more-meshtavern'))
+  link.href = MESHTAVERN_URL;
 // The icons are inline SVG (icons.ts, #143); data-icon names the one an element starts with
 // (icons.test.ts checks every name in index.html).
 for (const element of document.querySelectorAll<HTMLElement>('[data-icon]')) {
@@ -1848,8 +1985,9 @@ for (const element of document.querySelectorAll<HTMLElement>('[data-icon]')) {
 }
 /** Screens up to this width get the phone layout; the same number is in the media query of style.css. _(proposal)_ */
 const PHONE_MAX_WIDTH_PX = 600;
-// On a phone the sheet starts with the size line and the downloads; Adjust is one tap away.
-if (matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).matches) adjust.open = false;
+// On a desktop Up and turn starts open; on a phone the sheet starts with the size line and the
+// downloads, and every disclosure is closed (design note look-and-feel.md §4.4).
+disclosures.orient.open = !matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).matches;
 // The team's tools exist only under ?dev. Removed rather than hidden: a product page has no
 // benchmark button to find. References taken above stay valid, and the hooks keep working.
 if (!pageOptions.dev) {
@@ -1858,8 +1996,7 @@ if (!pageOptions.dev) {
   fileInput.accept = '.stl,.glb';
 }
 if (pageOptions.problems.length > 0) {
-  status.textContent = `Check the address: ${pageOptions.problems.join('; ')}.`;
-  status.classList.add('problem');
+  setStatus(`Check the address: ${pageOptions.problems.join('; ')}.`, true);
 }
 render();
 state.ready = true;
