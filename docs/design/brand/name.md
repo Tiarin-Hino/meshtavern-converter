@@ -56,8 +56,9 @@ polywash.com is not for sale anywhere visible and has served nothing; a held .co
 
 ### 2.4 Names nearby
 
-Not clashes, but names a reader may set beside this one:
+Not clashes in a register, but names a reader may set beside this one:
 
+- **Polymaker's "Poly" family**, the closest of them, found after the casing was decided. Polymaker, a filament maker every FDM printer knows, names its products "Poly" + a word in camel case: PolyLite, PolyTerra, PolySmooth, PolyMax, PolyFlex, PolyDryer, PolyBox, PolyCast (a casting resin), and Polysher, a device that smooths prints in an alcohol bath. "Wash" is also the step after a resin print (wash and cure stations). So in 3D printing, PolyWash in camel case reads as if it could be a Polymaker product, a wash station or a cleaning fluid. Searched in the USPTO register on 2026-10-14: Polymaker LLC holds POLYMAKER (classes 7, 17, 20, 21), POLYMAKER INDUSTRIAL (42) and PANCHROMA; its POLYSHER is dead; POLYLITE, POLYMAX, POLYFLEX, POLYCAST and POLYBOX are registered to other companies, and POLYTERRA, POLYSMOOTH and POLYDRYER are not registered there. So the family is not a register clash in the US. The risk is that buyers mistake the name for Polymaker's, which the lower-case "Polywash" would lessen.
 - **Polybrush**, Unity's package for painting and sculpting meshes inside the Unity editor: the same "Poly" + a painting word, in mesh painting. Not a registered US mark in class 9 (the only US POLYBRUSH and POLY-BRUSH records are a dead class 26 mark of a hair-products company and a live class 16 mark of Jen Mfg., Inc.). A different audience (game developers inside Unity), but the closest name in the space.
 - **Polycam**, a 3D-scanning app. "Poly" is a common prefix in 3D (Polycam, Poly Haven, Google's former Poly), which makes PolyWash sound at home in the space and makes the second half, "wash", the part that has to carry it.
 - **Mini Paint Oh**, a free browser tool for painting miniatures with a wash mode: a neighbour product, not a name clash.
