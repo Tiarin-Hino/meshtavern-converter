@@ -3,7 +3,7 @@ title: The page on MeshTavern's components
 date: 2026-10-14
 phase: 1
 issues: [144]
-prs: []
+prs: [154]
 topics: [ui, testing]
 ---
 
