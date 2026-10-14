@@ -568,6 +568,7 @@ test('the page does not freeze while a mini is converted, baked and shown', asyn
   expect(state.error).toBeNull();
   expect(state.showingBaked).toBe(true);
   expect(state.framesWhileConverting).toBeGreaterThan(10);
+  console.log(`STALL ${Math.round(state.longestFrameGapMs)} ms`);
   expect(state.longestFrameGapMs).toBeLessThan(MAX_STALL_MS);
 });
 
