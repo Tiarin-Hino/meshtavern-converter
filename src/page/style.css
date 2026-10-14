@@ -1,27 +1,18 @@
 /*
  * The product page (#41, docs/design/product-page.md). Which element shows is decided by
  * body[data-state] and data-in, not by flipping hidden panel by panel.
+ *
+ * Every colour is a role of the table application's tokens.css, and the fonts, the page's
+ * background and the focus ring are its components.css: index.html links both before this sheet
+ * (#143, design note look-and-feel.md §2.3 and §3). Restyling the page's elements on the
+ * components is #144; until then its own controls keep the rules below, on the roles.
  */
 
 :root {
-  color-scheme: dark;
-  --bg: #1b1d22;
-  --panel: #22252b;
-  --control: #252830;
-  --line: #3a3f49;
-  --rule: #2c3038;
-  --text: #e6e8eb;
-  --muted: #a9afb8;
-  --accent: #7aa2f7;
-  --accent-soft: #2f3b57;
-  --warn: #f0b35e;
-  /* Sizes of the layout (proposals of the design note). */
+  /* Sizes of the layout (proposals of the design note); named apart from tokens.css's roles. */
   --top-bar-height: 56px;
   --card-width: 520px;
-  --panel-width: 360px;
-  font-family: system-ui, sans-serif;
-  color: var(--text);
-  background: var(--bg);
+  --page-panel-width: 360px;
 }
 
 html,
@@ -51,46 +42,39 @@ body[data-kind='glb'] [data-mini] {
   display: none !important;
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-button,
-select,
-input[type='number'] {
+/*
+ * The page's own controls until #144 gives them the component classes. The question view's carry
+ * them already (.btn, .chip, .input, .check) and must look as they do in the application, so
+ * these rules leave them alone.
+ */
+button:not(.btn, .chip),
+select:not(.input),
+input[type='number']:not(.input) {
   min-height: 32px;
   padding: 4px 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--control);
+  background: var(--surface-sunken);
   color: inherit;
   font: inherit;
 }
 
-button {
+button:not(.btn, .chip) {
+  border-color: var(--line-strong);
+  background: var(--surface);
   cursor: pointer;
 }
 
-button:disabled {
+button:not(.btn, .chip):disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-button.primary {
+button.primary:not(.btn) {
   border-color: var(--accent);
   background: var(--accent);
-  color: #10131a;
+  color: var(--on-accent);
   font-weight: 600;
-}
-
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* Top bar */
@@ -100,7 +84,7 @@ button.primary {
   align-items: center;
   gap: 16px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--line);
 }
 
 h1 {
@@ -111,16 +95,16 @@ h1 {
 
 #dev-badge {
   padding: 1px 6px;
-  border: 1px solid var(--warn);
+  border: 1px solid var(--warn-text);
   border-radius: 4px;
-  color: var(--warn);
+  color: var(--warn-text);
   font-size: 0.75rem;
 }
 
 #promise-short {
   flex: 1;
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 
@@ -137,10 +121,12 @@ h1 {
   min-height: 0;
 }
 
+/* The stage is dark in both themes: the scenes' backdrop, also before their first frame (#143). */
 #view {
   position: relative;
   min-width: 0;
   min-height: 0;
+  background: var(--scene-backdrop);
 }
 
 #viewport {
@@ -180,8 +166,9 @@ h1 {
 }
 
 #levels button[aria-pressed='true'] {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 /* The card (empty, converting, error) and the panel (done): one element, two places. */
@@ -191,7 +178,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: var(--panel);
+  background: var(--surface);
 }
 
 body:not([data-state='done'], [data-state='asking']) #panel {
@@ -210,11 +197,11 @@ body:not([data-state='done'], [data-state='asking']) #panel {
 }
 
 body[data-state='empty'] #panel {
-  border: 2px dashed var(--line);
+  border: 2px dashed var(--line-strong);
 }
 
 body[data-state='error'] #panel {
-  border-top: 4px solid var(--warn);
+  border-top: 4px solid var(--danger-text);
 }
 
 /* In the empty card the hint in #status comes after the button and the promise. */
@@ -233,10 +220,10 @@ body[data-state='asking'] #panel {
   top: 0;
   right: 0;
   bottom: 0;
-  width: var(--panel-width);
+  width: var(--page-panel-width);
   overflow-y: auto;
   padding: 20px;
-  border-left: 1px solid var(--rule);
+  border-left: 1px solid var(--line);
 }
 
 #heading {
@@ -257,23 +244,23 @@ body[data-state='asking'] #cancel {
 
 #file-name {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
 #status {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
 #status.problem {
-  color: var(--warn);
+  color: var(--danger-text);
 }
 
 .promise {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 
@@ -284,12 +271,12 @@ body[data-state='asking'] #cancel {
   appearance: none;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: var(--control);
+  background: var(--surface-sunken);
   overflow: hidden;
 }
 
 #progress::-webkit-progress-bar {
-  background: var(--control);
+  background: var(--surface-sunken);
 }
 
 #progress::-webkit-progress-value {
@@ -300,20 +287,34 @@ body[data-state='asking'] #cancel {
   background: var(--accent);
 }
 
-/* A step that says nothing about its own progress (the bake): the fill shimmers. */
+/*
+ * A step that says nothing about its own progress (the bake): the fill shimmers, its highlight the
+ * accent mixed toward the text on it (design note look-and-feel.md §3). The keyframes are the
+ * page's own: components.css has a `shimmer` of its own for .skeleton.
+ */
 #progress[data-silent]::-webkit-progress-value {
-  background: linear-gradient(90deg, var(--accent) 30%, #b4c8fb 50%, var(--accent) 70%) 0 0 / 200%
-    100%;
-  animation: shimmer 1.4s linear infinite;
+  background: linear-gradient(
+      90deg,
+      var(--accent) 30%,
+      color-mix(in srgb, var(--accent) 70%, var(--on-accent)) 50%,
+      var(--accent) 70%
+    )
+    0 0 / 200% 100%;
+  animation: silent-step 1.4s linear infinite;
 }
 
 #progress[data-silent]::-moz-progress-bar {
-  background: linear-gradient(90deg, var(--accent) 30%, #b4c8fb 50%, var(--accent) 70%) 0 0 / 200%
-    100%;
-  animation: shimmer 1.4s linear infinite;
+  background: linear-gradient(
+      90deg,
+      var(--accent) 30%,
+      color-mix(in srgb, var(--accent) 70%, var(--on-accent)) 50%,
+      var(--accent) 70%
+    )
+    0 0 / 200% 100%;
+  animation: silent-step 1.4s linear infinite;
 }
 
-@keyframes shimmer {
+@keyframes silent-step {
   from {
     background-position: 100% 0;
   }
@@ -322,8 +323,12 @@ body[data-state='asking'] #cancel {
   }
 }
 
+/* Two rules: a browser drops a whole selector list with a pseudo-element it does not know. */
 @media (prefers-reduced-motion: reduce) {
-  #progress[data-silent]::-webkit-progress-value,
+  #progress[data-silent]::-webkit-progress-value {
+    animation: none;
+  }
+
   #progress[data-silent]::-moz-progress-bar {
     animation: none;
   }
@@ -340,11 +345,13 @@ body[data-state='asking'] #cancel {
   gap: 8px;
 }
 
+/* Section titles in the text face, as the components' .panel-section-title, also when a heading. */
 #export h3,
 #adjust legend {
   margin: 0;
   padding: 0;
-  color: var(--muted);
+  color: var(--text-muted);
+  font-family: var(--font-text);
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -352,7 +359,7 @@ body[data-state='asking'] #cancel {
 }
 
 #export label,
-.check {
+.check:not(.mt-questions *) {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -363,7 +370,7 @@ body[data-state='asking'] #cancel {
 
 #adjust {
   padding-top: 12px;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--line);
   font-size: 0.85rem;
 }
 
@@ -379,7 +386,7 @@ body[data-state='asking'] #cancel {
 
 #adjust summary::before {
   content: '▸';
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 #adjust[open] summary::before {
@@ -391,7 +398,7 @@ body[data-state='asking'] #cancel {
 }
 
 .summary-hint {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 0.8rem;
   font-weight: 400;
 }
@@ -429,7 +436,7 @@ body[data-state='asking'] #cancel {
 
 #turn-pending {
   flex-basis: 100%;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 #look-presets {
@@ -446,23 +453,25 @@ body[data-state='asking'] #cancel {
 }
 
 #look-presets button[aria-pressed='true'] {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   border-left-color: var(--coat);
   background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 #look input[type='range'] {
   width: 90px;
 }
 
+/* 6em of text as before components.css made every box border-box: the padding and border added. */
 #scale-to {
-  width: 6em;
+  width: calc(6em + 26px);
 }
 
 #sizing-warning {
   flex-basis: 100%;
   margin: 0;
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 /*
@@ -493,7 +502,7 @@ body[data-state='asking'] #cancel {
 #pair-warning {
   flex-basis: 100%;
   margin: 0;
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 #placement-controls {
@@ -505,7 +514,7 @@ body[data-state='asking'] #cancel {
 
 #placement-pending {
   flex-basis: 100%;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 /* Drag over the page */
@@ -519,10 +528,17 @@ body[data-state='asking'] #cancel {
   justify-content: center;
   border: 3px dashed var(--accent);
   border-radius: 16px;
-  background: rgb(27 29 34 / 0.75);
-  font-size: 1.5rem;
-  font-weight: 600;
+  background: var(--surface-scrim);
   pointer-events: none;
+}
+
+#drop-frame .banner {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+#drop-frame .banner .icon {
+  color: var(--accent-text);
 }
 
 body[data-dragging] #drop-frame {
@@ -537,7 +553,7 @@ body[data-dragging] #drop-frame {
   gap: 2px;
   margin: 0;
   padding-top: 12px;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--line);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
@@ -549,14 +565,14 @@ body[data-dragging] #drop-frame {
 
 #stats dt {
   flex: none;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 #stats dd {
   margin: 0;
 }
 
-/* The thumbnail (#99) on a light chequer, so its transparency and edges can be judged. */
+/* The thumbnail (#99) on a light chequer in both themes, so its transparency and edges can be judged. */
 #dev-thumbnail-figure {
   display: flex;
   align-items: center;
@@ -567,7 +583,11 @@ body[data-dragging] #drop-frame {
 
 #dev-thumbnail {
   flex: none;
-  background: repeating-conic-gradient(#e8e8e8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px;
+  background: repeating-conic-gradient(
+      var(--fixed-light) 0 25%,
+      color-mix(in srgb, var(--fixed-light) 88%, var(--fixed-dark)) 0 50%
+    )
+    0 0 / 16px 16px;
 }
 
 #stress {
@@ -581,19 +601,19 @@ body[data-dragging] #drop-frame {
   max-height: 40vh;
   overflow-y: auto;
   padding: 4px 16px 8px;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--line);
   font-size: 0.85rem;
 }
 
 #perf {
   margin: 4px 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
 #bench summary {
   cursor: pointer;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 #bench p {
@@ -609,17 +629,15 @@ body[data-dragging] #drop-frame {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  background: #14161a;
+  background: var(--surface-sunken);
   color: inherit;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  font:
-    0.8rem ui-monospace,
-    monospace;
+  font: 0.8rem var(--font-code);
 }
 
 #bench a {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /*
@@ -629,26 +647,27 @@ body[data-dragging] #drop-frame {
 @media (max-width: 600px) {
   :root {
     --sheet-max-height: 40vh;
-    --touch-target: 44px;
   }
 
-  #promise-short {
+  /* The bar keeps the name and the file button; the theme follows the system's (#143). */
+  #promise-short,
+  [data-theme-switch] {
     display: none;
   }
 
-  button,
-  select,
-  input[type='number'],
+  button:not(.btn, .chip),
+  select:not(.input),
+  input[type='number']:not(.input),
   input[type='color'],
   input[type='range'],
   #adjust label,
   #export label,
-  .check,
+  .check:not(.mt-questions *),
   #adjust summary {
-    min-height: var(--touch-target);
+    min-height: var(--tap-min);
   }
 
-  input[type='checkbox'] {
+  input[type='checkbox']:not(.mt-questions *) {
     width: 20px;
     height: 20px;
   }
@@ -683,7 +702,7 @@ body[data-dragging] #drop-frame {
     width: 40px;
     height: 4px;
     border-radius: 2px;
-    background: var(--line);
+    background: var(--line-strong);
     transform: translateX(-50%);
   }
 

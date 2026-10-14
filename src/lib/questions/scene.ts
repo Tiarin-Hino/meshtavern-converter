@@ -6,17 +6,15 @@ import type { IndexedMesh } from '../pipeline/mesh';
 import type { Rotation } from '../pipeline/rotation';
 import { GRID_SQUARE_MM } from '../pipeline/size';
 import { placeCameraOnSphere } from '../three/camera';
+import { PAIR_COLOURS, readSceneColours } from '../three/scene-colours';
 import { addTableLights, MINI_METALNESS, MINI_ROUGHNESS } from '../three/thumbnail';
 import { chunkRanges } from './mesh-chunks';
 
-/** The pairs' colours: the patches in the scene, and `--pair-1` … `--pair-4` on the view's hosts for the chips. _(proposal, #93)_ */
-export const PAIR_COLOURS = [0xf0b35e, 0x7ee0c3, 0xd78ae6, 0x8fb8f5] as const;
+export { PAIR_COLOURS };
 type Vec3 = [number, number, number];
 
 /** Squares the grid shows along each side, as the page's viewer. */
 const GRID_SQUARES = 40;
-/** The scene's background, the page's (`--bg`). */
-const BACKGROUND = 0x1b1d22;
 
 /**
  * The question's scene (#119): what the page's viewer drew at a question (#92, #93, #108),
@@ -75,15 +73,17 @@ export class QuestionScene {
       antialias: true,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.scene.background = new THREE.Color(BACKGROUND);
+    // The backdrop and the grid of the --scene-* roles, dark in both themes (#143).
+    const colours = readSceneColours();
+    this.scene.background = new THREE.Color(colours.backdrop);
 
     // The same light as the page's viewer and the thumbnail (#99).
     addTableLights(this.scene);
     this.grid = new THREE.GridHelper(
       GRID_SQUARE_MM * GRID_SQUARES,
       GRID_SQUARES,
-      0x4a4f5a,
-      0x2c3038,
+      colours.gridCentre,
+      colours.gridLine,
     );
     this.scene.add(this.grid);
 

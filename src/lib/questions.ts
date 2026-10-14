@@ -22,8 +22,9 @@ export {
 } from './questions/copy';
 // The view (#119): mounted into the consumer's elements, it draws every question and sends every
 // answer. Its stylesheet is ./questions.css (package export `meshtavern-converter/questions.css`),
-// imported once by the consumer: an import of a stylesheet here would stop Node and Playwright,
-// which cannot load one, from importing the words above.
+// imported once by the consumer after it links the theme's tokens.css and components.css (#143),
+// whose components the controls are: an import of a stylesheet here would stop Node and
+// Playwright, which cannot load one, from importing the words above.
 export {
   mountQuestions,
   type QuestionsOptions,

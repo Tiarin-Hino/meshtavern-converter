@@ -105,7 +105,8 @@ test('stops after the orient step and converts on Confirm', async ({ page }, tes
   await expect(page.locator('#progress')).toBeHidden();
   // Nothing after the orient step has run.
   expect(await progressSteps(page)).toEqual(['read', 'weld', 'orient']);
-  await expect(page.locator('#ask-up')).toHaveValue('+z');
+  // The up axis is a segmented group (#143): the detected axis is the button pressed.
+  await expect(page.locator('#ask-up [aria-pressed="true"]')).toHaveAttribute('data-up', '+z');
   await page.waitForFunction(() => window.__mt.state.questionMs !== null);
   await shoot(page, testInfo, 'question-upright');
 
@@ -148,11 +149,12 @@ test('stands a lying figure up at the question and converts it once', async ({
   );
   await shoot(page, testInfo, 'question-lying');
 
-  await page.evaluate(() => window.__mt.answerUp({ up: '+x' }));
-  const standing = await page.evaluate(() => window.__mt.state.question!);
+  // A press on the axis's button answers, as the select's change did before #143.
+  await page.getByRole('group', { name: COPY.upAxis }).getByRole('button', { name: '+X' }).click();
+  const standing = await question(page, first.serial);
   expect(standing).toMatchObject({ reason: 'chosen', orientation: { up: '+x', method: 'manual' } });
   expect(standing.serial).toBeGreaterThan(first.serial);
-  await expect(page.locator('#ask-up')).toHaveValue('+x');
+  await expect(page.locator('#ask-up [aria-pressed="true"]')).toHaveAttribute('data-up', '+x');
   await expect(page.locator('#ask-found')).toHaveText('As you turned it.');
   await shoot(page, testInfo, 'question-stood-up');
 
@@ -179,9 +181,17 @@ test('previews a turn without asking, and asks again for Set down and Reset', as
   await expect(page.locator('#ask-pending')).toHaveText('Turned 30°');
   expect(await page.evaluate(() => window.__mt.state.question!.serial)).toBe(first.serial);
 
+  // The axis on screen, pressed while a turn is tried out, stands the mini on it again (#143).
+  await page.locator('#ask-up [data-up="+z"][aria-pressed="true"]').click();
+  const straight = await question(page, first.serial);
+  expect(straight.orientation).toMatchObject({ up: '+z', tiltDeg: 0 });
+  await expect(page.locator('#ask-pending')).toBeHidden();
+  await pitch.click();
+  await pitch.click();
+
   // Set down asks again, with the turn; Reset asks again with the proposal.
   await page.locator('#ask-set-down').click();
-  const setDown = await question(page, first.serial);
+  const setDown = await question(page, straight.serial);
   expect(setDown.orientation.method).toBe('manual');
   await expect(page.locator('#ask-pending')).toBeHidden();
   await page.locator('#ask-reset').click();

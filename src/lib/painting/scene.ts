@@ -3,12 +3,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Vec3 } from '../pipeline/base';
 import { GRID_SQUARE_MM } from '../pipeline/size';
 import { placeCameraOnSphere } from '../three/camera';
+import { readSceneColours } from '../three/scene-colours';
 import { addTableLights } from '../three/thumbnail';
 
 /** Squares the grid shows along each side, as the page's viewer. */
 const GRID_SQUARES = 40;
-/** The scene's background, the page's (`--bg`). */
-const BACKGROUND = 0x1b1d22;
 /** The drawing buffer's pixels per CSS pixel, at most: the depth map follows it (§11.1). */
 const MAX_PIXEL_RATIO = 2;
 
@@ -43,13 +42,15 @@ export class PaintScene {
     host.append(this.canvas);
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
-    this.scene.background = new THREE.Color(BACKGROUND);
+    // The backdrop and the grid of the --scene-* roles, dark in both themes (#143).
+    const colours = readSceneColours();
+    this.scene.background = new THREE.Color(colours.backdrop);
     addTableLights(this.scene);
     this.grid = new THREE.GridHelper(
       GRID_SQUARE_MM * GRID_SQUARES,
       GRID_SQUARES,
-      0x4a4f5a,
-      0x2c3038,
+      colours.gridCentre,
+      colours.gridLine,
     );
     this.scene.add(this.grid);
     this.camera.position.set(60, 60, 90);

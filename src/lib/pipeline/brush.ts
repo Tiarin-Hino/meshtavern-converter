@@ -38,6 +38,9 @@ export interface BrushSettings {
   direction: Vec3 | null;
 }
 
+/** The colour a painting view starts with: paint, not the theme's (#143 moved it here from the view). _(proposal)_ */
+export const DEFAULT_PAINT_COLOUR = '#b03030';
+
 /** _(proposal)_ */
 export const DEFAULT_BRUSH: BrushSettings = {
   sizeMm: 2,

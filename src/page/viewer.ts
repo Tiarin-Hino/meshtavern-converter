@@ -25,6 +25,7 @@ import {
   MINI_METALNESS,
   MINI_ROUGHNESS,
   placeCameraOnSphere,
+  readSceneColours,
 } from '../lib/three';
 
 /** Squares the grid shows along each side. */
@@ -110,7 +111,7 @@ export class Viewer {
   private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
   private readonly material = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color: new THREE.Color(1, 1, 1),
     vertexColors: true,
     roughness: MINI_ROUGHNESS,
     metalness: MINI_METALNESS,
@@ -124,15 +125,17 @@ export class Viewer {
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.scene.background = new THREE.Color(0x1b1d22);
+    // The backdrop and the grid of the --scene-* roles, dark in both themes (#143).
+    const colours = readSceneColours();
+    this.scene.background = new THREE.Color(colours.backdrop);
 
     // The thumbnail (#99) draws in the same light.
     addTableLights(this.scene);
     this.grid = new THREE.GridHelper(
       GRID_SQUARE_MM * GRID_SQUARES,
       GRID_SQUARES,
-      0x4a4f5a,
-      0x2c3038,
+      colours.gridCentre,
+      colours.gridLine,
     );
     this.scene.add(this.grid);
 

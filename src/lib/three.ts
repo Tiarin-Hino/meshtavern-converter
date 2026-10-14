@@ -30,3 +30,5 @@ export {
 } from './three/thumbnail';
 // The camera on a sphere around a mini: the viewer, the question view and the painting view frame alike (#127).
 export { placeCameraOnSphere } from './three/camera';
+// The scenes' backdrop and grid from the --scene-* roles of the theme (#143).
+export { readSceneColours, SCENE_COLOURS_FALLBACK, type SceneColours } from './three/scene-colours';

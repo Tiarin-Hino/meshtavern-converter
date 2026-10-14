@@ -1,66 +1,16 @@
 /*
  * The question view (#119, docs/design/questions-view.md §6.2): every rule under .mt-questions,
- * the class mountQuestions puts on the elements it was given. Moved from the page's style.css,
- * with the page's control rules copied at the same values, so the view looks the same on the page
- * and in a consumer that has no rules of its own. The colours are the page's custom properties
- * (--panel, --control, --line, --text, --muted, --accent, --warn) with the page's values as
- * fallbacks; the pairs' colours (--pair-1 … --pair-4) are set on the hosts by the view.
+ * the class mountQuestions puts on the elements it was given. The controls are the table
+ * application's components (#143, docs/design/look-and-feel.md §2.3 and §4.5): the view's
+ * template gives each its class of components.css (.btn, .segmented, .input, .field, .check,
+ * .chip), so the consumer links the theme's tokens.css and components.css before this sheet, as
+ * the page and the application do, and the view reads the same in both. This sheet holds the
+ * view's layout and the few parts of its own the components do not have; every colour is a role
+ * of tokens.css. The pairs' colours (--pair-1 … --pair-4) are data of the view, set on the hosts.
  */
-
-.mt-questions {
-  --q-panel: var(--panel, #22252b);
-  --q-control: var(--control, #252830);
-  --q-line: var(--line, #3a3f49);
-  --q-text: var(--text, #e6e8eb);
-  --q-muted: var(--muted, #a9afb8);
-  --q-accent: var(--accent, #7aa2f7);
-  --q-warn: var(--warn, #f0b35e);
-  color: var(--q-text);
-}
 
 .mt-questions [hidden] {
   display: none !important;
-}
-
-/* The controls, as the page draws its own. */
-
-.mt-questions button,
-.mt-questions select {
-  min-height: 32px;
-  padding: 4px 12px;
-  border: 1px solid var(--q-line);
-  border-radius: 6px;
-  background: var(--q-control);
-  color: inherit;
-  font: inherit;
-}
-
-.mt-questions button {
-  cursor: pointer;
-}
-
-.mt-questions button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.mt-questions button.primary {
-  border-color: var(--q-accent);
-  background: var(--q-accent);
-  color: #10131a;
-  font-weight: 600;
-}
-
-.mt-questions :focus-visible {
-  outline: 2px solid var(--q-accent);
-  outline-offset: 2px;
-}
-
-.mt-questions .check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
 }
 
 /* The scene: the canvas fills the element it was given; the element's size is the consumer's. */
@@ -71,188 +21,207 @@
   height: 100%;
 }
 
-/* No specificity: a consumer's own position for the element wins. */
+/* No specificity: a consumer's own position wins. Dark in both themes, before the first frame too. */
 :where(.mt-questions-scene) {
   position: relative;
+  background: var(--scene-backdrop);
 }
 
 /*
- * The controls on the panel's colour, so the light text reads in a light dialog too (found by the
- * consumer check, #119). No specificity: a consumer's own background wins; on the page the panel
- * behind is the same colour.
+ * The controls on the panel's surface in the theme's text colour (design note §3: --panel became
+ * --surface), so they read in a dialog of another colour too (#119). No specificity: a consumer's
+ * own background wins.
  */
 :where(.mt-questions-controls) {
-  background: var(--q-panel);
+  color: var(--text);
+  background: var(--surface);
 }
 
-/* The view's own panel over the scene's right edge, when no controls element was given (PANEL_WIDTH_PX). */
+/*
+ * The view's own panel, the components' panel frame, over the scene's right edge when no
+ * controls element was given (PANEL_WIDTH_PX, 22 rem: the page's done panel, design note §7).
+ */
 .mt-questions-panel {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  box-sizing: border-box;
-  width: var(--q-panel-width, 360px);
+  width: 22rem;
   overflow-y: auto;
-  padding: 20px;
-  border-left: 1px solid var(--q-line);
-  background: var(--q-panel);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0;
 }
 
-/* The up question (#92). */
+/* The two questions, each a column: the up question (#92), where the parts meet (#93). */
 
-.mt-questions #ask {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 0.85rem;
-}
-
-.mt-questions #ask p {
-  margin: 0;
-}
-
-.mt-questions #ask-file,
-.mt-questions #ask-found {
-  color: var(--q-muted);
-}
-
-.mt-questions #ask-question {
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.mt-questions #ask-warning {
-  color: var(--q-warn);
-}
-
-.mt-questions #ask label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mt-questions #ask-turn {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.mt-questions #ask-pending {
-  flex-basis: 100%;
-  color: var(--q-muted);
-}
-
-/* Where the parts meet (#93): the pairs stop, then the final view. */
-
-.mt-questions #meet {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 0.85rem;
-}
-
-.mt-questions #meet p {
-  margin: 0;
-}
-
-.mt-questions #meet-question {
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.mt-questions #meet-hint,
-.mt-questions #meet-placement,
-.mt-questions #meet-parts {
-  color: var(--q-muted);
-}
-
-.mt-questions #meet-parts {
-  margin: 0;
-  padding-left: 1.1em;
-}
-
-/* At the final view of the parts a marked part's line selects what Raise, Lower and Turn move. */
-.mt-questions #meet-parts li[data-part] {
-  cursor: pointer;
-}
-
-.mt-questions #meet-parts li[data-selected] {
-  color: var(--q-text);
-  font-weight: 600;
-}
-
+.mt-questions #ask,
+.mt-questions #meet,
 .mt-questions #meet-marking,
 .mt-questions #meet-final {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
-.mt-questions #meet-look {
+/* A field takes the panel's width, as in the mockups; the segmented axis keeps its own. */
+.mt-questions .field {
+  align-self: stretch;
+  margin: 0;
+}
+
+.mt-questions .field > .segmented {
+  align-self: flex-start;
+}
+
+.mt-questions p {
+  margin: 0;
+}
+
+/* The question, and the sentence that says what was found (the question's colour outranks a dialog's muted paragraphs). */
+.mt-questions .question {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+.mt-questions .found,
+.mt-questions .hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* A row of buttons and button groups that wraps. */
+.mt-questions .actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
-.mt-questions #meet-view-hint {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--q-muted);
-}
-
-.mt-questions #meet-adjust,
-.mt-questions #meet-view,
-.mt-questions #meet-tools {
-  display: flex;
+.mt-questions .segmented {
   flex-wrap: wrap;
-  gap: 8px;
 }
 
-.mt-questions #meet-tools button[aria-pressed='true'] {
-  border-color: var(--q-accent);
-  color: var(--q-accent);
+/* Confirm takes the panel's width. */
+.mt-questions .mt-questions-confirm {
+  align-self: stretch;
 }
 
-/* One chip per pair, both sides of a pair in its colour (#93, patches §7.1). */
-.mt-questions #meet-pairs {
+/*
+ * A notice: the application's callout (its pages.css keeps it under its page frames), carried
+ * here so the view's warning reads the same in the application's dialogs. A candidate for
+ * components.css (design note §12).
+ */
+.mt-questions .callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--info-soft);
+  border-left: 3px solid var(--info-text);
+  border-radius: var(--radius-control);
+}
+
+.mt-questions .callout > .icon {
+  margin-top: 0.05em;
+  color: var(--info-text);
+}
+
+.mt-questions .callout-warn {
+  background: var(--warn-soft);
+  border-left-color: var(--warn-text);
+}
+
+.mt-questions .callout-warn > .icon {
+  color: var(--warn-text);
+}
+
+.mt-questions .callout > span {
+  flex: 1;
+}
+
+/* The parts' lines (#93). At the final view of the parts a marked part's line selects what Raise, Lower and Turn move. */
+.mt-questions .parts {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mt-questions .parts li[data-part] {
+  cursor: pointer;
+}
+
+.mt-questions .parts li[data-selected] {
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+
+/* One chip per pair, its dot and its outline when chosen in the pair's colour (#93, patches §7.1). */
+.mt-questions .pairs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.mt-questions #meet-pairs li {
+.mt-questions .pairs li {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: var(--space-1);
 }
 
-.mt-questions #meet-pairs .chip {
-  border-left: 6px solid var(--chip);
-  white-space: pre;
+.mt-questions .pairs .chip {
+  height: auto;
+  min-height: 1.75rem;
+  padding-block: var(--space-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: start;
 }
 
-.mt-questions #meet-pairs .chip[aria-pressed='true'] {
-  outline: 2px solid var(--chip);
+/* A file's name on a Look at button wraps in the panel rather than pushing it sideways. */
+.mt-questions #meet-view .btn {
+  max-width: 100%;
+  padding-block: var(--space-1);
+  line-height: var(--leading-tight);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
 }
 
-/* A phone: every control a touch target, as the page's (PHONE_MAX_WIDTH_PX, --touch-target). */
+.mt-questions .pairs .chip[aria-pressed='true'] {
+  outline: 2px solid var(--chip-color);
+  outline-offset: 1px;
+}
+
+/*
+ * A phone (the page's PHONE_MAX_WIDTH_PX): every control a touch target, as before #143. The
+ * theme raises --control-height under a coarse pointer, but the small buttons, the chips and the
+ * checkbox keep their own heights.
+ */
 @media (max-width: 600px) {
-  .mt-questions button,
-  .mt-questions select,
-  .mt-questions #ask label,
+  .mt-questions .btn,
+  .mt-questions .input,
+  .mt-questions .chip,
   .mt-questions .check {
-    min-height: 44px;
+    min-height: var(--tap-min);
   }
 
-  .mt-questions input[type='checkbox'] {
+  .mt-questions .btn-icon {
+    min-width: var(--tap-min);
+  }
+
+  .mt-questions .pairs .chip {
+    height: auto;
+  }
+
+  .mt-questions .check input {
     width: 20px;
     height: 20px;
   }

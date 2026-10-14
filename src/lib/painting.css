@@ -1,11 +1,17 @@
 /*
  * The painting view (#127, docs/design/painting-engine.md §10.3): every rule under .mt-painting,
- * the class mountPainting puts on the element it was given. The cursor's colour is the page's
- * --accent through the question view's --q-accent, with the page's value as the fallback.
+ * the class mountPainting puts on the element it was given. The cursor's colour is the --accent
+ * role of the theme's tokens.css (#143), which the consumer links before this sheet, as the page
+ * and the table application do.
  */
 
 .mt-painting {
   position: relative;
+}
+
+/* Dark in both themes, before the first frame too (#143); no specificity, a consumer's own wins. */
+:where(.mt-painting) {
+  background: var(--scene-backdrop);
 }
 
 .mt-painting canvas {
@@ -18,7 +24,7 @@
 .mt-painting-cursor {
   position: absolute;
   pointer-events: none;
-  border: 1px solid var(--q-accent, var(--accent, #7aa2f7));
+  border: 1px solid var(--accent);
   border-radius: 50%;
   transform: translate(-50%, -50%);
 }

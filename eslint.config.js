@@ -2,16 +2,9 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  // docs/design/look-and-feel/theme/ is the application's theme, copied byte for byte (#142).
+  // public/theme/ is the application's theme, copied byte for byte (#142, #143).
   {
-    ignores: [
-      'dist',
-      'out',
-      'playwright-report',
-      'test-results',
-      '.claude',
-      'docs/design/look-and-feel/theme',
-    ],
+    ignores: ['dist', 'out', 'playwright-report', 'test-results', '.claude', 'public/theme'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -26,6 +19,7 @@ export default tseslint.config(
         window: 'readonly',
         performance: 'readonly',
         document: 'readonly',
+        URL: 'readonly',
         URLSearchParams: 'readonly',
         requestAnimationFrame: 'readonly',
       },

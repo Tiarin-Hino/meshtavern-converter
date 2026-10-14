@@ -5,7 +5,7 @@
  * entry, beside index.ts (no three.js; it holds the strokes' data and the fill), three.ts, dev.ts
  * and questions.ts. Its stylesheet is ./painting.css (package export
  * `meshtavern-converter/painting.css`), imported once by the consumer, for the reason
- * questions.ts gives.
+ * questions.ts gives, after the theme's tokens.css (its cursor ring is the --accent role, #143).
  */
 export {
   mountPainting,

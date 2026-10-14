@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { DEFAULT_LOOK, vertexColours, type Look } from '../pipeline/look';
 import { computeVertexNormals, type IndexedMesh } from '../pipeline/mesh';
 import { createBakedGeometry, createBakedMaterial, createLookUniforms } from './baked-material';
+import { BLACK, TABLE_LIGHT_COLOURS } from './scene-colours';
 
 /**
  * A small picture of a converted mini (issue #99, design note `docs/design/thumbnail-and-kind.md`
@@ -25,8 +26,8 @@ export const MINI_METALNESS = 0;
 
 /** The table's light, in the viewer and in the thumbnail: a sky-and-ground fill and one key light, both fixed in the world. */
 export function addTableLights(scene: THREE.Scene): void {
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 1.2));
-  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  scene.add(new THREE.HemisphereLight(TABLE_LIGHT_COLOURS.sky, TABLE_LIGHT_COLOURS.ground, 1.2));
+  const key = new THREE.DirectionalLight(TABLE_LIGHT_COLOURS.key, 2.2);
   key.position.set(60, 120, 80);
   scene.add(key);
 }
@@ -229,7 +230,7 @@ function vertexColoured(mesh: IndexedMesh, look: Look): THREE.Mesh {
   );
   geometry.setAttribute('color', new THREE.BufferAttribute(vertexColours(mesh, look), 3));
   const material = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color: new THREE.Color(1, 1, 1),
     vertexColors: true,
     roughness: MINI_ROUGHNESS,
     metalness: MINI_METALNESS,
@@ -313,7 +314,7 @@ export async function renderThumbnail(
     };
     let read: Promise<unknown>;
     try {
-      renderer.setClearColor(0x000000, 0);
+      renderer.setClearColor(BLACK, 0);
       renderer.setRenderTarget(target);
       renderer.clear();
       renderer.render(scene, camera);
