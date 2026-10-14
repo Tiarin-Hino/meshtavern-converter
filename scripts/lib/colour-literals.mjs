@@ -81,8 +81,8 @@ export function stripComments(source, kind) {
 const HEX = /(?<![\w&#$])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})(?![\w-])/gi;
 /**
  * In TypeScript an issue number such as (#129) can sit in a string, in the comments of a script
- * the server inlines, and in HTML in a line of text: a hex of digits alone counts there only
- * after a quote, `:` or `=`.
+ * the server inlines, and in HTML in a line of text: a short hex of digits alone (three or four)
+ * counts there only after a quote, `:` or `=`; six or eight digits are never an issue number.
  */
 const TS_DIGITS_ONLY_CONTEXT = /['"`:=]\s*$/;
 /** A hex colour in a URL-encoded SVG of a data: URL: `stroke='%23888'`. */
@@ -94,10 +94,10 @@ const WORD = /(?<![\w-])[a-z]+(?![\w-])/gi;
 /** A declaration's value, up to the `;` or `}` that ends it (a selector ends at `{`). */
 const DECLARATION = /(?<![\w-])(--?[\w-]+|[a-z][\w-]*)\s*:\s*([^;{}]+)(?=[;}])/gi;
 const TS_NAMED = /(['"`])([a-z]+)\1/gi;
-/** In HTML a hex counts only as a value (after a quote, `:` or `=`), and never as a link's `#id`. */
+/** Outside its CSS, a hex in HTML counts only as a value (after a quote, `:` or `=`), never as a link's `#id`. */
 const HTML_LINK_CONTEXT = /href\s*=\s*["']?$/i;
-/** Where HTML holds CSS: a `style` attribute's value, a `<style>` element's content. */
-const HTML_CSS = /(\sstyle\s*=\s*)(["'])([^"']*)\2|(<style[^>]*>)([\s\S]*?)(?=<\/style>)/gi;
+/** Where HTML holds CSS: a `style` attribute's value (in either quote), a `<style>` element's content. */
+const HTML_CSS = /(\sstyle\s*=\s*)(?:"([^"]*)"|'([^']*)')|(<style[^>]*>)([\s\S]*?)(?=<\/style>)/gi;
 
 /**
  * The CSS an HTML source holds, everything else blanked (newlines kept, so indices hold); a style
@@ -107,9 +107,9 @@ const HTML_CSS = /(\sstyle\s*=\s*)(["'])([^"']*)\2|(<style[^>]*>)([\s\S]*?)(?=<\
 function cssOf(html) {
   let out = blank(html);
   for (const m of html.matchAll(HTML_CSS)) {
-    const [, attribute, , value, open, content] = m;
+    const [, attribute, doubleQuoted, singleQuoted, open, content] = m;
     const at = m.index + (attribute !== undefined ? attribute.length + 1 : open.length);
-    const css = attribute !== undefined ? `${value};` : content;
+    const css = attribute !== undefined ? `${doubleQuoted ?? singleQuoted};` : content;
     out = out.slice(0, at) + css + out.slice(at + css.length);
   }
   return out;
@@ -117,25 +117,27 @@ function cssOf(html) {
 
 /**
  * Every colour literal in a source: `{ line, text }`, in order. `kind` is 'css', 'html' (its
- * comments gone, a hex as a value, a named colour in its CSS) or 'ts'.
+ * comments gone; in its CSS as CSS, elsewhere a hex only as a value) or 'ts'.
  */
 export function findColourLiterals(source, kind) {
   const code = stripComments(source, kind);
+  const css = kind === 'html' ? cssOf(code) : code;
   const found = [];
   const add = (index, text) => found.push({ index, text });
   for (const m of code.matchAll(HEX)) {
     const before = code.slice(Math.max(0, m.index - 16), m.index);
-    const digitsOnly = /^#\d+$/.test(m[0]);
-    if (kind === 'ts' && digitsOnly && !TS_DIGITS_ONLY_CONTEXT.test(before)) continue;
-    if (kind === 'html' && (!TS_DIGITS_ONLY_CONTEXT.test(before) || HTML_LINK_CONTEXT.test(before)))
-      continue;
+    const value = TS_DIGITS_ONLY_CONTEXT.test(before);
+    const shortDigits = /^#\d{3,4}$/.test(m[0]);
+    if (kind === 'ts' && shortDigits && !value) continue;
+    const inCss = css[m.index] === '#';
+    if (kind === 'html' && !inCss && (!value || HTML_LINK_CONTEXT.test(before))) continue;
     add(m.index, m[0]);
   }
   for (const m of code.matchAll(ENCODED_HEX)) add(m.index, m[0]);
   for (const m of code.matchAll(FUNCTIONS)) add(m.index, m[0]);
   if (kind === 'css' || kind === 'html') {
     for (const m of code.matchAll(CSS_COLOR_FUNCTION)) add(m.index, m[0]);
-    for (const m of (kind === 'html' ? cssOf(code) : code).matchAll(DECLARATION)) {
+    for (const m of css.matchAll(DECLARATION)) {
       // Quoted strings and var() names are not colours: blank them before looking for words.
       const value = m[2].replace(/(['"]).*?\1/g, (s) => ' '.repeat(s.length));
       const start = m.index + m[0].length - m[2].length;

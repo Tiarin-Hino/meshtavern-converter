@@ -85,6 +85,19 @@ describe('findColourLiterals in HTML', () => {
     ]);
   });
 
+  it('reads its CSS as strictly as a stylesheet, in either quote', () => {
+    expect(texts('<p style="border: 1px solid #456">', 'html')).toEqual(['#456']);
+    expect(
+      texts('<style> .a { border: 1px solid #fab; box-shadow: 0 0 2px #000000; } </style>', 'html'),
+    ).toEqual(['#fab', '#000000']);
+    expect(texts('<p style="background: linear-gradient(#fff, #000)">', 'html')).toEqual([
+      '#fff',
+      '#000',
+    ]);
+    expect(texts(`<p style="font-family: 'Inter'; color: red">`, 'html')).toEqual(['red']);
+    expect(texts(`<p style='color: white'>`, 'html')).toEqual(['white']);
+  });
+
   it('counts a hex only as a value, never as a link’s fragment or a word', () => {
     expect(texts('<a href="#ace">x</a> <a href=#cafe>y</a> <span>#bad</span>', 'html')).toEqual([]);
     expect(texts('<rect fill="#ace" /><td bgcolor=#cafe>', 'html')).toEqual(['#ace', '#cafe']);
@@ -122,10 +135,16 @@ const word = 'whitespace';`;
     expect(texts(ts, 'ts')).toEqual([]);
   });
 
-  it('counts a hex of digits alone after a quote, a colon or an equals sign', () => {
+  it('counts a short hex of digits alone after a quote, a colon or an equals sign', () => {
     expect(texts(`const a = '#000';`, 'ts')).toEqual(['#000']);
     expect(texts('const b = `color: #111`;', 'ts')).toEqual(['#111']);
     expect(texts(`const c = 'fill=#222';`, 'ts')).toEqual(['#222']);
+    expect(texts(`const d = 'issue #1234';`, 'ts')).toEqual([]);
+  });
+
+  it('counts six or eight digits anywhere: they are never an issue number', () => {
+    expect(texts('const s = `box-shadow: 0 0 2px #000000`;', 'ts')).toEqual(['#000000']);
+    expect(texts(`el.style.border = '1px solid #33333380';`, 'ts')).toEqual(['#33333380']);
   });
 });
 

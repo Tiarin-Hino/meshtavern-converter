@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Fails on a colour literal outside the token stylesheet (#143, look-and-feel spec L1): every
 // colour the page and the library's views show comes from a role of public/theme/tokens.css, the
-// table application's, so the page looks like MeshTavern and a theme can change it. Scans the CSS
-// and TypeScript under src/, the theme's other stylesheets and index.html, tests excluded. Copied
-// from the application's scripts/check-colours.mjs (its main at 791425e) with this repo's roots.
+// table application's, so the page looks like MeshTavern and a theme can change it. Scans the CSS,
+// TypeScript, JavaScript, HTML and SVG under src/ and public/theme/ and index.html, tests
+// excluded. Copied from the application's scripts/check-colours.mjs (its main at 791425e) with
+// this repo's roots and kinds.
 // Usage: node scripts/check-colours.mjs (npm run check:colours). Exit 1 on a find.
 
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -27,15 +28,14 @@ const ALLOWED = [
   'src/regression/',
 ];
 
-/** The kind a file is read as, or null for one that is not scanned. */
-const kindOf = (path) =>
-  path.endsWith('.css')
-    ? 'css'
-    : path.endsWith('.html')
-      ? 'html'
-      : path.endsWith('.ts') && !path.endsWith('.test.ts') && !path.endsWith('.d.ts')
-        ? 'ts'
-        : null;
+/** The kind a file is read as, or null for one that is not scanned (a test, a type file, a font). */
+function kindOf(path) {
+  if (/\.test\.[cm]?[jt]sx?$|\.d\.[cm]?ts$/.test(path)) return null;
+  if (path.endsWith('.css')) return 'css';
+  if (/\.(html|svg)$/.test(path)) return 'html';
+  if (/\.[cm]?[jt]sx?$/.test(path)) return 'ts';
+  return null;
+}
 
 async function* files(path) {
   if (!(await stat(path)).isDirectory()) {
