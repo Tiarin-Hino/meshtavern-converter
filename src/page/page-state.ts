@@ -42,7 +42,8 @@ export function pageStateOf(app: {
 
 /**
  * The product's name (#147: PolyWash, the PM's pick and casing of 2026-10-14), the one place it
- * lives: the bar, the tab's title, the description and the tests read it from here.
+ * lives in code: the bar reads it from here, and the tests point at its other copies (index.html's
+ * title and description, the README, NOTICE.txt).
  */
 const NAME = 'PolyWash';
 /** What the page does, in one sentence (#145, spec L3): an STL in, a game-ready mini out. */
@@ -52,7 +53,8 @@ const PROMISE = 'Your file never leaves your computer.';
 export const COPY = {
   ...QUESTION_COPY,
   title: NAME,
-  // #145: the tab's title and the description tag (set at start-up from these).
+  // #145: the tab's title and the description tag, written in index.html so a link preview sees
+  // them without the script; page-state.test.ts keeps them equal to these.
   documentTitle: `${NAME}: an STL of a miniature in, a game-ready mini out`,
   description: `${SENTENCE} Everything runs in your browser. ${PROMISE}`,
   promise: PROMISE,

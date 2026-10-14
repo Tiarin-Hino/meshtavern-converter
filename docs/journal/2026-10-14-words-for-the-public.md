@@ -3,7 +3,7 @@ title: The words and the frame for the public
 date: 2026-10-14
 phase: 2
 issues: [145]
-prs: []
+prs: [155]
 topics: [ui, docs]
 ---
 
@@ -23,7 +23,7 @@ The name came from #147 on the same day: the PM picked **PolyWash**, chose that 
 - **`NOTICE.txt` beside the theme files.** `public/theme/NOTICE.txt` is written in the application's format (a part, what it does, copyright, licence), then three.js, meshoptimizer, xatlas, the Basis Universal encoder, the SRD 5.1 attribution and the favicon, then the full licence texts, copied from the licence files the repo and `node_modules` already hold. three.js's KTX2 loader brings two parts of its own that the page ships: the Basis Universal transcoder (served under `/basis/`) and zstddec, a build of Zstandard; both are named under three.js. It is the one file in `public/theme/` that is the page's own, not the application's; the theme's README says so and `theme-files.test.ts` lists it.
 - **The dialog names what the NOTICE names.** The Credits dialog (#144's shell) holds a definition list, one `<dt>` per part. `src/page/credits.test.ts` reads both files and fails when a part is in one and not the other, when a licence file's text is missing from the NOTICE, when the versions of three, meshoptimizer or lucide-static in `node_modules` differ from the ones credited, and when the SRD attribution differs from the README's. The dialog is 36 rem wide instead of the application's 26 rem, so a part and its licence fit in one or two lines, and it scrolls on a short screen. Its links open a tab of their own: leaving the page would lose the converted mini.
 - **The favicon.** `public/favicon.svg`: the P of Fraunces at weight 700 and optical size 9 (the sturdiest cut for 16 px), traced into outlines with fontTools from the WOFF2 the page already serves, in brass-400 on a grey-950 rounded square, the token values written out because a favicon cannot read the page's CSS. It sits outside `public/theme/` (which is the application's) and outside the colour check's roots, like the application's own favicon. `e2e/promise.spec.ts` allows `/favicon.svg` after a file is picked, because a browser may ask for it late.
-- **The README's screenshots** are of the real page (`docs/readme/page-light.png`, `page-dark.png`), a generated stand-in figure from the regression net converted in Playwright's Chromium at 1440 × 900, not the mockups of #142, which still show the development name. A `<picture>` with a `prefers-color-scheme: dark` source shows the one that matches the reader's GitHub theme.
+- **The README's screenshots** are of the real page (`docs/design/look-and-feel/shots/readme-light.png`, `readme-dark.png`, beside the mockups' shots that K5 rewrites), a generated stand-in figure from the regression net converted in Playwright's Chromium at 1440 × 900, not the mockups of #142, which still show the development name. A `<picture>` with a `prefers-color-scheme: dark` source shows the one that matches the reader's GitHub theme.
 
 ## Problems and how we solved them
 

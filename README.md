@@ -3,8 +3,8 @@
 An STL of a miniature in, a game-ready mini out. Everything runs in your browser: your file never leaves your computer.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/page-dark.png" />
-  <img alt="PolyWash with a converted mini: the mini on a dark stage, its size and the two downloads in the panel beside it." src="docs/readme/page-light.png" />
+  <source media="(prefers-color-scheme: dark)" srcset="docs/design/look-and-feel/shots/readme-dark.png" />
+  <img alt="PolyWash with a converted mini: the mini on a dark stage, its size and the two downloads in the panel beside it." src="docs/design/look-and-feel/shots/readme-light.png" />
 </picture>
 
 Drop the STL of a miniature you printed or bought. PolyWash stands it upright (and asks you first), measures it (units, base, creature size and its footprint on a 32 mm grid), reduces it to three detail levels, gives it a primed-and-washed look and hands you GLB files for a virtual tabletop. A figure and its base in two files, or a figure in up to six parts, are put together before anything else. The page follows your system's light or dark theme, or the switch in its bar.
