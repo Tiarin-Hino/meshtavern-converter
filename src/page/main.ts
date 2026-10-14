@@ -444,37 +444,60 @@ const converter = new Converter();
 const memoryBudget = memoryBudgetBytes(
   (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
 );
-const state: AppState = {
-  ready: false,
-  page: 'empty',
-  busy: false,
-  question: null,
-  meet: view.state.meet,
+/**
+ * What the page knows about a mini, as before the first file: the start-up values, and what Close
+ * puts back (#144). The look, the theme and the figures of the page itself stay.
+ */
+const noMini = (): Pick<
+  AppState,
+  | 'questionMs'
+  | 'fileName'
+  | 'stats'
+  | 'kind'
+  | 'cancelled'
+  | 'showMeshMs'
+  | 'shownLevel'
+  | 'stressCount'
+  | 'preset'
+  | 'imported'
+  | 'baked'
+  | 'showingBaked'
+  | 'orientation'
+  | 'pair'
+> => ({
   questionMs: null,
   fileName: null,
-  progress: null,
-  progressLog: [],
   stats: null,
   kind: null,
-  painting: null,
-  error: null,
-  errorCode: null,
-  errorDetail: null,
   cancelled: false,
-  framesWhileConverting: 0,
-  longestFrameGapMs: 0,
   showMeshMs: null,
   shownLevel: 0,
-  perf: null,
   stressCount: 0,
-  look: { ...DEFAULT_LOOK },
-  lookPreset: presetOf(DEFAULT_LOOK),
   preset: null,
   imported: null,
   baked: null,
   showingBaked: false,
   orientation: { turn: null, turnDeg: 0 },
   pair: null,
+});
+const state: AppState = {
+  ...noMini(),
+  ready: false,
+  page: 'empty',
+  busy: false,
+  question: null,
+  meet: view.state.meet,
+  progress: null,
+  progressLog: [],
+  painting: null,
+  error: null,
+  errorCode: null,
+  errorDetail: null,
+  framesWhileConverting: 0,
+  longestFrameGapMs: 0,
+  perf: null,
+  look: { ...DEFAULT_LOOK },
+  lookPreset: presetOf(DEFAULT_LOOK),
 };
 /** The baked table level of the converted mini; null when it has the per-vertex look. */
 let baked: BakedMini | null = null;
@@ -1787,18 +1810,7 @@ function closeMini(): void {
   baked = null;
   detailKtx2 = null;
   importedName = null;
-  Object.assign(state, {
-    fileName: null,
-    stats: null,
-    kind: null,
-    imported: null,
-    baked: null,
-    showingBaked: false,
-    stressCount: 0,
-    shownLevel: 0,
-    preset: null,
-    cancelled: false,
-  });
+  Object.assign(state, noMini());
   setStatus(COPY.dropHint);
   render();
   chooseAgain.focus();

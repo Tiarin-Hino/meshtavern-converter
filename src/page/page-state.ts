@@ -58,7 +58,6 @@ export const COPY = {
   downloadTable: 'Download table level',
   downloadFar: 'Download far level',
   adjust: 'Adjust',
-  adjustHint: 'Up and turn · Size · Look · Base',
   pairHint: 'Two files? Drop the figure and its base together.',
   addBase: 'Add a base file',
   removeBase: 'Remove the base',
