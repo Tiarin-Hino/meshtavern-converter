@@ -571,7 +571,9 @@ test('bakes and compresses a mini without being asked to, and shows it that way'
   }
 });
 
-test('the page does not freeze while a mini is converted, baked and shown', async ({ page }) => {
+test('the page does not freeze while a mini is converted, baked and shown', async ({
+  page,
+}, testInfo) => {
   test.setTimeout(240_000);
   await page.goto('/');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
@@ -584,6 +586,11 @@ test('the page does not freeze while a mini is converted, baked and shown', asyn
   expect(state.error).toBeNull();
   expect(state.showingBaked).toBe(true);
   expect(state.framesWhileConverting).toBeGreaterThan(10);
+  // In the report of every run, passed or not: the figure the CI limit is judged by (#156).
+  testInfo.annotations.push({
+    type: 'longest stall',
+    description: `${Math.round(state.longestFrameGapMs)} ms during ${state.longestFrameGapDuring}`,
+  });
   expect(
     state.longestFrameGapMs,
     `the longest stall fell during ${state.longestFrameGapDuring}`,
