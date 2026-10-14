@@ -103,9 +103,13 @@
   flex-wrap: wrap;
 }
 
-/* Confirm takes the panel's width. */
+/* Confirm takes the panel's width; in the consumer's footer (`footer`), what Cancel leaves of it. */
 .mt-questions .mt-questions-confirm {
   align-self: stretch;
+}
+
+.mt-questions.panel-footer .mt-questions-confirm {
+  flex: 1;
 }
 
 /*

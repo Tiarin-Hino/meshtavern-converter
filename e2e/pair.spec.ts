@@ -78,6 +78,7 @@ test('sets the generated figure in its recess, and moves it only when applied', 
     liftMm: 0,
     turnDeg: 0,
   });
+  await page.locator('#pair').evaluate((details: HTMLDetailsElement) => (details.open = true));
   await page.locator('#pair').scrollIntoViewIfNeeded();
   await shoot(page, testInfo, 'pair-pending-move');
 
@@ -94,6 +95,8 @@ test('swaps figure and base, and removes the base', async ({ page }) => {
   test.setTimeout(120_000);
   await open(page);
   await loadPair(page);
+  // The Base section's lines and buttons are in its disclosure (#144).
+  await page.locator('#pair > summary').click();
   await page.evaluate(() => window.__mt.swapPair());
   await expect(page.locator('body')).toHaveAttribute('data-state', 'done');
   const swapped = await page.evaluate(() => window.__mt.state.stats!.pair!.pairing);
@@ -138,7 +141,7 @@ test('adds a base to the mini on screen, and refuses two figures', async ({ page
   await page.setInputFiles('#file', file('hero.stl', generatePuddleFigure(12)));
   await page.waitForFunction(() => window.__mt.state.page === 'done');
   expect(await page.evaluate(() => window.__mt.state.stats!.pair)).toBeNull();
-  await page.locator('#adjust').evaluate((details: HTMLDetailsElement) => (details.open = true));
+  await page.locator('#pair').evaluate((details: HTMLDetailsElement) => (details.open = true));
   await page.setInputFiles('#base-file', file('hero-base.stl', generateRecessBase()));
   await page.waitForFunction(() => window.__mt.state.stats?.pair != null);
   await expect(page.locator('#heading')).toHaveText('hero + hero-base');

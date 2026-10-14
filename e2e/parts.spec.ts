@@ -138,7 +138,7 @@ test('joins a wing that lies apart by two pairs, then asks about the base and th
   expect(stats.asked.map((a) => a.role)).toEqual(['parts', 'base', 'figure', 'meet']);
   expect(stats.pair!.parts.map((p) => p.source)).toEqual(['body', 'marked']);
   expect(stats.choices.parts!.joints[0]!.pairs).toHaveLength(2);
-  await page.locator('#adjust').evaluate((details: HTMLDetailsElement) => (details.open = true));
+  await page.locator('#pair').evaluate((details: HTMLDetailsElement) => (details.open = true));
   await expect(page.locator('#pair-parts')).toHaveText('Parts: wing marked');
   await expect(page.locator('#pair-files')).toHaveText(
     'Base: recess-base.stl · Figure: body.stl + wing.stl',
@@ -181,7 +181,7 @@ test('makes parts of one figure when there is no base, pulls them apart, refuses
   const stats = await page.evaluate(() => window.__mt.state.stats!);
   expect(stats.pair).toMatchObject({ placement: null, baseOrientation: null });
   expect(stats.asked.map((a) => a.role)).toEqual(['parts', 'mini']);
-  await page.locator('#adjust').evaluate((details: HTMLDetailsElement) => (details.open = true));
+  await page.locator('#pair').evaluate((details: HTMLDetailsElement) => (details.open = true));
   await expect(page.locator('#pair-files')).toHaveText('Figure: body.stl + wing.stl');
   await expect(page.locator('#add-base')).toBeVisible();
 

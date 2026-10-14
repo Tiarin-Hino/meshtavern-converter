@@ -246,6 +246,7 @@ test('adds a plain base to a mini without one', async ({ page }) => {
     suggestedFrom: 'default',
   });
   const before = await page.evaluate(() => window.__mt.state.stats!.triangles);
+  await page.locator('#sizing > summary').click();
   await page.locator('#plain-base').check();
   await page.waitForFunction(() => !window.__mt.state.busy);
   const stats = await page.evaluate(() => window.__mt.state.stats!);
@@ -334,6 +335,8 @@ test('applies the primed-and-washed look and lets the user adjust it', async ({
     'shade',
   );
 
+  // The look's controls are in its disclosure (#144).
+  await page.locator('#look > summary').click();
   await page.getByLabel('Base coat').fill('#c9b994');
   await page.getByLabel('Shadows').fill('1');
   expect(await page.evaluate(() => window.__mt.state.look)).toMatchObject({
@@ -354,6 +357,7 @@ test('offers look presets, and the export says which one the mini has', async ({
   page,
 }, testInfo) => {
   await page.evaluate(() => window.__mt.loadGenerated(200));
+  await page.locator('#look > summary').click();
   const presets = page.getByRole('group', { name: 'Starting points' }).getByRole('button');
   expect(await presets.count()).toBeGreaterThanOrEqual(4);
   expect(await presets.count()).toBeLessThanOrEqual(6);
@@ -450,7 +454,7 @@ test('exports a level as GLB and opens the file again', async ({ page }, testInf
   // The two download buttons offer files named after the mini and their own level, whatever
   // level is on screen; the close level is shown but never offered (PM decision, 2026-09-20).
   await page.evaluate(() => window.__mt.loadGenerated(50));
-  await page.getByRole('button', { name: /^Close/ }).click();
+  await page.locator('#levels').getByRole('button', { name: 'Close' }).click();
   let download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download table level' }).click();
   expect((await download).suggestedFilename()).toBe('generated-50-table.glb');
