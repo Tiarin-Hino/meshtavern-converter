@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { encodeBinaryStl } from '../src/lib/dev';
+import { generateFigure } from '../src/regression/shapes';
 
 /**
  * The theme (#143, design note docs/design/look-and-feel.md §2.2): the page follows the system's
@@ -23,6 +25,35 @@ const theme = (page: Page) =>
       backdrop: style.getPropertyValue('--scene-backdrop').trim(),
     };
   });
+
+/** The most common colour in a patch of the screen, as [r, g, b]: a grid line crossing it does not count. */
+async function screenColour(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+): Promise<number[]> {
+  const png = await page.screenshot({ clip });
+  return page.evaluate(async (base64) => {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    const counts = new Map<string, number>();
+    for (let i = 0; i < data.length; i += 4) {
+      const key = `${data[i]},${data[i + 1]},${data[i + 2]}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const [mode] = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return mode![0].split(',').map(Number);
+  }, png.toString('base64'));
+}
+
+/** A patch near the stage's bottom-left corner, clear of the drop card and the level chips. */
+async function stagePatch(page: Page, selector: string) {
+  const box = (await page.locator(selector).boundingBox())!;
+  return { x: box.x + 8, y: box.y + box.height * 0.5, width: 32, height: 32 };
+}
 
 const pressed = (page: Page) =>
   page.locator('[data-theme-switch] [aria-pressed="true"]').getAttribute('aria-label');
@@ -78,4 +109,34 @@ test('without a choice the page follows the system’s setting', async ({ page }
   const light = await theme(page);
   expect(dark.attribute).toBeNull();
   expect(dark.surface).not.toBe(light.surface);
+});
+
+test('the viewer and the question scene draw the --scene-backdrop, the same dark in both themes', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto('/?bake=off');
+    await page.waitForFunction(() => window.__mt?.state.ready === true);
+    const role = (await theme(page)).backdrop;
+    expect(role).toMatch(/^#[0-9a-f]{6}$/);
+    const expected = [1, 3, 5].map((i) => parseInt(role.slice(i, i + 2), 16));
+    const near = (colour: number[]) =>
+      colour.forEach((channel, k) =>
+        expect(Math.abs(channel - expected[k]!)).toBeLessThanOrEqual(2),
+      );
+
+    near(await screenColour(page, await stagePatch(page, '#viewport')));
+
+    await page.setInputFiles('#file', {
+      name: 'hero.stl',
+      mimeType: 'model/stl',
+      buffer: Buffer.from(encodeBinaryStl(generateFigure(true))),
+    });
+    await page.waitForFunction(
+      () => window.__mt.state.page === 'asking' && window.__mt.state.questionMs !== null,
+    );
+    near(await screenColour(page, await stagePatch(page, '#question-view')));
+  }
 });
