@@ -207,7 +207,8 @@ body[data-state='empty'] #panel {
 }
 
 #panel.card #file-name,
-#panel.card #status {
+#panel.card #status,
+#panel.card #what-you-get {
   max-width: 100%;
   color: var(--text-muted);
   overflow-wrap: anywhere;
@@ -580,6 +581,31 @@ body[data-state='empty'] #panel {
 
 body[data-dragging] #drop-frame {
   display: flex;
+}
+
+/* ---------- Credits (§4.6, #145): the application's dialog, wider for the list ---------- */
+
+/* Wider than the application's 26 rem dialog, so a part and its licence read on one or two lines;
+   the list scrolls inside the dialog on a short screen. (proposal) */
+#credits .dialog {
+  width: min(100%, 36rem);
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow-y: auto;
+}
+
+#credits .credits-list {
+  margin: var(--space-3) 0;
+}
+
+#credits .credits-list dt {
+  margin-top: var(--space-2);
+  font-weight: var(--weight-medium);
+}
+
+#credits .credits-list dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 /* ---------- The team's tools (?dev): on the tokens, not restyled (§6) ---------- */

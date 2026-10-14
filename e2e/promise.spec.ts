@@ -16,9 +16,9 @@ const MAX_URL_LENGTH = 2048;
 /**
  * Where the page's own code, workers and WebAssembly are served from, and its theme: the table
  * application's stylesheets and fonts under /theme/ (#143). A font is fetched when the first
- * glyph of its face is drawn, which can be after the file is picked.
+ * glyph of its face is drawn, which can be after the file is picked; so can the favicon (#145).
  */
-const OWN_FILES = /^\/(assets|basis|theme)\//;
+const OWN_FILES = /^\/((assets|basis|theme)\/|favicon\.svg$)/;
 
 interface Recorded {
   url: string;

@@ -40,16 +40,30 @@ export function pageStateOf(app: {
   return 'empty';
 }
 
+/**
+ * The product's name (#147: PolyWash, the PM's pick and casing of 2026-10-14), the one place it
+ * lives: the bar, the tab's title, the description and the tests read it from here.
+ */
+const NAME = 'PolyWash';
+/** What the page does, in one sentence (#145, spec L3): an STL in, a game-ready mini out. */
+const SENTENCE = 'An STL of a miniature in, a game-ready mini out.';
+const PROMISE = 'Your file never leaves your computer.';
+
 export const COPY = {
   ...QUESTION_COPY,
-  title: 'MeshTavern Converter',
-  promise: 'Your file never leaves your computer.',
+  title: NAME,
+  // #145: the tab's title and the description tag (set at start-up from these).
+  documentTitle: `${NAME}: an STL of a miniature in, a game-ready mini out`,
+  description: `${SENTENCE} Everything runs in your browser. ${PROMISE}`,
+  promise: PROMISE,
   promiseShort: 'Runs in your browser. Your file never leaves your computer.',
   openStl: 'Open an STL',
   dropHeading: 'Drop an STL here',
   chooseFile: 'Choose a file',
   chooseAnother: 'Choose another file',
-  dropHint: 'You get a game-ready mini in seconds. Everything runs in this tab.',
+  // #145: the empty state's two sentences, then what comes out (a third line).
+  dropHint: `${SENTENCE} Everything runs in this tab.`,
+  whatYouGet: 'You get three detail levels, a look and two downloads.',
   dropOverlay: 'Drop to convert',
   errorHeading: 'This file did not become a mini',
   cancel: 'Cancel',
@@ -70,6 +84,9 @@ export const COPY = {
   close: 'Close',
   more: 'More',
   credits: 'Credits',
+  // #145: the credits dialog's last line (spec L3).
+  collectsNothing:
+    'This page collects nothing and sends nothing. It stores only your own choices, such as the theme, on this device.',
   meshTavern: 'MeshTavern',
   expandPanel: 'Expand the panel',
 } as const;

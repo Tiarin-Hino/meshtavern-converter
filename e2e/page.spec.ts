@@ -40,11 +40,21 @@ test('shows the empty, converting, done and error states on the components', asy
   await expect(bar.getByRole('button', { name: COPY.credits })).toBeVisible();
   await expect(bar.getByRole('button', { name: COPY.more })).toBeHidden();
 
-  // Empty: the centred card with the heading, the button and the promise.
+  // The tab reads the name and the sentence (#145).
+  await expect(page).toHaveTitle(COPY.documentTitle);
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    'content',
+    COPY.description,
+  );
+
+  // Empty: the centred card with the heading, the two sentences, what comes out, the button
+  // and the promise (#145).
   expect(await pageState(page)).toBe('empty');
   await expect(page.locator('body')).toHaveAttribute('data-state', 'empty');
   await expect(page.locator('#panel')).toHaveClass(/\bcard\b/);
   await expect(page.getByRole('heading', { name: COPY.dropHeading })).toBeVisible();
+  await expect(page.locator('#status')).toHaveText(COPY.dropHint);
+  await expect(page.locator('#panel').getByText(COPY.whatYouGet)).toBeVisible();
   await expect(page.getByRole('button', { name: COPY.chooseFile })).toHaveClass(/btn-primary/);
   await expect(page.locator('#panel').getByText(COPY.promise)).toBeVisible();
   await shoot(page, testInfo, 'page-empty');
@@ -260,6 +270,18 @@ test('Credits in the bar opens the dialog, which its Close and the scrim close',
   await opener.click();
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  // What the page ships, the full texts beside the theme, and that it collects nothing (#145).
+  await expect(dialog.locator('dt')).toContainText(['Inter', 'three.js', 'xatlas']);
+  await expect(dialog.getByRole('link', { name: 'NOTICE.txt' })).toHaveAttribute(
+    'href',
+    '/theme/NOTICE.txt',
+  );
+  await expect(dialog.getByText(COPY.collectsNothing)).toBeVisible();
+  const notice = await page.request.get('/theme/NOTICE.txt');
+  expect(notice.ok()).toBe(true);
+  expect(await notice.text()).toContain('Licence texts');
+  const favicon = await page.request.get('/favicon.svg');
+  expect(favicon.ok()).toBe(true);
   await dialog.getByRole('button', { name: COPY.close }).click();
   await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
