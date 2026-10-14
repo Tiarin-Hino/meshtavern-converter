@@ -56,13 +56,13 @@ Measured in the Claude Code cloud container (4 cores), Playwright 1.63, Chromium
 | With `painting.spec.ts` in the other worker, pinned to 2, with fix | 33.7 s         | 16.1 s    | 5,703 ms   | 1,606 ms        |
 | The whole suite on 4 cores, with the fix (72 passed)               | 22.4 s         | 4.8 s     | 1,422 ms   | 791 ms          |
 
-The original failure did not reproduce in the container, so CI's runner is probably slower. The new log line will give its own figures.
+The original failure did not reproduce in the container. On CI, in this PR's first run (GitHub Actions, 2 workers), the new line read `a drawn frame in 36566 ms, the page open again 3312 ms later`, and all 72 tests passed. That frame came 36.6 s after the stress scene was gone: longer than the 5 s of Playwright's end-of-test screenshot and the 30 s the next test had to start, which is the failure's signature.
 
 CI before the fix: this test failed in 5 of the 16 completed e2e attempts after PR #131 was merged (runs 289 to 313), and in 2 of 2 on PR #150.
 
 ## Still open
 
-- The fix rests on the measured backlog, not on a reproduced failure.
+- One green CI run is not yet a rate: the next runs on main will show whether the grid test stays green.
 - Runs 297, 300 and 309 (the last two on their first attempt) also failed "runs the device benchmark and offers the result as text" at its 180 s, and run 297 the 400 ms stall limit (450 ms). The benchmark draws 100- and 400-mini scenes too; not addressed here.
 - The CI job's limit is 25 minutes and recent jobs took up to 23.7. The new steps add seconds to a normal run.
 
