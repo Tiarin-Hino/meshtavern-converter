@@ -76,8 +76,8 @@ test('switches between detail levels without moving the camera', async ({ page }
 });
 
 test('fills the table with 100 minis and reports rendering figures', async ({ page }, testInfo) => {
-  // Software rendering of 100 minis is slow on CI runners.
-  test.setTimeout(180_000);
+  // Software rendering of 100 minis is slow on CI runners, and so is letting go of them.
+  test.setTimeout(300_000);
   // The 50 mm sheet is Medium without a base; 32 mm apart the copies overlap and the scene
   // gets too heavy for CI's software renderer. As Large they stand 64 mm apart, close to the
   // 50.8 mm the scene had before the 32 mm grid.
@@ -99,9 +99,29 @@ test('fills the table with 100 minis and reports rendering figures', async ({ pa
 
   await page.getByRole('button', { name: 'Single mini' }).click();
   expect(await page.evaluate(() => window.__mt.state.stressCount)).toBe(0);
-  // End on a drawn frame of the single mini: in software rendering one frame of 100 minis can
-  // take seconds, and closing the page during it broke the browser for the next test on CI.
+  // Let go of the 100 minis within this test's time (#151). In software rendering one frame of
+  // them can take seconds, and closing the page with such frames still queued is the likely
+  // reason the next test's context did not open within its 30 s on CI. state.perf is copied
+  // twice a second, so it only says the stress scene is gone; Chromium's screenshot copies a
+  // newly drawn frame, which comes after every frame queued before it; opening the page again
+  // makes the browser tear the stress page down here, not after the test.
   await page.waitForFunction(() => window.__mt.state.perf?.minis === 0, null, { timeout: 120_000 });
+  const cleared = Date.now();
+  // CI's software renderer can refuse a capture outright (scripts/lib/feedback-session.mjs
+  // meets it too): not this test's failure, and opening the page again still lets go.
+  const drawn = await page.screenshot({ timeout: 120_000 }).then(
+    () => 'a drawn frame',
+    (error: unknown) => {
+      if (!String(error).includes('Unable to capture screenshot')) throw error;
+      return 'no capture';
+    },
+  );
+  const drawnMs = Date.now() - cleared;
+  await page.goto('/?dev&bake=off', { timeout: 120_000 });
+  await page.waitForFunction(() => window.__mt?.state.ready === true, null, { timeout: 120_000 });
+  console.log(
+    `after 100 minis: ${drawn} in ${drawnMs} ms, the page open again ${Date.now() - cleared - drawnMs} ms later`,
+  );
 });
 
 test('draws the 32 mm grid and stands stress minis one footprint apart', async ({
