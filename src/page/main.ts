@@ -138,6 +138,11 @@ interface AppState {
    */
   framesWhileConverting: number;
   longestFrameGapMs: number;
+  /**
+   * Where the conversion was when the longest gap fell: the step in progress, `transcode` or
+   * `show` after the worker is done, `before → after` when it changed during the gap (#156).
+   */
+  longestFrameGapDuring: string | null;
   /** Main-thread time to hand the first mesh to the GPU. */
   showMeshMs: number | null;
   /** Which version is on screen: 0 = full detail, 1… = LODs from highest to lowest. */
@@ -495,6 +500,7 @@ const state: AppState = {
   errorDetail: null,
   framesWhileConverting: 0,
   longestFrameGapMs: 0,
+  longestFrameGapDuring: null,
   perf: null,
   look: { ...DEFAULT_LOOK },
   lookPreset: presetOf(DEFAULT_LOOK),
@@ -1043,17 +1049,29 @@ function showPerf(): void {
 }
 setInterval(showPerf, 500);
 
+/** Where a conversion is once the worker is done: the frame watch names it (#156). */
+let afterWorker: 'transcode' | 'show' | null = null;
+
 /** Counts animation frames until stopped, to prove the page stayed responsive. */
 function watchFrames(): () => void {
   let running = true;
   let last = performance.now();
+  afterWorker = null;
+  const phase = (): string => afterWorker ?? state.progress?.step ?? 'start';
+  let lastPhase = phase();
   state.framesWhileConverting = 0;
   state.longestFrameGapMs = 0;
+  state.longestFrameGapDuring = null;
   const tick = (now: number): void => {
     if (!running) return;
     state.framesWhileConverting++;
-    state.longestFrameGapMs = Math.max(state.longestFrameGapMs, now - last);
+    const during = phase();
+    if (now - last > state.longestFrameGapMs) {
+      state.longestFrameGapMs = now - last;
+      state.longestFrameGapDuring = during === lastPhase ? during : `${lastPhase} → ${during}`;
+    }
     last = now;
+    lastPhase = during;
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -1191,6 +1209,7 @@ async function convert(
     baked = null;
     detailKtx2 = null;
     state.baked = null;
+    afterWorker = 'transcode';
     if (result.baked) {
       const { mesh, maps, ktx2, detail, charts, utilisation, tableAreaMm2 } = result.baked;
       try {
@@ -1216,6 +1235,7 @@ async function convert(
         stats.bakeSkipped = { reason: 'failed', step: 'transcode', message };
       }
     }
+    afterWorker = 'show';
     levels = [result.mesh, ...result.lods.map((lod) => lod.mesh)];
     state.stats = stats;
     state.kind = result.kind;
