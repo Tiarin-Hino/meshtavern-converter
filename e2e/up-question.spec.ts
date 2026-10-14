@@ -181,9 +181,17 @@ test('previews a turn without asking, and asks again for Set down and Reset', as
   await expect(page.locator('#ask-pending')).toHaveText('Turned 30°');
   expect(await page.evaluate(() => window.__mt.state.question!.serial)).toBe(first.serial);
 
+  // The axis on screen, pressed while a turn is tried out, stands the mini on it again (#143).
+  await page.locator('#ask-up [data-up="+z"][aria-pressed="true"]').click();
+  const straight = await question(page, first.serial);
+  expect(straight.orientation).toMatchObject({ up: '+z', tiltDeg: 0 });
+  await expect(page.locator('#ask-pending')).toBeHidden();
+  await pitch.click();
+  await pitch.click();
+
   // Set down asks again, with the turn; Reset asks again with the proposal.
   await page.locator('#ask-set-down').click();
-  const setDown = await question(page, first.serial);
+  const setDown = await question(page, straight.serial);
   expect(setDown.orientation.method).toBe('manual');
   await expect(page.locator('#ask-pending')).toBeHidden();
   await page.locator('#ask-reset').click();

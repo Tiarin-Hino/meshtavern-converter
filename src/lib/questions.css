@@ -28,8 +28,9 @@
 }
 
 /*
- * The controls on the panel's surface, so their text reads in a dialog of another colour too
- * (found by the consumer check, #119). No specificity: a consumer's own background wins.
+ * The controls on the panel's surface in the theme's text colour (design note §3: --panel became
+ * --surface), so they read in a dialog of another colour too (#119). No specificity: a consumer's
+ * own background wins.
  */
 :where(.mt-questions-controls) {
   color: var(--text);
@@ -63,18 +64,25 @@
   gap: var(--space-3);
 }
 
+/* A field takes the panel's width, as in the mockups; the segmented axis keeps its own. */
 .mt-questions .field {
+  align-self: stretch;
   margin: 0;
+}
+
+.mt-questions .field > .segmented {
+  align-self: flex-start;
 }
 
 .mt-questions p {
   margin: 0;
 }
 
-/* The question, and the sentence that says what was found. */
+/* The question, and the sentence that says what was found (the question's colour outranks a dialog's muted paragraphs). */
 .mt-questions .question {
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
+  color: var(--text);
 }
 
 .mt-questions .found,
@@ -169,8 +177,22 @@
 }
 
 .mt-questions .pairs .chip {
-  height: 1.75rem;
-  white-space: pre;
+  height: auto;
+  min-height: 1.75rem;
+  padding-block: var(--space-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+/* A file's name on a Look at button wraps in the panel rather than pushing it sideways. */
+.mt-questions #meet-view .btn {
+  max-width: 100%;
+  padding-block: var(--space-1);
+  line-height: var(--leading-tight);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
 }
 
 .mt-questions .pairs .chip[aria-pressed='true'] {

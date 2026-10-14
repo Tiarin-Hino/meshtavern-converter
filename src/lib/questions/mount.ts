@@ -1215,9 +1215,11 @@ class View implements QuestionsView {
     );
     ask.source.addEventListener('change', () => void this.setPreset(ask.source.value || null));
     for (const button of ask.up.querySelectorAll<HTMLButtonElement>('[data-up]')) {
-      // The axis on screen pressed again changes nothing, as a select's change never fired for it.
+      // The axis the mini stands on, pressed again, changes nothing (a select's change never fired
+      // for it); pressed while the mini is tilted off it or a turn is tried out, it stands it up.
       button.addEventListener('click', () => {
-        if (button.getAttribute('aria-pressed') === 'true') return;
+        const standing = this.upQuestion()?.orientation.tiltDeg === 0 && this.turned.turn === null;
+        if (button.getAttribute('aria-pressed') === 'true' && standing) return;
         this.answerQuestion({
           kind: 'up',
           orientation: { up: button.dataset.up as UpAxis },
