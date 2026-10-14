@@ -32,7 +32,7 @@ The fix is in the test, not the page: it waits until `performance.now()` is past
 
 - **Trace attachments were missing from the report.** `testInfo.attach` with a 50 MB JSON body did not reach the HTML report. **Fix:** the diagnosis spec wrote the trace into `playwright-report/diag/`, which the CI job uploads anyway.
 - **Tracing made its own gap.** Started right before the conversion, tracing put an 850–1,100 ms gap in every run, all at about 1 s after navigation. That was the same teardown, made longer by tracing. **Fix:** tracing started before `page.goto`.
-- **Two test workers at once doubled the numbers.** The first diagnosis ran the traced spec next to the real test, and the real test failed 12 times out of 12 (517–900 ms). **Fix:** every later measurement ran with `--workers 1`, as CI's e2e run does.
+- **Two test workers at once doubled the numbers.** The first diagnosis ran the traced spec next to the real test, and the real test failed 12 times out of 12 (517–900 ms). **Fix:** every later measurement ran with `--workers 1`. CI's e2e run does not: `playwright.config.ts` sets no `workers`, so on the 4-vCPU runner Playwright runs two, and the figures below are single-worker ones. This PR's CI runs are the two-worker evidence.
 
 ## Dead ends
 
@@ -52,5 +52,9 @@ Failures before the fix: 450, 433, 400, 650 and 450 ms against the 400 ms CI lim
 
 ## Still open
 
-- The CI limit stays at 400 ms. With the teardown out of the measurement, the gaps on CI were 17–33 ms, so the CI limit could go down to the spec's 100 ms. That is the PM's call once a few more runs show where the numbers settle.
+- The CI limit stays at 400 ms. With the teardown out of the measurement, the gaps on CI were 17–33 ms, but those were single-worker runs and CI runs two workers, so whether the CI limit could go down to the spec's 100 ms is the PM's call once a few more CI runs show where the numbers settle.
 - "runs the device benchmark and offers the result as text" also ran past its 180 s on one slow runner (and on 2026-10-13): software drawing of the stress scenes, a separate flake.
+
+## Story angle
+
+A flake blamed on the new theme turned out to be the browser tidying up the page before, one second late. Possible title: "The stall that was not ours".
