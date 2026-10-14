@@ -51,3 +51,5 @@ Development PC, `npm run corpus`. Times from the run of 2026-09-24 with the PC f
 ## Story angle
 
 What a mini's size means at the table, and why the converter measures the base rather than the figure. Possible title: "How many squares is your dragon?"
+
+Later: see 2026-10-14-smoke-stress-letgo.md (the stress test's guard did not wait for a drawn frame; #151).
