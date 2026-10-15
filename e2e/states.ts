@@ -55,11 +55,12 @@ export async function asking(page: Page): Promise<number> {
 }
 
 /**
- * A sheet of 180,000 triangles converting: it stays in the converting state for seconds even on a
- * fast machine. The caller cancels it (`window.__mt.cancel()`) when done with the state.
+ * A generated sheet of `quadsPerSide`² × 2 triangles converting (180,000 by default): it stays in
+ * the converting state for seconds even on a fast machine. The reference pictures take 600, so the
+ * conversion outlasts two pictures per theme. The caller cancels it (`cancel`) when done.
  */
-export async function converting(page: Page): Promise<void> {
-  void page.evaluate(() => window.__mt.loadGenerated(300)).catch(() => undefined);
+export async function converting(page: Page, quadsPerSide = 300): Promise<void> {
+  void page.evaluate((n) => window.__mt.loadGenerated(n), quadsPerSide).catch(() => undefined);
   await page.waitForFunction(
     () => window.__mt.state.page === 'converting' && window.__mt.state.progressLog.length > 1,
   );

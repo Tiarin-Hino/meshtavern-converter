@@ -17,22 +17,23 @@ The table application keeps its look with the same three tests (its spec 07 U7),
 
 ## How
 
-- **The scan** is axe-core through Playwright (`@axe-core/playwright` 4.13.0, pinned like the application's), with the WCAG 2.2 A and AA rules. It runs over empty, the drag overlay, the credits dialog, converting, error, the up question, done with every section of Adjust open, the pairs stop and the final view of a figure on its base, the phone's More menu and sheet, and the `?dev` Paint tool, each in light and dark. A serious or critical violation fails; every result, the rest included, is attached to the report as text.
-- **The keyboard pass** has two halves. The sweep lists every visible, enabled control not taken out of the order (`tabindex="-1"`: the hidden file inputs and the menu's items, which the arrows move between), presses Tab until the focus has come round, and asserts each was reached with a 2 px solid outline in the colour `--focus-ring` resolves to. It runs in seven states and on a phone. The flows then drive each kind of control with keys only: both file buttons (the `filechooser` event), the theme switch, the credits dialog (Tab stays inside, Escape gives the focus back), a disclosure, a level chip, a look preset chip, a slider, the six-way axis in the panel and at the question, Confirm, the More menu and the sheet's handle.
-- **The reference pictures** are Playwright's `toHaveScreenshot`, one set per platform (Playwright puts the platform in the file name). The canvases are hidden by `e2e/reference-screens.css`, the converting step and its bar are masked, motion is reduced. The Linux set, the one CI compares, is committed; a platform's first run writes its own. `docs/guides/reference-screenshots.md` says how to read a failure and how to rewrite the pictures.
-- `e2e/states.ts` holds the ways into each state the three specs share. The done state of the pictures comes from the generated figure with `?bake=off`: the canvas is not on them, so the texture is not needed.
-- "The two phone frames" of the issue are read as the two phone sizes the page's tests already hold the sheet to, 375 × 812 and 390 × 844.
+- **The scan** is axe-core through Playwright (`@axe-core/playwright` 4.13.0, pinned like the application's), with the WCAG 2.2 A and AA rules, in every state the page, its questions and the `?dev` Paint tool can be in, both themes. Serious and critical fail; every result is attached to the report as text. The full list is in `e2e/accessibility.spec.ts`.
+- **The keyboard pass** sweeps with Tab: it lists every visible, enabled control not taken out of the order (`tabindex="-1"`: the hidden file inputs, the menu's items), presses Tab until the focus comes round, and asserts each was reached with a 2 px solid outline in the colour `--focus-ring` resolves to. Flows then drive each kind of control with keys only (`e2e/keyboard.spec.ts`).
+- **The reference pictures** are Playwright's `toHaveScreenshot`, one set per platform (the platform is in the file name), canvases hidden, the converting step masked, motion reduced; the Linux set is committed. `docs/guides/reference-screenshots.md` says how to read a failure and rewrite them.
+- **Held frames.** While a picture is taken, `freezeFrames` keeps the page's animation-frame callbacks and hands them back after (see Problems).
+- `e2e/states.ts` holds the ways into each state the three specs share. "The two phone frames" of the issue are read as the two phone sizes the page's tests already hold the sheet to, 375 × 812 and 390 × 844.
 
 ## Problems and how we solved them
 
 - **Two empty yellow buttons while converting.** The scan's first run failed on `button-name` for `#ask-confirm` and `#meet-confirm`. **Cause:** since #144 the question view moves its two Confirm buttons into the page's footer, and only hides them when a question is shown; before the first question both stood visible and empty under Cancel on the converting card (`page.spec.ts` took a picture of it, nobody saw it). **Fix:** the view hides them when it moves them; `page.spec.ts` asserts the footer holds Cancel alone while converting.
 - **The chosen pair's chip hid the focus ring.** **Cause:** `questions.css` draws a pressed pair chip's outline in its pair's colour, which is more specific than the theme's one focus rule. **Fix:** the pair's outline yields while the chip has the keyboard's focus.
 - **The credits dialog failed the contrast rule, once.** **Cause:** the scan ran while the dialog was still fading in. **Fix:** the scan runs with reduced motion, under which the theme turns off the dialog's and the menu's animations.
-- **A picture at the question waited more than a minute.** With 2 workers on 4 cores, each test's question scene drew in software continuously; the first picture after a theme change took 9 s in a probe and never came in the full run, at 5, 30 and 60 s timeouts. Taking the stylesheet out of each picture (`stylePath`) and injecting it once changed nothing. **Fix:** `freezeFrames` holds every `requestAnimationFrame` callback while the pictures are taken and hands them back afterwards, so the scenes stop drawing and go on afterwards. The run went from 9 min (3 failed) to 29 s (all passed).
+- **A picture at the question waited more than a minute.** **Cause:** with 2 workers on 4 cores, each test's question scene drew continuously in software, and a picture waits for a frame. **Fix:** `freezeFrames` holds the animation-frame callbacks while the pictures are taken and hands them back after. The run went from 9 min with 3 failures to 29 s.
 
 ## Dead ends
 
-- A longer screenshot timeout: 60 s was not enough, and it only hid the cost.
+- A longer screenshot timeout: 5, 30 and 60 s all ran out, and it would only have hidden the cost.
+- The stylesheet injected once instead of with each picture (`stylePath`): no change.
 
 ## Numbers
 

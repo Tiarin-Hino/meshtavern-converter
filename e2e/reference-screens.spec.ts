@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { asking, cancel, error, freezeFrames, open, thawFrames } from './states';
+import { asking, cancel, converting, error, freezeFrames, open, thawFrames } from './states';
 
 /**
  * The reference screenshots (#146, spec docs/specs/look-and-feel.md L4, design note
@@ -44,10 +44,7 @@ for (const frame of FRAMES) {
       await both(page, frame.name, 'empty');
 
       // Converting: the step and the bar move on while the picture is taken, so they are masked.
-      void page.evaluate(() => window.__mt.loadGenerated(600)).catch(() => undefined);
-      await page.waitForFunction(
-        () => window.__mt.state.page === 'converting' && window.__mt.state.progressLog.length > 1,
-      );
+      await converting(page, 600);
       await both(page, frame.name, 'converting', ['#status', '#progress']);
       await cancel(page);
 
