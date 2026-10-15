@@ -2,17 +2,25 @@
  * The product page (#41, docs/design/product-page.md). Which element shows is decided by
  * body[data-state] and data-in, not by flipping hidden panel by panel.
  *
- * Every colour is a role of the table application's tokens.css, and the fonts, the page's
- * background and the focus ring are its components.css: index.html links both before this sheet
- * (#143, design note look-and-feel.md §2.3 and §3). Restyling the page's elements on the
- * components is #144; until then its own controls keep the rules below, on the roles.
+ * The page on MeshTavern's components (#144, design note docs/design/look-and-feel.md §4): every
+ * colour is a role of the table application's tokens.css and every control a class of its
+ * components.css, which index.html links before this sheet (#143). This sheet holds the page's
+ * layout, the measurements of the mockups (docs/design/look-and-feel/mock.css), and two parts the
+ * components do not have outside the application's page frames: the disclosure and the callout
+ * (design note §12). No colour literal, no rule for a control by its element.
+ *
+ * The layout's sizes (design note §7, proposals):
+ *   PAGE_BAR_HEIGHT_REM   3.25  the application's app bar
+ *   CARD_WIDTH_REM        26    the application's centred card
+ *   PANEL_WIDTH_REM       22    the done panel; the application's dock is 19
+ *   PANEL_INSET           --space-3 around the panel on a desktop
+ *   LEVEL_CHIP_HEIGHT_REM 1.75
+ *   SHEET_PEEK_VH         44    the sheet's first screen on a phone; SHEET_FULL_VH 85 expanded
+ *   PHONE_MAX_WIDTH_PX    600   the media queries below and main.ts
  */
 
-:root {
-  /* Sizes of the layout (proposals of the design note); named apart from tokens.css's roles. */
-  --top-bar-height: 56px;
-  --card-width: 520px;
-  --page-panel-width: 360px;
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -23,12 +31,10 @@ body {
 
 body {
   display: grid;
-  grid-template-rows: var(--top-bar-height) minmax(0, 1fr) auto;
+  grid-template-rows: 3.25rem minmax(0, 1fr) auto;
   overflow: hidden;
-}
-
-[hidden] {
-  display: none !important;
+  color: var(--text);
+  background: var(--surface-page);
 }
 
 /* Every element that names states shows only in those. */
@@ -42,83 +48,67 @@ body[data-kind='glb'] [data-mini] {
   display: none !important;
 }
 
-/*
- * The page's own controls until #144 gives them the component classes. The question view's carry
- * them already (.btn, .chip, .input, .check) and must look as they do in the application, so
- * these rules leave them alone.
- */
-button:not(.btn, .chip),
-select:not(.input),
-input[type='number']:not(.input) {
-  min-height: 32px;
-  padding: 4px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-sunken);
-  color: inherit;
-  font: inherit;
+#top p,
+#panel p {
+  margin: 0;
 }
 
-button:not(.btn, .chip) {
-  border-color: var(--line-strong);
-  background: var(--surface);
-  cursor: pointer;
-}
-
-button:not(.btn, .chip):disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-button.primary:not(.btn) {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-/* Top bar */
+/* ---------- The bar: the application's app bar (§4.1) ---------- */
 
 #top {
+  z-index: var(--z-bar);
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0 var(--space-4);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
 
-h1 {
-  margin: 0;
-  font-size: 1.1rem;
-  white-space: nowrap;
-}
-
-#dev-badge {
-  padding: 1px 6px;
-  border: 1px solid var(--warn-text);
-  border-radius: 4px;
-  color: var(--warn-text);
-  font-size: 0.75rem;
+/* The wordmark slot: the name in the display face until the mark exists (spec L5, #147). */
+#wordmark {
+  font-family: var(--font-display);
+  font-weight: var(--heading-weight);
+  font-variation-settings: var(--display-settings);
+  letter-spacing: var(--heading-tracking);
 }
 
 #promise-short {
-  flex: 1;
-  margin: 0;
+  min-width: 0;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #choose {
   margin-left: auto;
 }
 
-/* Viewport, with the level chips in its corner */
+#meshtavern .icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.bar-narrow {
+  display: none;
+}
+
+/* A link in the menu reads as its other items, not as a link in a paragraph. */
+a.menu-item {
+  text-decoration: none;
+}
+
+/* ---------- The stage: the viewport, with the card, the panel and the chips over it ---------- */
 
 #stage {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
 /* The stage is dark in both themes: the scenes' backdrop, also before their first frame (#143). */
@@ -147,163 +137,170 @@ h1 {
   inset: 0;
 }
 
-#dev-paint label {
-  display: block;
-}
-
+/* The level chips in the viewport's corner (§4.4). */
 #levels {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  z-index: var(--z-panels);
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
-#levels button {
-  border-radius: 999px;
-  font-size: 0.85rem;
+#levels .chip {
+  height: 1.75rem;
+  padding: 0 var(--space-3);
 }
 
-#levels button[aria-pressed='true'] {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
-/* The card (empty, converting, error) and the panel (done): one element, two places. */
-
-#panel {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: var(--surface);
-}
-
-body:not([data-state='done'], [data-state='asking']) #panel {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: min(var(--card-width), 100% - 32px);
-  max-height: calc(100% - 32px);
-  overflow-y: auto;
-  transform: translate(-50%, -50%);
-  align-items: center;
-  padding: 32px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  text-align: center;
-}
-
-body[data-state='empty'] #panel {
-  border: 2px dashed var(--line-strong);
-}
-
-body[data-state='error'] #panel {
-  border-top: 4px solid var(--danger-text);
-}
-
-/* In the empty card the hint in #status comes after the button and the promise. */
-body[data-state='empty'] #status {
-  order: 1;
-}
+/* ---------- The card: empty, converting, error (§4.2) ---------- */
 
 /*
  * Over the viewport, not beside it: the canvas keeps the whole width in every state, so the
  * stress scene and the benchmark see the same view as before the page had a panel.
  */
-/* At the question (#92) the panel lies over the viewport as when done: the mesh is on screen. */
-body[data-state='done'] #panel,
-body[data-state='asking'] #panel {
+#panel.card {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--page-panel-width);
+  top: 50%;
+  left: 50%;
+  z-index: var(--z-panels);
+  align-items: center;
+  gap: var(--space-2);
+  width: min(26rem, 100% - 2 * var(--space-4));
+  max-height: calc(100% - 2 * var(--space-4));
   overflow-y: auto;
-  padding: 20px;
-  border-left: 1px solid var(--line);
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  transform: translate(-50%, -50%);
+  text-align: center;
 }
 
-#heading {
-  margin: 0;
-  font-size: 1.4rem;
+/* In the card the frame's parts give up their boxes: their children stand in the card's column. */
+#panel.card > .panel-header,
+#panel.card > .panel-body,
+#panel.card > .panel-footer,
+#panel.card .panel-section {
+  display: contents;
+}
+
+/* The empty state's sign: a dashed edge, as the application's empty state. */
+body[data-state='empty'] #panel {
+  border: 1px dashed var(--line-strong);
+}
+
+#panel.card .card-icon .icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-bottom: var(--space-2);
+  color: var(--text-faint);
+}
+
+#panel.card #heading {
+  flex: none;
+  max-width: 100%;
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--heading-weight);
+  letter-spacing: var(--heading-tracking);
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
-body[data-state='done'] #heading,
-body[data-state='asking'] #heading {
-  font-size: 1.15rem;
-}
-
-/* The question after the orient step (#92): Cancel comes last, under Confirm. */
-body[data-state='asking'] #cancel {
-  order: 1;
-}
-
-#file-name {
-  margin: 0;
+#panel.card #file-name,
+#panel.card #status,
+#panel.card #what-you-get {
+  max-width: 100%;
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
-#status {
-  margin: 0;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-#status.problem {
-  color: var(--danger-text);
-}
-
-.promise {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-#progress {
+#panel.card #progress {
   width: 100%;
-  max-width: 400px;
-  height: 10px;
-  appearance: none;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--surface-sunken);
-  overflow: hidden;
+  margin: var(--space-3) 0 var(--space-2);
 }
 
-#progress::-webkit-progress-bar {
-  background: var(--surface-sunken);
+#panel.card #choose-again,
+#panel.card #cancel {
+  margin-top: var(--space-3);
 }
 
-#progress::-webkit-progress-value {
-  background: var(--accent);
+#pair-hint,
+.promise {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
-#progress::-moz-progress-bar {
-  background: var(--accent);
+#panel.card .promise {
+  margin-top: var(--space-2);
+}
+
+/* ---------- The status line, and a problem as the application's callout (§4.3) ---------- */
+
+#status:not(.problem) .status-icon {
+  display: none;
+}
+
+#panel.card #status.callout {
+  width: 100%;
+  margin-top: var(--space-3);
+  text-align: left;
 }
 
 /*
- * A step that says nothing about its own progress (the bake): the fill shimmers, its highlight the
- * accent mixed toward the text on it (design note look-and-feel.md §3). The keyframes are the
- * page's own: components.css has a `shimmer` of its own for .skeleton.
+ * The callout of the application's pages.css, which it keeps under its page frames: the page
+ * carries the same rules for the error card's reason, the size warning and the pair warning.
  */
-#progress[data-silent]::-webkit-progress-value {
-  background: linear-gradient(
-      90deg,
-      var(--accent) 30%,
-      color-mix(in srgb, var(--accent) 70%, var(--on-accent)) 50%,
-      var(--accent) 70%
-    )
-    0 0 / 200% 100%;
-  animation: silent-step 1.4s linear infinite;
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--info-soft);
+  border-left: 3px solid var(--info-text);
+  border-radius: var(--radius-control);
 }
 
-#progress[data-silent]::-moz-progress-bar {
+.callout .icon {
+  margin-top: 0.05em;
+  color: var(--info-text);
+}
+
+.callout-error {
+  background: var(--danger-soft);
+  border-left-color: var(--danger-text);
+}
+
+.callout-error .icon {
+  color: var(--danger-text);
+}
+
+.callout-warn {
+  background: var(--warn-soft);
+  border-left-color: var(--warn-text);
+}
+
+.callout-warn .icon {
+  color: var(--warn-text);
+}
+
+#panel .callout {
+  color: var(--text);
+}
+
+.callout-text {
+  flex: 1;
+}
+
+/* ---------- The progress: the application's component, and the shimmer of a silent step ---------- */
+
+/*
+ * A step that says nothing about its own progress (the bake): the fill shimmers, its highlight
+ * the accent mixed toward the text on it (design note §3). The keyframes are the page's own:
+ * components.css has a `shimmer` of its own for .skeleton.
+ */
+#progress[data-silent] > span {
   background: linear-gradient(
       90deg,
       var(--accent) 30%,
@@ -323,155 +320,202 @@ body[data-state='asking'] #cancel {
   }
 }
 
-/* Two rules: a browser drops a whole selector list with a pseudo-element it does not know. */
 @media (prefers-reduced-motion: reduce) {
-  #progress[data-silent]::-webkit-progress-value {
+  #progress[data-silent] > span {
     animation: none;
   }
+}
 
-  #progress[data-silent]::-moz-progress-bar {
-    animation: none;
-  }
+/* ---------- The panel: done, and at a question (§4.4, §4.5) ---------- */
+
+/* Floats over the viewport's right edge like a dock panel; its body scrolls. */
+#panel.panel {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: var(--z-dock);
+  width: 22rem;
+  max-width: calc(100% - 2 * var(--space-3));
+}
+
+#panel.panel #heading {
+  overflow-wrap: normal;
 }
 
 #mini-size {
-  margin: 0;
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
 }
 
-#export {
+#panel.panel #status {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+#panel.panel #status:has(.status-text:empty) {
+  display: none;
+}
+
+/* The question view's controls, as a section of the panel. */
+#questions {
+  padding: var(--space-3) var(--space-4);
+}
+
+.stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
-/* Section titles in the text face, as the components' .panel-section-title, also when a heading. */
-#export h3,
-#adjust legend {
-  margin: 0;
-  padding: 0;
+.stack .btn {
+  width: 100%;
+}
+
+#export .check {
+  margin-top: var(--space-2);
+}
+
+#panel .field {
+  margin-bottom: var(--space-3);
+}
+
+#panel .field:last-child {
+  margin-bottom: 0;
+}
+
+#panel .field-row .input-sm {
+  width: 5.5rem;
+}
+
+#panel .hint {
+  margin-top: var(--space-1);
   color: var(--text-muted);
-  font-family: var(--font-text);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
 }
 
-#export label,
-.check:not(.mt-questions *) {
+/* A row of buttons and button groups that wraps. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.disclosure-body > .actions,
+.disclosure-body > .check,
+#placement-adjust > .actions,
+#placement-controls > .actions {
+  margin-top: var(--space-3);
+}
+
+/* The six-way axis takes the panel's width, its buttons alike. */
+.segmented.wide {
+  display: flex;
+}
+
+.segmented.wide .btn {
+  flex: 1;
+  padding: 0;
+}
+
+/* The browser's slider, checkbox and colour swatch with the accent, as the application leaves them. */
+#panel input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#panel input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+#panel input[type='color'] {
+  width: 2.75rem;
+  height: var(--control-height);
+  padding: 2px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+#look-base-hex {
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* The size warning: a sentence and a button, so the callout, not the one-line banner pill (§4.3). */
+#panel .disclosure .callout {
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+
+#panel .disclosure .callout .btn {
+  margin-left: calc(1.25em + var(--space-2));
+}
+
+/*
+ * A disclosure: Up and turn, Size, Look, Base and parts under Adjust. A part the components do
+ * not have; the page's own (§4.4, a candidate for components.css, §12).
+ */
+.disclosure {
+  border-top: 1px solid var(--line);
+}
+
+.disclosure:first-of-type {
+  border-top: 0;
+}
+
+.disclosure > summary {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
-}
-
-/* Adjust: up and turn, size, look */
-
-#adjust {
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 0.85rem;
-}
-
-#adjust summary {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-height: 32px;
-  font-size: 1rem;
-  font-weight: 600;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: var(--space-1) 0;
+  font-weight: var(--weight-medium);
+  list-style: none;
   cursor: pointer;
+  border-radius: var(--radius-xs);
 }
 
-#adjust summary::before {
-  content: '▸';
-  color: var(--text-muted);
-}
-
-#adjust[open] summary::before {
-  content: '▾';
-}
-
-#adjust summary::-webkit-details-marker {
+.disclosure > summary::-webkit-details-marker {
   display: none;
+}
+
+.disclosure > summary .icon {
+  color: var(--text-muted);
+  transition: transform var(--motion-hover);
+}
+
+.disclosure[open] > summary .icon {
+  transform: rotate(180deg);
 }
 
 .summary-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
   color: var(--text-muted);
-  font-size: 0.8rem;
-  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-#adjust[open] .summary-hint {
+.disclosure[open] > summary .summary-hint {
   display: none;
 }
 
-#adjust fieldset {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin: 16px 0 0;
-  padding: 0;
-  border: 0;
-}
-
-#adjust legend {
-  margin-bottom: 8px;
-}
-
-#adjust label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-#turn {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-#turn-pending {
-  flex-basis: 100%;
-  color: var(--text-muted);
-}
-
-#look-presets {
-  display: flex;
-  flex-basis: 100%;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* The stripe is the preset's base coat. */
-#look-presets button {
-  border-left: 10px solid var(--coat);
-  font-size: 0.85rem;
-}
-
-#look-presets button[aria-pressed='true'] {
-  border-color: var(--accent-line);
-  border-left-color: var(--coat);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
-#look input[type='range'] {
-  width: 90px;
-}
-
-/* 6em of text as before components.css made every box border-box: the padding and border added. */
-#scale-to {
-  width: calc(6em + 26px);
-}
-
-#sizing-warning {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--warn-text);
+.disclosure-body {
+  padding: var(--space-1) 0 var(--space-3);
 }
 
 /*
@@ -489,50 +533,44 @@ body[data-state='asking'] #cancel {
   display: none;
 }
 
-#placement-adjust {
-  display: contents;
-}
-
 #pair-files,
-#placement {
-  flex-basis: 100%;
-  margin: 0;
-}
-
+#placement,
 #pair-warning {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--warn-text);
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
 }
 
-#placement-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+#pair-files {
+  font-size: var(--text-sm);
 }
 
-#placement-pending {
-  flex-basis: 100%;
-  color: var(--text-muted);
+/* The footer: Cancel, and at a question the view's Confirm (mountQuestions' footer). */
+#panel.panel > .panel-footer {
+  flex: none;
 }
 
-/* Drag over the page */
+/* The grab handle shows on a phone only. */
+.sheet-handle {
+  display: none;
+}
+
+/* ---------- The drag overlay (§4.7) ---------- */
 
 #drop-frame {
   position: fixed;
-  inset: 8px;
-  z-index: 10;
+  inset: var(--space-2);
+  z-index: var(--z-overlay);
   display: none;
   align-items: center;
   justify-content: center;
   border: 3px dashed var(--accent);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: var(--surface-scrim);
   pointer-events: none;
 }
 
 #drop-frame .banner {
+  padding: var(--space-2) var(--space-4);
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
 }
@@ -545,22 +583,45 @@ body[data-dragging] #drop-frame {
   display: flex;
 }
 
-/* The team's tools (?dev) */
+/* ---------- Credits (§4.6, #145): the application's dialog, wider for the list ---------- */
+
+/* Wider than the application's 26 rem dialog, so a part and its licence read on one or two lines;
+   the list scrolls inside the dialog on a short screen. (proposal) */
+#credits .dialog {
+  width: min(100%, 36rem);
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow-y: auto;
+}
+
+#credits .credits-list {
+  margin: var(--space-3) 0;
+}
+
+#credits .credits-list dt {
+  margin-top: var(--space-2);
+  font-weight: var(--weight-medium);
+}
+
+#credits .credits-list dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------- The team's tools (?dev): on the tokens, not restyled (§6) ---------- */
 
 #stats {
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin: 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
 #stats div {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 #stats dt {
@@ -576,9 +637,9 @@ body[data-dragging] #drop-frame {
 #dev-thumbnail-figure {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 #dev-thumbnail {
@@ -590,23 +651,28 @@ body[data-dragging] #drop-frame {
     0 0 / 16px 16px;
 }
 
-#stress {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 0.8rem;
+#dev-paint summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+#dev-paint #paint-open,
+#paint-controls > * {
+  margin-top: var(--space-2);
 }
 
 #dev-tools {
   max-height: 40vh;
   overflow-y: auto;
-  padding: 4px 16px 8px;
+  padding: var(--space-1) var(--space-4) var(--space-2);
+  background: var(--surface);
   border-top: 1px solid var(--line);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 #perf {
-  margin: 4px 0;
+  margin: var(--space-1) 0;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -617,97 +683,140 @@ body[data-dragging] #drop-frame {
 }
 
 #bench p {
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   max-width: 70ch;
 }
 
-#bench button {
-  margin: 0 6px 8px 0;
+#bench .btn {
+  margin: 0 var(--space-1) var(--space-2) 0;
 }
 
 #bench textarea {
   display: block;
   width: 100%;
-  box-sizing: border-box;
+  color: var(--text);
   background: var(--surface-sunken);
-  color: inherit;
   border: 1px solid var(--line);
-  border-radius: 4px;
-  font: 0.8rem var(--font-code);
+  border-radius: var(--radius-xs);
+  font: var(--text-xs) var(--font-code);
 }
 
 #bench a {
   color: var(--accent-text);
 }
 
-/*
- * Phone (PHONE_MAX_WIDTH_PX in main.ts): the done panel becomes a bottom sheet that
- * scrolls inside, the viewport keeps the rest, every control is a touch target.
- */
+/* ---------- A phone (PHONE_MAX_WIDTH_PX): the panel is a bottom sheet (§4.8) ---------- */
+
 @media (max-width: 600px) {
-  :root {
-    --sheet-max-height: 40vh;
+  /* The bar keeps the name and the file button; More holds the theme, the link and Credits. */
+  #top {
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
   }
 
-  /* The bar keeps the name and the file button; the theme follows the system's (#143). */
   #promise-short,
-  [data-theme-switch] {
+  .bar-wide {
     display: none;
   }
 
-  button:not(.btn, .chip),
-  select:not(.input),
-  input[type='number']:not(.input),
-  input[type='color'],
-  input[type='range'],
-  #adjust label,
-  #export label,
-  .check:not(.mt-questions *),
-  #adjust summary {
+  .bar-narrow {
+    display: inline-flex;
+  }
+
+  #choose {
+    width: var(--tap-min);
+    padding: 0;
+  }
+
+  #choose .choose-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /*
+   * Every control a touch target, as the question view's (questions.css): the theme raises
+   * --control-height under a coarse pointer, but the small buttons, chips and checkboxes keep
+   * their own heights, and a narrow window on a fine pointer is a phone layout too.
+   */
+  #top .btn,
+  #panel .btn,
+  #panel .input,
+  #panel .check,
+  #panel .chips .chip,
+  #panel input[type='color'],
+  #panel input[type='range'],
+  .disclosure > summary {
     min-height: var(--tap-min);
   }
 
-  input[type='checkbox']:not(.mt-questions *) {
+  #top .btn-icon,
+  #panel .btn-icon {
+    min-width: var(--tap-min);
+  }
+
+  #panel input[type='checkbox']:not(.mt-questions *) {
     width: 20px;
     height: 20px;
   }
 
-  body:not([data-state='done'], [data-state='asking']) #panel {
-    padding: 24px 16px;
+  #panel.card {
+    padding: var(--space-5) var(--space-4) var(--space-4);
   }
 
+  /* The viewport, then the sheet under it, so the sheet never covers the mini (#41). */
   body[data-state='done'] #stage,
   body[data-state='asking'] #stage {
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
-  body[data-state='done'] #panel,
-  body[data-state='asking'] #panel {
+  #panel.panel {
     position: relative;
+    inset: auto;
     width: auto;
-    max-height: var(--sheet-max-height);
-    padding: 20px 16px 16px;
-    border-top: 1px solid var(--line);
-    border-left: 0;
-    border-radius: 16px 16px 0 0;
+    max-width: none;
+    max-height: 44vh;
+    border-bottom: 0;
+    border-radius: var(--radius-dialog) var(--radius-dialog) 0 0;
+    box-shadow: var(--elevation-overlay);
   }
 
-  /* The grab handle: a sign that the sheet scrolls, drawn, not a control. */
-  body[data-state='done'] #panel::before,
-  body[data-state='asking'] #panel::before {
+  #panel.panel[data-expanded] {
+    max-height: 85vh;
+  }
+
+  /* The grab handle: a button at the tap size, drawn as a pill; a press expands the sheet. */
+  #panel.panel > .sheet-handle {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 100%;
+    height: var(--tap-min);
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-dialog) var(--radius-dialog) 0 0;
+    cursor: pointer;
+  }
+
+  #panel.panel > .sheet-handle::before {
     content: '';
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
+    width: 2.5rem;
+    height: 0.25rem;
+    border-radius: var(--radius-full);
     background: var(--line-strong);
-    transform: translateX(-50%);
+  }
+
+  #panel.panel > .panel-header {
+    min-height: 2rem;
   }
 
   #levels {
-    bottom: 8px;
-    left: 8px;
+    left: var(--space-2);
+    bottom: var(--space-2);
   }
 }

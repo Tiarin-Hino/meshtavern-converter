@@ -1,8 +1,17 @@
-# MeshTavern Converter
+# PolyWash
 
-Turn a 3D-print STL of a miniature into a lightweight, game-ready 3D mini — entirely in your browser. Your STL file is never uploaded.
+An STL of a miniature in, a game-ready mini out. Everything runs in your browser: your file never leaves your computer.
 
-**Status:** early, but usable end to end. Drop an STL and it is reduced to three detail levels, stood upright, measured (units, base, creature size and its footprint on a 32 mm grid), given a primed-and-washed look, and can be downloaded as a GLB file (the table and far levels). Everything runs in your browser. There is no hosted version yet: run it locally as shown below. See [the Phase 0 spec](docs/specs/phase-0-spike.md) for measurements, and [the Phase 1 spec](docs/specs/phase-1-converter.md) for the converter at product quality and how its exit criteria ended: Phase 1 is finished, and what follows is what the table needs from the library and the release blockers. [The journal](docs/journal/) tells how it was built: what we tried, what failed and why.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/design/look-and-feel/shots/readme-dark.png" />
+  <img alt="PolyWash with a converted mini: the mini on a dark stage, its size and the two downloads in the panel beside it." src="docs/design/look-and-feel/shots/readme-light.png" />
+</picture>
+
+Drop the STL of a miniature you printed or bought. PolyWash stands it upright (and asks you first), measures it (units, base, creature size and its footprint on a 32 mm grid), reduces it to three detail levels, gives it a primed-and-washed look and hands you GLB files for a virtual tabletop. A figure and its base in two files, or a figure in up to six parts, are put together before anything else. The page follows your system's light or dark theme, or the switch in its bar.
+
+**Open PolyWash:** the link goes here once the page is published. Until then, run it on your own computer as shown below.
+
+PolyWash is made for MeshTavern, a virtual tabletop that is still being built; the table application uses this repository as its library. What the page ships and under which licences is under Credits on the page and in [`public/theme/NOTICE.txt`](public/theme/NOTICE.txt).
 
 ## Run it
 
@@ -21,6 +30,8 @@ npm run e2e     # Playwright smoke test (first time: npx playwright install chro
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.md) for conventions (also used by the Claude Code agent).
+
+Where it stands: usable end to end, not yet hosted. See [the Phase 0 spec](docs/specs/phase-0-spike.md) for measurements, and [the Phase 1 spec](docs/specs/phase-1-converter.md) for the converter at product quality and how its exit criteria ended: Phase 1 is finished, and what follows is what the table needs from the library and the release blockers. [The journal](docs/journal/) tells how it was built: what we tried, what failed and why.
 
 ## Use it as a library
 
@@ -115,7 +126,7 @@ export async function addMini(files: File[]) {
   }
   ```
 
-  `start` takes the files' names, what is asked, and the `orientation`, `baseOrientation` and `preset` id the conversion starts with, if any; it returns the callback for `convert`'s fourth argument. Left without `controls`, the view lays a panel of its own over the scene's right edge. The words are `QUESTION_COPY` and the sentence functions (`describeUp`, `describePairs`, …), replaced field by field: `mountQuestions({ copy: { askUp: 'Which way is up?' } })`. The controls are MeshTavern's components (#143): the page links the theme's `tokens.css` and `components.css` before the view's stylesheet, the table application's own (`web/public/theme/`) or the copy in this repo's `public/theme/` served with its `fonts/` folder, as this page does (`<link rel="stylesheet" href="/theme/tokens.css" />`, then `components.css`). Then `questions.css` is imported once, as above; it holds the view's layout and the few parts of its own the components do not have, every rule under `.mt-questions`, every colour a role of `tokens.css`, so the view follows the page's light or dark theme. Without the theme the controls work but have the browser's look. The chips' colours are `--pair-1` to `--pair-4`, which the view writes on its elements from `PAIR_COLOURS`. The view's elements keep this page's ids, so there is one view per document. `view.state` and the view's methods (`answerUp`, `confirmUp`, `tap`, `brush`, `confirmMeet`, …) are what this page's `window.__mt` hooks forward to, so `scripts/lib/answer-up.mjs` drives a consumer the same way.
+  `start` takes the files' names, what is asked, and the `orientation`, `baseOrientation` and `preset` id the conversion starts with, if any; it returns the callback for `convert`'s fourth argument. Left without `controls`, the view lays a panel of its own over the scene's right edge. Given a `footer` (a panel's footer that holds your Cancel), the view puts its Confirm there after what it holds, shown while its question is (#144); left out, Confirm ends the controls. The words are `QUESTION_COPY` and the sentence functions (`describeUp`, `describePairs`, …), replaced field by field: `mountQuestions({ copy: { askUp: 'Which way is up?' } })`. The controls are MeshTavern's components (#143): the page links the theme's `tokens.css` and `components.css` before the view's stylesheet, the table application's own (`web/public/theme/`) or the copy in this repo's `public/theme/` served with its `fonts/` folder, as this page does (`<link rel="stylesheet" href="/theme/tokens.css" />`, then `components.css`). Then `questions.css` is imported once, as above; it holds the view's layout and the few parts of its own the components do not have, every rule under `.mt-questions`, every colour a role of `tokens.css`, so the view follows the page's light or dark theme. Without the theme the controls work but have the browser's look. The chips' colours are `--pair-1` to `--pair-4`, which the view writes on its elements from `PAIR_COLOURS`. The view's elements keep this page's ids, so there is one view per document. `view.state` and the view's methods (`answerUp`, `confirmUp`, `tap`, `brush`, `confirmMeet`, …) are what this page's `window.__mt` hooks forward to, so `scripts/lib/answer-up.mjs` drives a consumer the same way.
 
 - A source preset (`SOURCE_PRESETS`, `findSourcePreset(id)`, or a `SourcePreset` of your own) says what a tool's files are: `units`, an extra `scale` and the `up` axis. It lies under the options field by field: an `orientation`, `baseOrientation` or `sizing` given wins over it, and the converter guesses only what neither says. Its axis counts as chosen, so the up question still comes, standing the file the preset's way; an `UpAnswer` may set (`preset`) or clear (`preset: null`) it. `result.choices.preset` is the preset the conversion ended with.
 - `result.kind` is a first guess whether the mini is a `character` or a `prop`, made from its base: a separate base file, no flat underside, or a bare flat top within `DISC_HEIGHT_MAX_MM` of the floor covering `TOP_SHARE` of the base make a character; anything else that stands on a flat underside is its own base, a prop (`reason` says which, `topShare` what was measured). The `kind` option sets it (`method: 'manual'`), and `result.choices.kind` keeps it. A tree on a disc reads as a character: the guess cannot tell it from a figure.

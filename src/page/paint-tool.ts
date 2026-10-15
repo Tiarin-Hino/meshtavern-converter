@@ -212,6 +212,7 @@ export function createPaintTool(
     for (const tool of TOOL_IDS) {
       const button = document.createElement('button');
       button.type = 'button';
+      button.className = 'btn btn-sm';
       button.dataset.tool = tool;
       button.textContent = PAINT_COPY.tools[tool];
       button.addEventListener('click', () => {

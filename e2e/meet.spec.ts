@@ -227,7 +227,7 @@ test('marks two pairs of its own, brushes and erases, fits, goes back and tilts'
   expect(stats.pair!.placement!.method).toBe('marked');
   expect(stats.choices.placement!.marks!.pairs).toHaveLength(2);
   expect(stats.choices.placement!.marks!.liftMm).toBe(0.5);
-  await page.locator('#adjust').evaluate((details: HTMLDetailsElement) => (details.open = true));
+  await page.locator('#pair').evaluate((details: HTMLDetailsElement) => (details.open = true));
   await expect(page.locator('#placement')).toHaveText(
     'Set where you marked · kept upright · raised 0.5 mm',
   );
