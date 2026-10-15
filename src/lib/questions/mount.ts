@@ -114,6 +114,11 @@ export interface QuestionsOptions {
   scene: HTMLElement;
   /** Where the controls go. Left out: a panel of the view's own over the scene's right edge. */
   controls?: HTMLElement;
+  /**
+   * Where Confirm goes, beside the consumer's own Cancel: a panel's footer (#144, design note
+   * look-and-feel.md §4.5). Left out: at the end of the controls.
+   */
+  footer?: HTMLElement;
   /** Words and sentences to replace, field by field. */
   copy?: Partial<QuestionCopy>;
   /** Called after every change the view shows: a question arrived or was answered, a turn is tried, a tool toggled, a pair selected. */
@@ -308,6 +313,8 @@ class View implements QuestionsView {
   private readonly hosts: HTMLElement[];
   /** The view's own panel, when no `controls` element was given. */
   private readonly panel: HTMLElement | null;
+  /** The consumer's footer that holds the two Confirm buttons, when one was given. */
+  private readonly footer: HTMLElement | null;
   private readonly onChange: ((state: QuestionsState) => void) | undefined;
   private readonly ask: {
     file: HTMLElement;
@@ -453,6 +460,12 @@ class View implements QuestionsView {
       view: $('#meet-view'),
       confirm: $('#meet-confirm'),
     };
+    // Confirm moves into the consumer's footer, after what it holds; it then shows with its section.
+    this.footer = options.footer ?? null;
+    if (this.footer) {
+      this.footer.classList.add('mt-questions');
+      this.footer.append(this.ask.confirm, this.meetInputs.confirm);
+    }
     this.scene = new QuestionScene(sceneHost);
     this.current = this.snapshot();
     this.wireAsk();
@@ -657,6 +670,10 @@ class View implements QuestionsView {
     const question = this.question;
     this.ask.section.hidden = question?.kind !== 'up';
     this.meetInputs.section.hidden = question?.kind !== 'meet';
+    if (this.footer) {
+      this.ask.confirm.hidden = this.ask.section.hidden;
+      this.meetInputs.confirm.hidden = this.meetInputs.section.hidden;
+    }
     if (!question) return;
     const { copy } = this;
     const ask = this.ask;
@@ -1396,6 +1413,9 @@ class View implements QuestionsView {
     this.scene.dispose();
     const [sceneHost, controls] = this.hosts as [HTMLElement, HTMLElement];
     controls.replaceChildren();
+    this.ask.confirm.remove();
+    this.meetInputs.confirm.remove();
+    this.footer?.classList.remove('mt-questions');
     this.panel?.remove();
     sceneHost.classList.remove('mt-questions', 'mt-questions-scene');
     controls.classList.remove('mt-questions', 'mt-questions-controls');

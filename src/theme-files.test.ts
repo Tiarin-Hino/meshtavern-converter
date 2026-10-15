@@ -23,9 +23,13 @@ const STYLESHEETS = [
   'src/lib/questions.css',
   'src/lib/painting.css',
 ];
-/** The copy: the application's files of these names, and the README that names its commit. */
+/**
+ * The copy: the application's files of these names, the README that names its commit, and the
+ * page's own NOTICE.txt (#145: what the page ships, with the licences).
+ */
 const THEME_FILES = [
   'LICENSE-Lucide.txt',
+  'NOTICE.txt',
   'README.md',
   'components.css',
   'fonts/OFL-Fraunces.txt',
@@ -45,7 +49,7 @@ function listFiles(dir: URL, prefix = ''): string[] {
 }
 
 describe('the theme the page serves', () => {
-  it('is the application’s files and the README naming their commit, nothing else', () => {
+  it('is the application’s files, the README naming their commit and the NOTICE, nothing else', () => {
     expect(listFiles(THEME).sort()).toEqual(THEME_FILES);
     expect(read('README.md')).toMatch(/its `main` at `[0-9a-f]{7,40}`/);
   });

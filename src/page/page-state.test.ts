@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  axisLabel,
+  describeLookHint,
   describeMini,
+  describePairHint,
+  describeSizeHint,
+  describeUpHint,
   describeOrientation,
   describePendingPlacement,
   describeProgress,
@@ -12,6 +17,7 @@ import {
   COPY,
   STEP_LABELS,
 } from './page-state';
+import { readFileSync } from 'node:fs';
 import { BAKE_STEPS, STEPS, type Orientation, type Sizing } from '../lib';
 import { QUESTION_COPY } from '../lib/questions';
 
@@ -181,6 +187,79 @@ describe('source presets in the words (#100)', () => {
 
   it('spreads the words of the questions into the page’s own (#119)', () => {
     expect(COPY).toMatchObject(QUESTION_COPY);
-    expect(COPY.title).toBe('MeshTavern Converter');
+    expect(COPY.title).toBe('PolyWash');
+  });
+});
+
+describe('the hints of Adjust’s disclosures (#144)', () => {
+  const orientation: Orientation = {
+    up: '+z',
+    method: 'base',
+    confidence: 0.9,
+    rotation: [0, 0, 0, 1],
+    tiltDeg: 0,
+    setDownDeg: 0,
+  };
+
+  it('name the axis as its button does, and how it was decided', () => {
+    expect(axisLabel('+z')).toBe('+Z');
+    expect(axisLabel('-y')).toBe('−Y');
+    expect(describeUpHint(orientation)).toBe('+Z, from the base');
+    expect(describeUpHint({ ...orientation, up: '+y', method: 'tallest' })).toBe(
+      '+Y, the taller way',
+    );
+    expect(describeUpHint({ ...orientation, method: 'manual' })).toBe('+Z, chosen');
+    expect(describeUpHint({ ...orientation, method: 'manual' }, true)).toBe('+Z, from the source');
+  });
+
+  it('name the size and the units, the look, and the files', () => {
+    expect(describeSizeHint({ size: 'medium', units: 'mm' })).toBe('Medium, mm');
+    expect(describeSizeHint({ size: 'large', units: 'in' })).toBe('Large, inches');
+    expect(describeLookHint('Grey primer')).toBe('Grey primer');
+    expect(describeLookHint(null)).toBe('Your own');
+    expect(describePairHint(null)).toBe('one file');
+    expect(describePairHint({ parts: [0], pairing: { baseFile: 1 } })).toBe('with its base');
+    expect(describePairHint({ parts: [0, 1, 2], pairing: { baseFile: null } })).toBe('3 parts');
+    expect(describePairHint({ parts: [0, 1], pairing: { baseFile: 2 } })).toBe(
+      '2 parts and a base',
+    );
+  });
+});
+
+describe('the words for the public (#145, spec L3)', () => {
+  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  /** The text of an HTML attribute value or element, with its entities and line breaks read. */
+  const text = (raw: string) =>
+    raw
+      .replace(/\s+/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .trim();
+
+  it('names the product once: no development name in the page’s words', () => {
+    expect(COPY.title).toBe('PolyWash');
+    for (const words of Object.values(COPY)) expect(words).not.toMatch(/Converter/);
+  });
+
+  it('says what the page does in two sentences, then what comes out', () => {
+    expect(COPY.dropHint.match(/[.!?](\s|$)/g)).toHaveLength(2);
+    expect(COPY.dropHint).toMatch(/STL/);
+    expect(COPY.dropHint).toMatch(/game-ready mini/);
+    expect(COPY.whatYouGet).toMatch(/three detail levels/);
+    expect(COPY.whatYouGet).toMatch(/two downloads/);
+  });
+
+  it('keeps the promise a plain sentence', () => {
+    expect(COPY.promise).toBe('Your file never leaves your computer.');
+    expect(COPY.description).toContain(COPY.promise);
+    for (const words of Object.values(COPY)) expect(words).not.toMatch(/100\s*%/);
+  });
+
+  it('gives the tab the name and the sentence, as COPY says', () => {
+    expect(COPY.documentTitle.startsWith(`${COPY.title}: `)).toBe(true);
+    expect(text(/<title>([^<]*)<\/title>/.exec(html)![1]!)).toBe(COPY.documentTitle);
+    const description = /<meta\s+name="description"\s+content="([^"]*)"/.exec(html);
+    expect(text(description![1]!)).toBe(COPY.description);
+    expect(html).toMatch(/<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg" \/>/);
   });
 });
