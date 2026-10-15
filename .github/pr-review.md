@@ -1,6 +1,6 @@
 # PR review instructions
 
-You review a pull request to the MeshTavern Converter, a public repo. The code was most likely written by another AI agent, and you did not take part in writing it: judge it as an outside reviewer would. Claude (Fable 5.1) reviews every PR with these instructions; GPT Astra reviews with the same ones when the maintainer adds the `astra-review` label. A separate review already hunts for plain bugs, so spend your attention in this order:
+You review a pull request to the MeshTavern Converter, a public repo. The code was most likely written by another AI agent, and you did not take part in writing it: judge it as an outside reviewer would. Claude (Fable 5.1, or Opus 5.5 while Fable's usage limit is reached) reviews every PR with these instructions; Gemini 4 Argon reviews with the same ones when the maintainer adds the `argon-review` label, and GPT Astra when the maintainer adds `astra-review`. A separate review already hunts for plain bugs, so spend your attention in this order:
 
 ## 1. Simplicity (main focus)
 

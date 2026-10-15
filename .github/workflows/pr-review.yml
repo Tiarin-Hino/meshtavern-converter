@@ -1,6 +1,7 @@
 name: PR Review
 
-# Claude (Fable 5.1) reviews every PR; GPT Astra joins while the PR carries the `astra-review` label.
+# Claude (Fable 5.1) reviews every PR, Opus 5.5 in its place while Fable's usage limit is reached;
+# Gemini 4 Argon joins while the PR carries the `argon-review` label, GPT Astra while it carries `astra-review`.
 # Both use the instructions in .github/pr-review.md, read from the base branch.
 # All reviews pass -> label `ready-for-human-review`.
 # Blocking findings -> label `changes-requested` and Claude (Opus 5.5) fixes them on the PR branch.
@@ -12,10 +13,10 @@ on:
 
 jobs:
   prompt:
-    # Forks get no secrets; drafts are not ready to be judged. Of all labels, only `astra-review` starts a review.
+    # Forks get no secrets; drafts are not ready to be judged. Of all labels, only `argon-review` and `astra-review` start a review.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft &&
-      (github.event.action != 'labeled' || github.event.label.name == 'astra-review')
+      (github.event.action != 'labeled' || github.event.label.name == 'argon-review' || github.event.label.name == 'astra-review')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,7 +108,8 @@ jobs:
       issues: read
       id-token: write
     outputs:
-      review: ${{ steps.claude.outputs.structured_output }}
+      review: ${{ steps.fable.outputs.structured_output || steps.opus.outputs.structured_output }}
+      reviewer: ${{ steps.opus.outputs.structured_output && 'Claude (Opus 5.5, Fable out of usage)' || 'Claude (Fable 5.1)' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -116,8 +118,10 @@ jobs:
           persist-credentials: false
 
       # Read-only tools: the reviewer reads the repo and the diff and writes nothing.
+      # Fable's budget is small; when it runs out, the next step hands the review to Opus.
       - name: Review with Claude Fable 5.1
-        id: claude
+        id: fable
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -127,6 +131,129 @@ jobs:
             --model claude-fable-5-1
             --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --json-schema '${{ needs.prompt.outputs.schema }}'
+
+      # Only a usage limit hands over to Opus; any other failure fails the job as before. The log is
+      # searched only when Fable failed or returned nothing, so a review that quotes the words cannot trip it.
+      - name: Is Fable out of usage?
+        id: limit
+        if: steps.fable.outcome == 'failure' || steps.fable.outputs.structured_output == ''
+        env:
+          LOG: ${{ steps.fable.outputs.execution_file }}
+          FAILED: ${{ steps.fable.outcome == 'failure' }}
+        run: |
+          if [ -n "$LOG" ] && [ -f "$LOG" ] && grep -qiE 'usage limit|hit your (usage )?limit|limit reached|limit will reset|rate_limit_error|out of (extra )?usage' "$LOG"; then
+            echo "::warning::Fable 5.1 is out of usage; Opus 5.5 reviews this round."
+            echo "out=true" >> "$GITHUB_OUTPUT"
+          elif [ "$FAILED" = true ]; then
+            echo "::error::The Fable review failed, and not for its usage limit."
+            exit 1
+          fi
+
+      # claude-code-action@v1 bundles a Claude Code too old for Opus 5.5 (see the fix job below).
+      - name: Install Claude Code
+        id: claude-code
+        if: steps.limit.outputs.out == 'true'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/claude-code" @anthropic-ai/claude-code@2.1.280
+          echo "path=$RUNNER_TEMP/claude-code/node_modules/.bin/claude" >> "$GITHUB_OUTPUT"
+
+      - name: Review with Claude Opus 5.5
+        id: opus
+        if: steps.limit.outputs.out == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
+          allowed_bots: 'claude[bot]'
+          prompt: ${{ needs.prompt.outputs.text }}
+          claude_args: |
+            --model claude-opus-5-5
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '${{ needs.prompt.outputs.schema }}'
+
+  argon:
+    needs: prompt
+    if: contains(github.event.pull_request.labels.*.name, 'argon-review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: pr-review-argon-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    outputs:
+      review: ${{ steps.argon.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Argon runs in the Gemini CLI's plan mode, which allows only reading tools: no shell, so no
+      # `git diff`. The diffs the prompt names are written to files it reads instead.
+      - name: Write the prompt, the diffs and the settings
+        env:
+          PROMPT: ${{ needs.prompt.outputs.text }}
+          SCHEMA: ${{ needs.prompt.outputs.schema }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          review="$RUNNER_TEMP/review"
+          mkdir -p "$review"
+          git diff "$BASE_SHA...$HEAD_SHA" > "$review/pr.diff"
+          last=$(printf '%s\n' "$PROMPT" | grep -o 'The last round reviewed [0-9a-f]\{40\}' | cut -d' ' -f5 || true)
+          if [ -n "$last" ] && git cat-file -e "$last^{commit}" 2>/dev/null; then
+            git diff "$last...$HEAD_SHA" > "$review/since-last-round.diff"
+          fi
+          {
+            printf '%s\n\n' "$PROMPT"
+            echo "## How to read the change"
+            echo
+            echo "You have no shell. The whole change is in $review/pr.diff; on a later round, what changed since the last one is in $review/since-last-round.diff. Read them and the repository with your file tools."
+            echo
+            echo "Your final answer is one JSON object matching this schema, and nothing else: no Markdown fence, no text around it."
+            echo
+            printf '%s\n' "$SCHEMA"
+          } > "$review/prompt.md"
+          # A fresh home per run keeps ~/.gemini and its settings out of the review. No web tools: the
+          # review needs only the repository, and a prompt injected in a PR gets no way out.
+          mkdir -p "$RUNNER_TEMP/gemini-home/.gemini"
+          echo '{"security":{"auth":{"selectedType":"gemini-api-key"}},"tools":{"exclude":["google_web_search","web_fetch"]}}' \
+            >"$RUNNER_TEMP/gemini-home/.gemini/settings.json"
+
+      # Since 2026-06-18 the Gemini CLI serves only API keys and enterprise licences, not the Google AI
+      # subscriptions, so the review is billed per use on the key.
+      - name: Install the Gemini CLI
+        run: npm install --prefix "$RUNNER_TEMP/gemini" @google/gemini-cli@0.64.0
+
+      - name: Review with Gemini 4 Argon
+        id: argon
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          export GEMINI_CLI_HOME="$RUNNER_TEMP/gemini-home"
+          review="$RUNNER_TEMP/review"
+          "$RUNNER_TEMP/gemini/node_modules/.bin/gemini" \
+            --model gemini-4-argon --approval-mode plan --skip-trust \
+            --include-directories "$review" --output-format json \
+            -p "Review the pull request above. Answer with the JSON object only." \
+            <"$review/prompt.md" > "$review/out.json"
+          # The CLI has no schema option, so the answer is checked here: one object with a summary and
+          # findings whose `blocking` is a boolean, a Markdown fence around it tolerated.
+          jq -r '.response // ""' "$review/out.json" | sed -e '/^```/d' > "$review/argon.json"
+          if ! jq -e 'type == "object" and (.summary | type) == "string" and (.findings | type) == "array"
+                      and all(.findings[]; (.blocking | type) == "boolean")' "$review/argon.json" > /dev/null; then
+            echo "::error::The Argon review is not the JSON the schema asks for."
+            cat "$review/argon.json"
+            exit 1
+          fi
+          delimiter="EOF_$(openssl rand -hex 16)"
+          {
+            echo "final-message<<$delimiter"
+            jq -c . "$review/argon.json"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
 
   astra:
     needs: prompt
@@ -168,9 +295,11 @@ jobs:
           allow-bot-users: 'claude[bot]' # Claude's fix pushes start the next round
 
   verdict:
-    needs: [claude, astra]
-    # Astra is skipped without the label; any failed or cancelled review means no verdict.
-    if: always() && needs.claude.result == 'success' && (needs.astra.result == 'success' || needs.astra.result == 'skipped')
+    needs: [claude, argon, astra]
+    # Argon and Astra are skipped without their labels; any failed or cancelled review means no verdict.
+    if:
+      always() && needs.claude.result == 'success' && (needs.argon.result == 'success' || needs.argon.result == 'skipped') &&
+      (needs.astra.result == 'success' || needs.astra.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -184,6 +313,9 @@ jobs:
         uses: actions/github-script@v9
         env:
           CLAUDE_REVIEW: ${{ needs.claude.outputs.review }}
+          CLAUDE_REVIEWER: ${{ needs.claude.outputs.reviewer }}
+          ARGON_REVIEW: ${{ needs.argon.outputs.review }}
+          ARGON_RAN: ${{ needs.argon.result == 'success' }}
           ASTRA_REVIEW: ${{ needs.astra.outputs.review }}
           ASTRA_RAN: ${{ needs.astra.result == 'success' }}
           MAX_FIX_ROUNDS: 3
@@ -194,6 +326,7 @@ jobs:
 
             // claude-code-action skips itself when this workflow differs from the default branch's copy.
             if (!process.env.CLAUDE_REVIEW) return core.setFailed('The Claude review returned nothing (skipped or failed).');
+            if (process.env.ARGON_RAN === 'true' && !process.env.ARGON_REVIEW) return core.setFailed('The Argon review returned nothing.');
             if (process.env.ASTRA_RAN === 'true' && !process.env.ASTRA_REVIEW) return core.setFailed('The Astra review returned nothing.');
 
             // A push during the review makes it stale; the review of that push decides instead.
@@ -204,7 +337,7 @@ jobs:
               return;
             }
 
-            const reviews = [['Claude (Fable 5.1)', process.env.CLAUDE_REVIEW], ['GPT Astra', process.env.ASTRA_REVIEW]]
+            const reviews = [[process.env.CLAUDE_REVIEWER, process.env.CLAUDE_REVIEW], ['Gemini 4 Argon', process.env.ARGON_REVIEW], ['GPT Astra', process.env.ASTRA_REVIEW]]
               .filter(([, raw]) => raw)
               .map(([by, raw]) => ({ by, ...JSON.parse(raw) }));
             const passed = reviews.every(r => r.findings.every(f => !f.blocking));
@@ -249,7 +382,7 @@ jobs:
   fix:
     needs: verdict
     # always(): without it GitHub also demands success from every job before verdict, and
-    # astra is skipped on PRs without the astra-review label, which skipped the fix too (#76).
+    # argon and astra are skipped on PRs without their labels, which skipped the fix too (#76).
     if: always() && needs.verdict.result == 'success' && needs.verdict.outputs.fix == 'true'
     runs-on: ubuntu-latest
     permissions:
