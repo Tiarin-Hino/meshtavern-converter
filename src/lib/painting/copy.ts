@@ -37,6 +37,14 @@ export const PAINT_COPY = {
     direction: 'From',
   },
   regions: { base: 'The base', figure: 'The figure' },
+  /** The pipette (#135): its button, the two modes, and what it does. */
+  pick: {
+    button: 'Pick a colour',
+    shown: 'As shown',
+    painted: 'As painted',
+    hint: 'Tap the mini to take a colour from it. As shown takes it as you see it, light and shade included; as painted takes the paint itself.',
+    nothing: 'Nothing to pick there: off the mini, or no paint on it.',
+  },
   undo: 'Undo',
   redo: 'Redo',
   navigate: 'Turn the mini',

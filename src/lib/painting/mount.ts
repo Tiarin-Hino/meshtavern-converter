@@ -70,6 +70,11 @@ export const CURSOR_MIN_PX = 4;
 /** A frame longer than this, in ms, is counted as slow: 30 frames a second. _(proposal)_ */
 export const FRAME_BUDGET_MS = 33;
 
+/** What the pipette picks (#135): the pixel as shown, light and shading included, or the paint as painted. */
+export type PickMode = 'shown' | 'painted';
+/** The pipette's mode when none is given: as shown (PM decision on #135, 2026-10-13). */
+export const PICK_MODE: PickMode = 'shown';
+
 export interface PaintingOptions {
   /** The view's canvas fills this element: give it a size. */
   scene: HTMLElement;
@@ -142,6 +147,13 @@ export interface PaintingView {
   stroke(points: Vec3[], pressure?: number[]): Promise<void>;
   /** For tests and scripts: a stroke given as a path on the canvas (CSS px), a point a frame, as a pointer would. */
   strokeAt(path: [number, number][]): Promise<void>;
+  /**
+   * The pipette (#135): the colour under a canvas point (CSS px) as sRGB hex, `#rrggbb`, for
+   * `setColour`; null off the mini. `shown` (the default, PICK_MODE) is the pixel on screen after
+   * the next frame, the look's light and shading included; `painted` the paint's own colour in the
+   * texel under the point, whatever its alpha, and null where the mini is bare there.
+   */
+  colourAt(x: number, y: number, mode?: PickMode): Promise<string | null>;
   /** The texel under a canvas point, or null off the mini: what a pixel test asserts on. */
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null;
   /** Where a point of the mini is on the canvas, CSS px: what a test strokes along. */
@@ -468,6 +480,18 @@ class Painting implements PaintingView {
     await this.scene.nextFrame();
   }
 
+  async colourAt(x: number, y: number, mode: PickMode = PICK_MODE): Promise<string | null> {
+    this.commitLive();
+    const under = this.texelAt(x, y);
+    if (!under) return null;
+    if (mode === 'shown') {
+      const pixel = await this.scene.pixelAt(x, y);
+      return pixel && hexOf(pixel);
+    }
+    const [r, g, b, alpha] = await this.passes.readTexel(...under.texel);
+    return alpha === 0 ? null : hexOf([r, g, b]);
+  }
+
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null {
     const hit = this.hitAt(x, y);
     if (!hit || !this.opened) return null;
@@ -712,7 +736,12 @@ class Painting implements PaintingView {
   }
 }
 
-/** A pointer's pressure: a pen's or a finger's as it reports it; a mouse's MOUSE_PRESSURE. */
+/** sRGB bytes as `#rrggbb`. */
+function hexOf(rgb: readonly number[]): string {
+  return `#${rgb.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** A pointer's pressure:a pen's or a finger's as it reports it; a mouse's MOUSE_PRESSURE. */
 function pressureOf(event: PointerEvent): number {
   return event.pointerType === 'mouse' || !(event.pressure > 0) ? MOUSE_PRESSURE : event.pressure;
 }

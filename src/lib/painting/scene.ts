@@ -36,6 +36,8 @@ export class PaintScene {
   /** Called at the end of every frame with its time in ms, by `performance.now()` around the frame's body (§11.3). */
   onFrameTimed: ((ms: number) => void) | null = null;
   private frameWaiters: (() => void)[] = [];
+  /** Pixel reads waiting for the next frame: called with true after its draw, false when the mini is taken off. */
+  private pixelReads: ((drawn: boolean) => void)[] = [];
 
   constructor(host: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -79,6 +81,7 @@ export class PaintScene {
     if (this.mini) this.scene.remove(this.mini);
     this.mini = null;
     this.stop();
+    for (const read of this.pixelReads.splice(0)) read(false);
     for (const resolve of this.frameWaiters.splice(0)) resolve();
   }
 
@@ -106,7 +109,38 @@ export class PaintScene {
     this.onFrame?.();
     this.renderer.render(this.scene, this.camera);
     this.onFrameTimed?.(performance.now() - start);
+    // Read in the frame that drew them: the drawing buffer is not kept after it is shown.
+    for (const read of this.pixelReads.splice(0)) read(true);
     for (const resolve of this.frameWaiters.splice(0)) resolve();
+  }
+
+  /**
+   * The canvas's pixel under point (x, y), CSS pixels, as the next frame draws it: sRGB bytes,
+   * lighting and all (#135). Null when nothing is shown or the point is off the canvas.
+   */
+  pixelAt(x: number, y: number): Promise<[number, number, number] | null> {
+    if (!this.running) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      this.pixelReads.push((drawn) => {
+        if (!drawn) {
+          resolve(null);
+          return;
+        }
+        const rect = this.canvas.getBoundingClientRect();
+        const buffer = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+        const column = Math.floor((x / rect.width) * buffer.x);
+        const row = buffer.y - 1 - Math.floor((y / rect.height) * buffer.y);
+        if (column < 0 || column >= buffer.x || row < 0 || row >= buffer.y) {
+          resolve(null);
+          return;
+        }
+        const gl = this.renderer.getContext();
+        const bytes = new Uint8Array(4);
+        this.renderer.setRenderTarget(null);
+        gl.readPixels(column, row, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+        resolve([bytes[0]!, bytes[1]!, bytes[2]!]);
+      });
+    });
   }
 
   /**

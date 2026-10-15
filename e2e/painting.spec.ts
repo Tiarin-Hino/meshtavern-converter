@@ -1140,3 +1140,91 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
   expect(hints.every((hint) => hint.length > 20)).toBe(true);
   expect(new Set(hints).size).toBe(hints.length);
 });
+
+/** Opens the view and paints the figure's chest in #b03030 from the front: where a test picks from. */
+async function paintTheChest(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setBrush({ sizeMm: 4 });
+    view.setColour('#b03030');
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const points = [-2, -1, 0, 1, 2].flatMap((x) => {
+      const hit = view.texelAt(...view.screenOf([x, 14, 6]));
+      return hit ? [hit.point] : [];
+    });
+    await view.stroke(points);
+  });
+}
+
+test('picks the paint as painted, the pixel as shown, and nothing where there is none (#135)', async ({
+  figurePage: page,
+}) => {
+  await paintTheChest(page);
+  const picked = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const chest = view.screenOf([0, 14, 6]);
+    // Below the stroke, 2.5 mm from its dabs’ centres: bare.
+    const below = view.screenOf([0, 11.5, 6]);
+    const result = {
+      painted: await view.colourAt(...chest, 'painted'),
+      shown: await view.colourAt(...chest),
+      bareShown: await view.colourAt(...below, 'shown'),
+      barePainted: await view.colourAt(...below, 'painted'),
+      offShown: await view.colourAt(2, 2),
+      offPainted: await view.colourAt(2, 2, 'painted'),
+      belowOnMini: view.texelAt(...below) !== null,
+    };
+    // From behind, the figure's back is bare.
+    view.setCamera(180, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const back = view.screenOf([0, 14, -6]);
+    return { ...result, back: await view.colourAt(...back, 'painted'), steps: view.state.steps };
+  });
+  expect(picked.painted).toBe('#b03030');
+  expect(picked.belowOnMini).toBe(true);
+  expect(picked.barePainted).toBeNull();
+  expect(picked.back).toBeNull();
+  expect(picked.offShown).toBeNull();
+  expect(picked.offPainted).toBeNull();
+  // As shown: the paint under the table's light, red over the primer's grey, and not the paint's own bytes.
+  const rgb = (hex: string): [number, number, number] =>
+    [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16)) as [number, number, number];
+  const [r, g, b] = rgb(picked.shown!);
+  expect(r - g).toBeGreaterThan(30);
+  expect(r - b).toBeGreaterThan(30);
+  const [br, bg] = rgb(picked.bareShown!);
+  expect(Math.abs(br - bg)).toBeLessThan(30);
+  // Picking paints nothing.
+  expect(picked.steps).toBe(1);
+});
+
+test('takes the colour under a tap after Pick in the Paint tool, without painting (#135)', async ({
+  figurePage: page,
+}) => {
+  await paintTheChest(page);
+  await page.evaluate(() => {
+    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
+    window.__mt.painting.view().setColour('#2050a0');
+  });
+  const chest = await page.evaluate(() => window.__mt.painting.view().screenOf([0, 14, 6]));
+  const shown = await page.evaluate((at) => window.__mt.painting.view().colourAt(...at), chest);
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  const pick = page.locator('#paint-pick');
+  await expect(pick).toHaveText('Pick a colour');
+
+  await pick.click();
+  await expect(pick).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+  await page.waitForFunction(() => window.__mt.painting.view().state.colour !== '#2050a0');
+  expect(await page.evaluate(() => window.__mt.painting.view().state.colour)).toBe(shown);
+  await expect(pick).toHaveAttribute('aria-pressed', 'false');
+
+  await page.locator('#paint-pick-mode').selectOption('painted');
+  await pick.click();
+  await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+  await page.waitForFunction(() => window.__mt.painting.view().state.colour === '#b03030');
+  expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
+});

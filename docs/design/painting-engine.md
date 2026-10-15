@@ -342,6 +342,8 @@ On the view's canvas, the question view's rules with the brush always on, moved 
 
 ### 10.1 What the entry mounts and what the consumer draws
 
+**As built (2026-10-15, #135):** the view also has the pipette, `colourAt(x, y, mode?: PickMode): Promise<string | null>`, the colour under a canvas point as `#rrggbb`. `'shown'`, the default (`PICK_MODE`, PM decision on #135, 2026-10-13), is the canvas's pixel there as the next frame draws it, light and shading included (read with `readPixels` inside that frame, since the drawing buffer is not kept); `'painted'` is the committed paint's texel under the point (`texelAt`), its colour whatever its alpha, null where its alpha is 0. Off the mini both give null. Picking is not a tool: the consumer's pipette button waits for the next tap, calls `colourAt` and `setColour`; the view's own input is untouched.
+
 The view mounts the canvas and the cursor ring, nothing else. The consumer draws the tool buttons, the sliders, the palette, Undo and Redo, the region buttons, Save and Close, and wires them to `setTool`, `setBrush`, `setColour`, `undo`, `redo`, `fillRegion`, `paint`, `close`; it reads `state` in `onChange` to disable Undo, show the perf counter or grey the regions a mini does not have. This is the split #119 made for the questions, with the panel left out: a painting panel is where every consumer differs most.
 
 ### 10.2 Words
@@ -381,6 +383,8 @@ export type PaintCopy = typeof PAINT_COPY;
 The engine itself shows only `cannotPaint` (as the refusal's message); the rest is offered so a consumer's panel and this page's `?dev` tool say the same words, as `QUESTION_COPY` does for the questions. `copy` in the options replaces fields; nested objects are replaced whole.
 
 **As built (2026-10-13, #128):** `PAINT_COPY` also has `toolHints`, a sentence or two per tool on what it does, for the consumer's panel to show beside the tool (the `?dev` tool shows it under its tool buttons), added after the PM found the brush, the wash and the ink hard to tell apart.
+
+**As built (2026-10-15, #135):** `PAINT_COPY.pick` holds the pipette's button, its two modes (`shown`, `painted`), a hint and what to say when there is nothing to pick.
 
 ### 10.3 The scene and the styles
 
