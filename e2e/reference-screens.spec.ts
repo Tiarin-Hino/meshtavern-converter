@@ -17,20 +17,23 @@ const FRAMES = [
   { name: 'phone-390', viewport: { width: 390, height: 844 }, phone: true },
 ];
 const THEMES = ['light', 'dark'] as const;
+type Theme = (typeof THEMES)[number];
 
 /**
- * Compares the screen in both themes; `mask` covers what changes from run to run. Each comparison
- * is soft: the run goes on past a picture that differs, so one run reports, and writes the actual
- * picture of, every one that does.
+ * Compares the screen in `theme` with its picture. The comparison is soft: the run goes on past a
+ * picture that differs, so one run reports, and writes the actual picture of, every one that does.
  */
-async function both(page: Page, frame: string, state: string, mask: string[] = []) {
+async function shot(page: Page, name: string, theme: Theme, mask: string[] = []) {
+  await page.emulateMedia({ colorScheme: theme });
+  await expect.soft(page).toHaveScreenshot(`${name}-${theme}.png`, {
+    mask: mask.map((selector) => page.locator(selector)),
+  });
+}
+
+/** Compares the screen in both themes, the scenes held while the pictures are taken. */
+async function both(page: Page, frame: string, state: string) {
   await freezeFrames(page);
-  for (const theme of THEMES) {
-    await page.emulateMedia({ colorScheme: theme });
-    await expect.soft(page).toHaveScreenshot(`${frame}-${state}-${theme}.png`, {
-      mask: mask.map((selector) => page.locator(selector)),
-    });
-  }
+  for (const theme of THEMES) await shot(page, `${frame}-${state}`, theme);
   await thawFrames(page);
 }
 
@@ -47,10 +50,17 @@ for (const frame of FRAMES) {
       await page.addStyleTag({ path: 'e2e/reference-screens.css' });
       await both(page, frame.name, 'empty');
 
-      // Converting: the step and the bar move on while the picture is taken, so they are masked.
-      await converting(page, 600);
-      await both(page, frame.name, 'converting', ['#status', '#progress']);
-      await cancel(page);
+      // Converting: one conversion per picture, so the conversion cannot end between the two
+      // themes; the step and the bar move on while the picture is taken, so they are masked. A
+      // conversion that ended under the picture fails the run instead of recording the done state.
+      for (const theme of THEMES) {
+        await converting(page, 600);
+        await freezeFrames(page);
+        await shot(page, `${frame.name}-converting`, theme, ['#status', '#progress']);
+        expect(await page.evaluate(() => window.__mt.state.page)).toBe('converting');
+        await thawFrames(page);
+        await cancel(page);
+      }
 
       await error(page);
       await both(page, frame.name, 'error');
