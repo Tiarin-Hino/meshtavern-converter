@@ -1,7 +1,8 @@
 // Measures the painting engine (#127, design note docs/design/painting-engine.md §11, §13 step 9)
 // in real Chrome with the GPU on: the time of `open`, the engine's frame counter for strokes of the
 // largest brush across the whole canvas with every brush that strokes (the flat brush also at the
-// default size; the hobby brushes since #128, the airbrush sprayed from above), the intervals
+// default size; the hobby brushes since #128, the airbrush sprayed from above; the dry brush also
+// at 2 mm since #133, whose stroke measures its reference under the first dab), the intervals
 // between frames, and the GPU process's memory with the view open against without. One fresh
 // browser per mini.
 // Usage, after `npm run build`:
@@ -23,13 +24,14 @@ const VIEWPORT = { width: 1920, height: 1080 };
 const STROKES = 3;
 /** Pointer samples a stroke across the canvas has: one a frame, as a pointer at 60 Hz. */
 const SAMPLES = 120;
-/** The brushes measured: each tool that strokes at the largest size, the flat brush also at the default. */
+/** The brushes measured: each tool that strokes at the largest size, the flat brush and the dry brush also at the default. */
 const RUNS = [
   { tool: 'flat', sizeMm: 16 },
   { tool: 'flat', sizeMm: 2 },
   { tool: 'wash', sizeMm: 16 },
   { tool: 'ink', sizeMm: 16 },
   { tool: 'dry', sizeMm: 16 },
+  { tool: 'dry', sizeMm: 2 },
   { tool: 'airbrush', sizeMm: 16, direction: [0, 1, 0] },
 ];
 
