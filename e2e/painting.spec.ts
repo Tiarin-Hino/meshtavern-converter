@@ -1238,6 +1238,104 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
   expect(new Set(hints).size).toBe(hints.length);
 });
 
+test('measures a dry stroke’s reference again when it is replayed after another (#133)', async ({
+  figurePage: page,
+}) => {
+  // Stroke A across the chest, whose highest point stands well above the floor; stroke B from the
+  // disc's flat top over its rim, whose reference is flat (the floor scales it). Undoing B replays
+  // A, which leaves A's reference measured; redoing B must measure B's again, or the rim's flanks
+  // would take A's scale.
+  const outcome = await page.evaluate(
+    async ({ chest, disc }) => {
+      const painting = window.__mt.painting;
+      await painting.open();
+      const view = painting.view();
+      view.setCamera(0, 20, 1);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const pathOf = (points: Vec3[]): [number, number][] => {
+        const anchors = points.map((point) => view.screenOf(point));
+        const path: [number, number][] = [];
+        for (let k = 1; k < anchors.length; k++)
+          for (let i = 0; i < 8; i++) {
+            const [ax, ay] = anchors[k - 1]!;
+            const [bx, by] = anchors[k]!;
+            path.push([ax + ((bx - ax) * i) / 8, ay + ((by - ay) * i) / 8]);
+          }
+        path.push(anchors.at(-1)!);
+        return path;
+      };
+      const paths = [pathOf(chest), pathOf(disc)];
+      const brush = { sizeMm: 3, hardness: 0.8, opacity: 0.5, direction: null };
+      // Each stroke's reference, as the engine measures it: the highest cavity under a one-dab
+      // flat stroke at its first point (undone).
+      view.setTool('flat');
+      view.setBrush({ ...brush, opacity: 1 });
+      const footprints: Uint8Array[] = [];
+      for (const path of paths) {
+        await view.stroke([view.texelAt(...path[0]!)!.point]);
+        footprints.push((await view.paint()).data);
+        await view.undo();
+      }
+      const surface = await view.surface();
+      const references = footprints.map((data) => {
+        let highest = -1;
+        for (let texel = 0; texel < 1024 * 1024; texel++)
+          if (data[texel * 4 + 3]! > 0) highest = Math.max(highest, surface.cavity[texel]!);
+        return highest;
+      });
+      const hash = async (): Promise<number> => {
+        const { data } = await view.paint();
+        let h = 0;
+        for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
+        return h;
+      };
+      view.setTool('dry');
+      view.setBrush(brush);
+      const bare = await hash();
+      await view.strokeAt(paths[0]!);
+      const afterA = await hash();
+      await view.strokeAt(paths[1]!);
+      const afterB = await hash();
+      await view.undo();
+      const undoneB = (await hash()) === afterA;
+      await view.redo();
+      const redoneB = (await hash()) === afterB;
+      await view.undo();
+      await view.undo();
+      const undoneBoth = (await hash()) === bare;
+      await view.redo();
+      await view.redo();
+      const redoneBoth = (await hash()) === afterB;
+      return {
+        references,
+        steps: view.state.steps,
+        changed: [afterA !== bare, afterB !== afterA],
+        undoneB,
+        redoneB,
+        undoneBoth,
+        redoneBoth,
+      };
+    },
+    {
+      chest: [-2, -1, 0, 1, 2].map((x): Vec3 => [x, 14, 6]),
+      disc: [9, 10, 11, 12].map((z): Vec3 => [0.5, 3, z]).concat([[0.5, 2.2, 12.6]]),
+    },
+  );
+  // The two references differ: A's scale is its own height, B's the floor.
+  const [chestReference, discReference] = outcome.references;
+  expect(chestReference! - FLAT_CAVITY).toBeGreaterThan(DRY_REFERENCE_MIN + 0.1);
+  expect(discReference! - FLAT_CAVITY).toBeLessThan(DRY_REFERENCE_MIN);
+  expect(outcome).toEqual({
+    references: outcome.references,
+    steps: 2,
+    changed: [true, true],
+    undoneB: true,
+    redoneB: true,
+    undoneBoth: true,
+    redoneBoth: true,
+  });
+});
+
 /** Opens the view and paints the figure's chest in #b03030 from the front: where a test picks from. */
 async function paintTheChest(page: Page): Promise<void> {
   await page.evaluate(async () => {
