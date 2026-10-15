@@ -3,7 +3,7 @@ title: The quality bar: accessibility scan, keyboard pass, reference screenshots
 date: 2026-10-15
 phase: 1
 issues: [146]
-prs: []
+prs: [159]
 topics: [ui, testing]
 ---
 
