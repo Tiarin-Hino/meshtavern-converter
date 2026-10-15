@@ -22,26 +22,41 @@ const glsl = {
 /** A tool's mask GLSL as a JavaScript function of the same inputs and uniforms. */
 function maskAsJs(
   mask: string,
-): (cavity: number, occlusion: number, normal: V3, brush: BrushSettings) => number {
+): (
+  cavity: number,
+  occlusion: number,
+  normal: V3,
+  brush: BrushSettings,
+  reference: number,
+) => number {
   const body = mask.replace(/\bfloat\b/g, 'let');
   const run = new Function(
     'cavity',
     'occlusion',
     'normal',
+    'reference',
     'uPressure',
     'uDirection',
     ...Object.keys(glsl),
     body,
   ) as (...args: unknown[]) => number;
-  return (cavity, occlusion, normal, brush) => {
+  return (cavity, occlusion, normal, brush, reference) => {
     const direction = brush.direction;
     const uDirection = direction ? { xyz: direction, w: 1 } : { xyz: [0, 0, 0], w: 0 };
-    return run(cavity, occlusion, normal, brush.opacity, uDirection, ...Object.values(glsl));
+    return run(
+      cavity,
+      occlusion,
+      normal,
+      reference,
+      brush.opacity,
+      uDirection,
+      ...Object.values(glsl),
+    );
   };
 }
 
 describe('the tools', () => {
-  it('pairs every tool’s mask GLSL with toolMask, over the surface and the sliders', () => {
+  it('pairs every tool’s mask GLSL with toolMask, over the surface, the sliders and the reference', () => {
     const normals: V3[] = [
       [0, 1, 0],
       [0, -1, 0],
@@ -52,17 +67,20 @@ describe('the tools', () => {
     ];
     for (const tool of TOOL_IDS) {
       const gpu = maskAsJs(TOOL_PASSES[tool].mask);
+      // The reference is read by the tools that measure one (the dry brush, #133).
+      const references = TOOL_PASSES[tool].reference ? [-1, 0, 0.0078, 0.05, 0.12, 0.4, 1] : [1];
       for (const cavity of [-1, -0.6, -0.1, 0, 0.05, 0.15, 0.3, 0.5, 0.75, 1])
         for (const occlusion of [0, 0.3, 0.7, 1])
           for (const normal of normals)
             for (const opacity of [0, 0.25, 0.5, 1])
-              for (const direction of [null, [0, 1, 0], [0.6, 0, 0.8]] as (V3 | null)[]) {
-                const brush = { ...DEFAULT_BRUSH, opacity, direction };
-                expect(gpu(cavity, occlusion, normal, brush)).toBeCloseTo(
-                  toolMask(tool, cavity, occlusion, normal, brush),
-                  12,
-                );
-              }
+              for (const direction of [null, [0, 1, 0], [0.6, 0, 0.8]] as (V3 | null)[])
+                for (const reference of references) {
+                  const brush = { ...DEFAULT_BRUSH, opacity, direction };
+                  expect(gpu(cavity, occlusion, normal, brush, reference)).toBeCloseTo(
+                    toolMask(tool, cavity, occlusion, normal, brush, reference),
+                    12,
+                  );
+                }
     }
   });
 
@@ -70,6 +88,10 @@ describe('the tools', () => {
     expect(toolPass('eraser').composite).toBe('erase');
     expect(toolPass('flat').blend).toBe('max');
     expect(() => toolPass('glaze' as never)).toThrow(RangeError);
+  });
+
+  it('measures a reference for the dry brush only (#133)', () => {
+    for (const tool of TOOL_IDS) expect(toolPass(tool).reference === true).toBe(tool === 'dry');
   });
 
   it('adds up the airbrush, soft, with its flow in each dab; the dry brush at its own opacity', () => {

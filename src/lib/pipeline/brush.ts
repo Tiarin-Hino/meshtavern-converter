@@ -2,8 +2,10 @@ import type { Vec3 } from './base';
 import {
   AIR_DIR_EDGE,
   AIR_DIR_SOFTNESS,
+  DRY_REFERENCE_MIN,
   DRY_SOFTNESS,
   DRY_THRESHOLD,
+  FLAT_CAVITY,
   INK_FLAT,
   WASH_FLAT,
   WASH_LIFT,
@@ -270,10 +272,15 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * - `wash`: pools where the cavity is negative and the occlusion low, tints a flat open surface
  *   faintly (`WASH_FLAT`) and evenly, and is shed by a raised edge (`WASH_LIFT`).
  * - `ink`: stains everything it covers (`INK_FLAT`), the creases fully.
- * - `dry`: only where the cavity is above `DRY_THRESHOLD × (1 − pressure)`, the pressure being
- *   the brush's `opacity`: more pressure reaches further down the edge.
+ * - `dry`: by the texel's height above flat (`FLAT_CAVITY`) as a share of `reference`'s, the
+ *   highest cavity under the stroke's first dab (#133), never less than `DRY_REFERENCE_MIN`: only
+ *   where that share is above `DRY_THRESHOLD × (1 − pressure)`, the pressure being the brush's
+ *   `opacity`. The reference's own height takes all at any pressure; more pressure reaches
+ *   further down from it; flat and creases take nothing.
  * - `airbrush`: with a `direction`, only the surface whose normal faces it (above `AIR_DIR_EDGE`);
  *   without, everything.
+ *
+ * `reference` is read by the dry brush only; left out it is 1, a fully raised edge under the brush.
  */
 export function toolMask(
   tool: ToolId,
@@ -281,6 +288,7 @@ export function toolMask(
   occlusion: number,
   normal: Vec3,
   brush: BrushSettings,
+  reference = 1,
 ): number {
   switch (tool) {
     case 'flat':
@@ -294,8 +302,9 @@ export function toolMask(
     case 'ink':
       return INK_FLAT + (1 - INK_FLAT) * saturate(-cavity);
     case 'dry': {
+      const scale = Math.max(reference - FLAT_CAVITY, DRY_REFERENCE_MIN);
       const threshold = DRY_THRESHOLD * (1 - brush.opacity);
-      return smoothstep(threshold, threshold + DRY_SOFTNESS, cavity);
+      return smoothstep(threshold, threshold + DRY_SOFTNESS, (cavity - FLAT_CAVITY) / scale);
     }
     case 'airbrush': {
       const direction = brush.direction;

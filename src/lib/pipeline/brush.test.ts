@@ -13,7 +13,15 @@ import {
   type BrushSettings,
   type DabHit,
 } from './brush';
-import { DRY_SOFTNESS, DRY_THRESHOLD, INK_FLAT, WASH_FLAT, WASH_LIFT } from './look';
+import {
+  DRY_REFERENCE_MIN,
+  DRY_SOFTNESS,
+  DRY_THRESHOLD,
+  FLAT_CAVITY,
+  INK_FLAT,
+  WASH_FLAT,
+  WASH_LIFT,
+} from './look';
 
 const hit = (x: number, y = 0, z = 0, pressure = 0.5): DabHit => ({ point: [x, y, z], pressure });
 
@@ -209,20 +217,75 @@ describe('toolMask', () => {
     expect(ink(-0.5)).toBeGreaterThan(ink(0));
   });
 
-  it('dry-brushes only where the cavity is positive, and further down the edge with more pressure', () => {
-    const dry = (cavity: number, pressure: number): number =>
-      toolMask('dry', cavity, 1, UP, brush({ opacity: pressure }));
-    for (const pressure of [0, 0.5, 1])
-      for (const cavity of [-1, -0.3, 0]) expect(dry(cavity, pressure)).toBe(0);
-    expect(dry(1, 1)).toBe(1);
-    // At full pressure the threshold is 0: a slightly raised texel catches some.
+  // The dry brush relative to its stroke's reference (#133, design note `dry-brush-crests.md` §4).
+  const dry = (cavity: number, pressure: number, reference = 1): number =>
+    toolMask('dry', cavity, 1, UP, brush({ opacity: pressure }), reference);
+  const PRESSURES = [0, 0.25, 0.5, 0.75, 1];
+  const REFERENCES = [-1, -0.2, 0, FLAT_CAVITY, 0.03, 0.067, 0.11, 0.3, 0.6, 1];
+
+  it('dry-brushes nothing flat or below, whatever the reference and the pressure', () => {
+    for (const reference of REFERENCES)
+      for (const pressure of PRESSURES)
+        for (const cavity of [-1, -0.3, 0, FLAT_CAVITY])
+          expect(dry(cavity, pressure, reference)).toBe(0);
+    expect(FLAT_CAVITY).toBeCloseTo(2 / 255, 12);
+  });
+
+  it('dry-brushes the reference’s own height fully at every pressure', () => {
+    for (const reference of [FLAT_CAVITY + DRY_REFERENCE_MIN, 0.3, 0.6, 1])
+      for (const pressure of PRESSURES) expect(dry(reference, pressure, reference)).toBe(1);
+    // Anything higher along the stroke too.
+    expect(dry(0.9, 0, 0.3)).toBe(1);
+  });
+
+  it('reaches further down from the reference with more pressure, never taking less', () => {
+    for (const reference of [0.067, 0.3, 1]) {
+      const lowest = PRESSURES.map((pressure) => {
+        let cavity = reference;
+        while (cavity > -1 && dry(cavity - 0.001, pressure, reference) > 0) cavity -= 0.001;
+        return cavity;
+      });
+      for (let k = 1; k < lowest.length; k++) expect(lowest[k]).toBeLessThan(lowest[k - 1]!);
+      for (let cavity = -1; cavity <= 1; cavity += 0.01)
+        for (let k = 1; k < PRESSURES.length; k++)
+          expect(dry(cavity, PRESSURES[k]!, reference)).toBeGreaterThanOrEqual(
+            dry(cavity, PRESSURES[k - 1]!, reference),
+          );
+    }
+  });
+
+  it('catches the crest of low detail where an absolute threshold leaves it bare', () => {
+    // The ridged block of the e2e test: crests at 0.067, four of the texture's steps above flat.
+    const crest = 0.067;
+    expect(dry(crest, 0.5, 1)).toBe(0);
+    expect(dry(crest, 0.5, crest)).toBe(1);
+    expect(dry(crest, 0.25, crest)).toBe(1);
+    // Half its height takes something at half pressure, a third of it only at full.
+    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 2, 0.5, crest)).toBeGreaterThan(0);
+    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 3, 0.5, crest)).toBe(0);
+    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 3, 1, crest)).toBeGreaterThan(0);
+  });
+
+  it('takes a reference under DRY_REFERENCE_MIN above flat as that floor', () => {
+    const floor = FLAT_CAVITY + DRY_REFERENCE_MIN;
+    for (const reference of [-1, 0, FLAT_CAVITY, 0.03, floor])
+      for (const pressure of PRESSURES)
+        for (let cavity = -0.2; cavity <= 0.3; cavity += 0.01)
+          expect(dry(cavity, pressure, reference)).toBe(dry(cavity, pressure, floor));
+    // One step of the texture above flat, under a flat footprint: nothing below two thirds of the pressure.
+    expect(dry(FLAT_CAVITY + 4 / 255, 0.6, 0.02)).toBe(0);
+  });
+
+  it('dry-brushes as before #133 when a fully raised texel is under the first dab', () => {
+    // The old threshold and softness, measured from flat and over the height from flat to 1.
+    const at = (share: number): number => FLAT_CAVITY + share * (1 - FLAT_CAVITY);
+    for (const pressure of PRESSURES) {
+      const threshold = DRY_THRESHOLD * (1 - pressure);
+      expect(dry(at(threshold), pressure)).toBe(0);
+      expect(dry(at(threshold + DRY_SOFTNESS), pressure)).toBeCloseTo(1, 12);
+    }
     expect(dry(0.1, 1)).toBeGreaterThan(0);
-    // At none it is DRY_THRESHOLD: that texel takes nothing, a sharper edge does.
     expect(dry(0.1, 0)).toBe(0);
-    expect(dry(DRY_THRESHOLD, 0)).toBe(0);
-    expect(dry(DRY_THRESHOLD + DRY_SOFTNESS, 0)).toBe(1);
-    for (const cavity of [0.05, 0.2, 0.4, 0.6])
-      expect(dry(cavity, 0.8)).toBeGreaterThanOrEqual(dry(cavity, 0.2));
   });
 
   it('airbrushes everything without a direction, and from above nothing that faces down', () => {
