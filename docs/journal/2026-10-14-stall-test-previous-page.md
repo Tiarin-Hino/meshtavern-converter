@@ -9,7 +9,7 @@ topics: [testing, tooling, performance]
 
 ## What we did
 
-The end-to-end test "the page does not freeze while a mini is converted, baked and shown" now starts its conversion two seconds after the page opened rather than right away. In the first second after a navigation, Chromium is still tearing down the page that was there before, and on a CI runner without a GPU that teardown held the new page up for 100–650 ms. The page itself did not change. The frame watch now also says in which step its longest gap fell (`state.longestFrameGapDuring`), and the test's failure message prints it. The CI job may now run 35 minutes instead of 25.
+The end-to-end test "the page does not freeze while a mini is converted, baked and shown" now starts its conversion two seconds after the page opened rather than right away. In the first second after a navigation, Chromium is still tearing down the page that was there before, and on a CI runner without a GPU that teardown held the new page up for 100–650 ms. The page itself did not change. With the previous page out of the measurement, the CI limit went from 400 ms to 200 ms (PM decision on PR #157). The frame watch now also says in which step its longest gap fell (`state.longestFrameGapDuring`), and the test's failure message prints it. The CI job may now run 35 minutes instead of 25.
 
 ## Why
 
@@ -54,7 +54,7 @@ Failures before the fix: 450, 433, 400, 650 and 450 ms against the 400 ms CI lim
 
 ## Still open
 
-- The CI limit stays at 400 ms. With the teardown out of the measurement, the gaps on CI were 17–33 ms with one worker and 83–100 ms in the full suite with two, so the spec's 100 ms would still be too tight for CI; whether to lower the CI limit (to 200 ms, say) is the PM's call once more runs show where the numbers settle.
+- Whether 200 ms holds on CI over time. Each run's uploaded `playwright-report` carries the figure as the test's `longest stall` annotation, so a creeping number shows before it fails.
 - "runs the device benchmark and offers the result as text" also ran past its 180 s on one slow runner (and on 2026-10-13): software drawing of the stress scenes, a separate flake.
 
 ## Story angle

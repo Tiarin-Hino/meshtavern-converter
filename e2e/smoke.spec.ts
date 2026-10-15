@@ -2,10 +2,12 @@ import { expect, test } from '@playwright/test';
 
 /**
  * The longest the page may stand still, in ms (Phase 1 spec, story 2). CI runners draw the
- * scene in software on four shared cores, where one frame alone can take longer, so the
- * limit is only enforced as it stands where a GPU does the drawing: STALL_LIMIT=strict.
+ * scene in software on four shared cores, next to a second test worker, where one frame alone
+ * can take longer, so the limit is only enforced as it stands where a GPU does the drawing:
+ * STALL_LIMIT=strict. CI's limit is twice the worst it measured once the previous page was
+ * out of the measurement, 83–100 ms in the full suite (#156; PM decision on PR #157).
  */
-const MAX_STALL_MS = process.env.STALL_LIMIT === 'strict' ? 100 : 400;
+const MAX_STALL_MS = process.env.STALL_LIMIT === 'strict' ? 100 : 200;
 
 /**
  * How long after a navigation Chromium still holds the previous document's compositor. It shuts
