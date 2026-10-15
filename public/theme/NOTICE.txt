@@ -25,8 +25,8 @@ Lucide 1.53.0
   2013-present Cole Bemis) are also under the MIT License, whose text and list of icons are in
   the same file.
 
-three.js 0.186.0
-  Draws the minis, loads a GLB and reads the KTX2 texture, from the npm package three 0.186.0.
+three.js 0.186.1
+  Draws the minis, loads a GLB and reads the KTX2 texture, from the npm package three 0.186.1.
   Copyright (c) 2010-2026 three.js authors, https://threejs.org
   MIT License: below. Its KTX2 loader brings two parts of its own: the Basis Universal
   transcoder (/basis/, Apache License 2.0, below, with Basis Universal's notice) and zstddec

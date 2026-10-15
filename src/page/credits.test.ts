@@ -24,7 +24,7 @@ const dialogTerms = [...dialog.matchAll(/<dt>([^<]+)<\/dt>/g)].map((m) => m[1]!)
 
 describe('the credits', () => {
   it('names in the dialog every part NOTICE.txt credits, and nothing else', () => {
-    expect(parts).toContain('three.js 0.186.0');
+    expect(parts).toContain(`three.js ${version('three')}`);
     expect(dialogTerms).toEqual(parts);
   });
 
