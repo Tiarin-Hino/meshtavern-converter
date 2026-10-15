@@ -3,7 +3,7 @@ title: The build commands move into the converter repo
 date: 2026-09-23
 phase: 1
 issues: []
-prs: [65]
+prs: [65, 160]
 topics: [workflow, tooling]
 ---
 
@@ -25,6 +25,8 @@ The five commands are adapted copies, not links, because this repo is public and
 - Each command carries the journal rule: `/implement` and `/fix-bug` write the entry, `/open-pr` checks it exists, `/review-pr` checks it matches the PR.
 
 Planning commands (specs, decisions, research, status) were not copied. Planning stays with the product repo.
+
+Review pictures (#160): the PM decided on #159 (2026-10-15) that every picture a PR asks them to judge is embedded in the PR description itself, not only named or linked. `/open-pr` now says so under "Needs a human look": committed files only, `raw.githubusercontent.com` links pinned to the commit so a later push does not change what was approved, one table per frame size, and the links moved to the new commit when the pictures change. The PR template's checklist asks for the same instead of accepting the Playwright report. The reason is the PM's review: they judge the pictures in the description, without opening the Playwright report, an artifact or the branch.
 
 ## Problems and how we solved them
 
