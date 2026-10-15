@@ -465,6 +465,9 @@ class View implements QuestionsView {
     if (this.footer) {
       this.footer.classList.add('mt-questions');
       this.footer.append(this.ask.confirm, this.meetInputs.confirm);
+      // Hidden until a question shows them: the footer holds the consumer's own buttons before it.
+      this.ask.confirm.hidden = true;
+      this.meetInputs.confirm.hidden = true;
     }
     this.scene = new QuestionScene(sceneHost);
     this.current = this.snapshot();
