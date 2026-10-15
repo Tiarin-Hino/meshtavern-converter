@@ -48,11 +48,13 @@ All on GitHub's `ubuntu-latest` (4 vCPU, AMD EPYC 7763 or 9V74, SwiftShader), th
 | Right after `ready` (before) | 133, 167, 150, 200, 167, 133 ms   |
 | 2 s after navigation         | 17, 17, 17, 33, 17, 17 ms         |
 
+With the fix, in the full e2e suite as CI runs it (two workers), run 38651028343 and two re-runs: 83 ms (during `compress`), 83 ms (`show`) and 100 ms (`simplify`); all three passed, as did run 38640198132 before them (the stall was not recorded then). The test now records its longest stall in the report of every run, passed or not (annotation `longest stall`).
+
 Failures before the fix: 450, 433, 400, 650 and 450 ms against the 400 ms CI limit. On the reference Windows PC (SwiftShader) 33–83 ms either way.
 
 ## Still open
 
-- The CI limit stays at 400 ms. With the teardown out of the measurement, the gaps on CI were 17–33 ms, but those were single-worker runs and CI runs two workers, so whether the CI limit could go down to the spec's 100 ms is the PM's call once a few more CI runs show where the numbers settle.
+- The CI limit stays at 400 ms. With the teardown out of the measurement, the gaps on CI were 17–33 ms with one worker and 83–100 ms in the full suite with two, so the spec's 100 ms would still be too tight for CI; whether to lower the CI limit (to 200 ms, say) is the PM's call once more runs show where the numbers settle.
 - "runs the device benchmark and offers the result as text" also ran past its 180 s on one slow runner (and on 2026-10-13): software drawing of the stress scenes, a separate flake.
 
 ## Story angle
