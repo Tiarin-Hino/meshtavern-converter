@@ -1,0 +1,8 @@
+/*
+ * The reference screenshots (#146) hide every 3D canvas: CI draws WebGL in software, and the mini
+ * looks different per machine. The chrome around it is what these pictures keep; the mini's look
+ * is judged by eye and by the corpus's sheets.
+ */
+canvas {
+  visibility: hidden !important;
+}

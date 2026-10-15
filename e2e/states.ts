@@ -101,3 +101,38 @@ export async function dragLeave(page: Page): Promise<void> {
   );
   await page.waitForFunction(() => !document.body.hasAttribute('data-dragging'));
 }
+
+/**
+ * Holds every animation-frame callback the page asks for, so the 3D scenes stop drawing: a
+ * picture of the page then takes milliseconds, not the seconds a software-rendered frame costs on
+ * a busy machine. `thawFrames` hands the held callbacks back, and the scenes go on.
+ */
+export async function freezeFrames(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const w = window as typeof window & {
+      __held?: { raf: typeof requestAnimationFrame; queue: FrameRequestCallback[] };
+    };
+    if (w.__held) return;
+    const held = { raf: w.requestAnimationFrame.bind(w), queue: [] as FrameRequestCallback[] };
+    w.__held = held;
+    w.requestAnimationFrame = (callback) => {
+      held.queue.push(callback);
+      return 0;
+    };
+    // The frames already asked for run once more and ask again, into the queue.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+}
+
+export async function thawFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as typeof window & {
+      __held?: { raf: typeof requestAnimationFrame; queue: FrameRequestCallback[] };
+    };
+    const held = w.__held;
+    if (!held) return;
+    delete w.__held;
+    w.requestAnimationFrame = held.raf;
+    for (const callback of held.queue) held.raf(callback);
+  });
+}
