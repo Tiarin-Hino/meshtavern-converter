@@ -38,7 +38,8 @@
     "feedback": "node scripts/feedback.mjs",
     "shots:look-and-feel": "node scripts/look-and-feel-shots.mjs",
     "check:colours": "node scripts/check-colours.mjs",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "shots:take": "node scripts/take-reference-screens.mjs"
   },
   "dependencies": {
     "meshoptimizer": "^1.2.0",

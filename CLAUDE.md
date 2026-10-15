@@ -22,6 +22,7 @@ TypeScript, Vite, three.js, Vitest, Playwright. Node 20.19+.
 - `npm run feedback` — steps through figure + base pairs in real Chrome for the PM to judge (R right, S save placement, K skip, N next, Escape end) and writes a record and a sheet per pair to `out/feedback/` (`-- --pairs <json>`, `--only`, `--from`, `--redo`; issue #70, design note §13)
 - `npm run score-placements` — scores the current placement code against the recorded placements (`scripts/corpus-placements.json`, `out/feedback/`) in Node, in about a minute
 - `npm run shots:look-and-feel` — renders the look-and-feel mockups (`docs/design/look-and-feel/`, #142) into their `shots/` with headless Chromium, both themes, desktop and phone
+- `npm run shots:take -- <folder>` — copies the reference pictures a CI run wrote (its `reference-screens-actual` artifact, unzipped) into `e2e/reference-screens.spec.ts-snapshots/` as the Linux set (#146, `docs/guides/reference-screenshots.md`)
 - `npm run format` — Prettier
 
 ## Layout

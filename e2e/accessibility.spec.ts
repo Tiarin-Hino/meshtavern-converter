@@ -118,13 +118,21 @@ for (const theme of THEMES) {
       await open(page, '/?dev&ask=off');
       await page.setInputFiles('#file', file('hero.stl', generateFigure(true)));
       await page.waitForFunction(
-        () => window.__mt.state.stats !== null && !window.__mt.state.busy,
+        () =>
+          window.__mt.state.stats !== null &&
+          window.__mt.state.baked !== null &&
+          !window.__mt.state.busy,
         undefined,
         { timeout: 180_000 },
       );
       await page.locator('#dev-paint > summary').click();
       await page.locator('#paint-open').click();
-      await expect(page.locator('#paint-controls')).toBeVisible();
+      // Opening builds the painting's targets in software rendering: seconds on a CI runner. A
+      // refusal is written under the controls, so the failure names it.
+      await expect(
+        page.locator('#paint-controls'),
+        await page.locator('#paint-perf').innerText(),
+      ).toBeVisible({ timeout: 60_000 });
       await scan(page, testInfo, `${theme}-painting`);
     });
   });

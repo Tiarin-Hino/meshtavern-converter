@@ -45,7 +45,7 @@ All on the cloud container (4 cores, Chromium 141 headless shell, SwiftShader).
 
 ## Still open
 
-- **CI's Chromium is a newer build than the container's.** The Linux set was written with Chromium 141; if CI's draws text differently, the first CI run fails and the set is rewritten from its report (the guide says how).
+- **The Linux set must come from CI.** The first CI run differed by 1–2 % of the pixels in every picture (text drawn by CI's newer Chromium); this session can reach neither CI's artifacts nor that browser build. The comparisons are now soft, so one run writes every actual picture; CI uploads them as `reference-screens-actual`, and `npm run shots:take` puts them in place. Until then the reference test is red on CI.
 - **The Windows set** is written on the development PC's first run and committed from there.
 - The scan reads axe's rules for contrast with the theme's real colours; the contrast of every pair of roles stays the application's check.
 

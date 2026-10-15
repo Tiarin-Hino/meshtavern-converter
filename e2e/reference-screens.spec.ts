@@ -18,12 +18,16 @@ const FRAMES = [
 ];
 const THEMES = ['light', 'dark'] as const;
 
-/** Compares the screen in both themes; `mask` covers what changes from run to run. */
+/**
+ * Compares the screen in both themes; `mask` covers what changes from run to run. Each comparison
+ * is soft: the run goes on past a picture that differs, so one run reports, and writes the actual
+ * picture of, every one that does.
+ */
 async function both(page: Page, frame: string, state: string, mask: string[] = []) {
   await freezeFrames(page);
   for (const theme of THEMES) {
     await page.emulateMedia({ colorScheme: theme });
-    await expect(page).toHaveScreenshot(`${frame}-${state}-${theme}.png`, {
+    await expect.soft(page).toHaveScreenshot(`${frame}-${state}-${theme}.png`, {
       mask: mask.map((selector) => page.locator(selector)),
     });
   }

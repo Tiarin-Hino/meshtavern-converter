@@ -28,7 +28,13 @@ npx playwright test e2e/reference-screens.spec.ts --update-snapshots
 git add e2e/reference-screens.spec.ts-snapshots
 ```
 
-This rewrites only the set of the platform you run it on. When the Linux set must change and you are not on Linux, take the `actual` pictures from the CI run's report (named `<picture>-actual.png`), rename them to the snapshot names and commit them, or run the command in a Linux session (a Claude Code cloud session can: the task needs no GPU).
+This rewrites only the set of the platform you run it on.
+
+**The Linux set must be CI's own.** The text in the pictures is drawn by the browser, and a different Chromium build moves 1–2 % of the pixels. The set must therefore come from the Chromium build CI installs (`npx playwright install chromium` for the pinned Playwright), not from an older build on another Linux machine. The comparisons are soft: one CI run writes the actual picture of every one that differs. To take CI's set:
+
+1. Download the `reference-screens-actual` artifact of the failed CI run (on the run's page, under Artifacts) and unzip it.
+2. `npm run shots:take -- <the unzipped folder>` copies each `<picture>-actual.png` to `e2e/reference-screens.spec.ts-snapshots/<picture>-chromium-linux.png`.
+3. Look at them, commit them, and push: the next CI run compares against them.
 
 In the PR, say which pictures changed and why; the diff of a PNG on GitHub shows both side by side.
 
