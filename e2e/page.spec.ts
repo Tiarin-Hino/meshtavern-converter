@@ -75,6 +75,8 @@ test('shows the empty, converting, done and error states on the components', asy
   await expect(page.getByRole('progressbar')).toBeVisible();
   await expect(page.locator('#progress')).toHaveClass(/\bprogress\b/);
   await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  // The question view's Confirm buttons wait in the footer, hidden until a question (#146).
+  await expect(page.locator('#panel-footer button:visible')).toHaveCount(1);
   await shoot(page, testInfo, 'page-converting');
   await conversion;
 

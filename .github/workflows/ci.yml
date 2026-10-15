@@ -34,3 +34,12 @@ jobs:
           name: playwright-report
           path: playwright-report
           retention-days: 14
+      # The reference pictures that differ, by name, so the Linux set can be taken from CI's own
+      # Chromium (#146, docs/guides/reference-screenshots.md, `npm run shots:take`).
+      - uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: reference-screens-actual
+          path: test-results/reference-screens-*/*-actual.png
+          if-no-files-found: ignore
+          retention-days: 14
