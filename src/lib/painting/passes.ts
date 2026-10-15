@@ -674,6 +674,13 @@ export class PaintPasses {
     return bytes;
   }
 
+  /** One texel of the committed paint: sRGB, straight alpha (#135). */
+  async readTexel(x: number, y: number): Promise<[number, number, number, number]> {
+    const bytes = new Uint8Array(4);
+    await this.renderer.readRenderTargetPixelsAsync(this.paint, x, y, 1, 1, bytes);
+    return [bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!];
+  }
+
   /**
    * What the masks read at every texel, at its owner (§6): the cavity, the occlusion and the
    * normal, for tests that check a brush against `toolMask`. Two quad passes and two read-backs;

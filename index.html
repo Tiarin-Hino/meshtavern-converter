@@ -588,7 +588,7 @@
             <figcaption id="dev-kind"></figcaption>
           </figure>
           <details id="dev-paint" class="panel-section" data-in="done" data-mini data-dev>
-            <summary>Paint (team tool, #127, #128)</summary>
+            <summary>Paint (team tool, #127, #128, #135)</summary>
             <button id="paint-open" class="btn btn-sm" type="button">Paint this mini</button>
             <div id="paint-controls" hidden>
               <div id="paint-tools" class="actions" role="group" aria-label="Tool"></div>
@@ -619,6 +619,18 @@
               <label class="field"
                 ><span>Colour</span> <input id="paint-colour" type="color"
               /></label>
+              <div class="actions" role="group" aria-label="Pipette">
+                <button id="paint-pick" class="btn btn-sm" type="button" aria-pressed="false">
+                  Pick a colour
+                </button>
+                <label class="field"
+                  ><span class="visually-hidden">Pick</span>
+                  <select id="paint-pick-mode" class="input">
+                    <option value="shown">As shown</option>
+                    <option value="painted">As painted</option>
+                  </select></label
+                >
+              </div>
               <div class="actions" role="group" aria-label="Regions">
                 <button id="paint-base" class="btn btn-sm" type="button">The base</button>
                 <button id="paint-figure" class="btn btn-sm" type="button">The figure</button>

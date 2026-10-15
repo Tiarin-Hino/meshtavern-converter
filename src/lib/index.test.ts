@@ -155,7 +155,7 @@ describe('the library entries', () => {
     ]);
   });
 
-  it('painting.ts exports exactly the painting view and its words (#127)', () => {
+  it('painting.ts exports exactly the painting view and its words (#127, #135)', () => {
     expect(Object.keys(painting).sort()).toEqual([
       'BRUSH_DEPTH_MM',
       'BRUSH_DEPTH_SOFT_MM',
@@ -169,6 +169,7 @@ describe('the library entries', () => {
       'KEYFRAME_EVERY',
       'PAINT_COPY',
       'PAINT_DILATION_RINGS',
+      'PICK_MODE',
       'UNDO_STEPS',
       'mountPainting',
     ]);

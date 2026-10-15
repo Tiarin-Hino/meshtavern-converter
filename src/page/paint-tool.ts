@@ -16,6 +16,7 @@ import {
   PAINT_COPY,
   type PaintingState,
   type PaintingView,
+  type PickMode,
 } from '../lib/painting';
 
 /**
@@ -23,7 +24,8 @@ import {
  * step 5): the painting view mounted over the viewport for the converted mini, with a plain panel
  * of the tools, sliders, colour, regions, Undo, Redo, Save and Close. The test harness for the
  * engine's pixel tests and the PM's tool for judging the brushes (the hobby brushes of #128 with
- * their own sliders and the airbrush's direction); not the product page's (it is
+ * their own sliders and the airbrush's direction, and the pipette of #135: Pick, then a tap on
+ * the mini takes its colour); not the product page's (it is
  * `data-dev`, removed without ?dev). It uses the entry as any consumer would.
  */
 
@@ -87,6 +89,8 @@ interface Panel {
   tolerance: HTMLInputElement;
   direction: HTMLSelectElement;
   colour: HTMLInputElement;
+  pick: HTMLButtonElement;
+  pickMode: HTMLSelectElement;
   base: HTMLButtonElement;
   figure: HTMLButtonElement;
   undo: HTMLButtonElement;
@@ -113,6 +117,8 @@ function findPanel(root: Document): Panel | null {
     tolerance: get('paint-tolerance')!,
     direction: get('paint-direction')!,
     colour: get('paint-colour')!,
+    pick: get('paint-pick')!,
+    pickMode: get('paint-pick-mode')!,
     base: get('paint-base')!,
     figure: get('paint-figure')!,
     undo: get('paint-undo')!,
@@ -136,7 +142,14 @@ export function createPaintTool(
 ): PaintHooks {
   let view: PaintingView | null = null;
   let opened: MiniForPainting | null = null;
+  /** Pick is pressed: the next tap on the mini takes its colour instead of painting. */
+  let picking = false;
   const panel = findPanel(document);
+
+  const setPicking = (on: boolean): void => {
+    picking = on;
+    panel?.pick.setAttribute('aria-pressed', String(on));
+  };
 
   const show = (state: PaintingState): void => {
     onState(state);
@@ -201,6 +214,7 @@ export function createPaintTool(
   };
 
   const close = (): void => {
+    setPicking(false);
     view?.close();
     opened?.release?.();
     opened = null;
@@ -208,7 +222,30 @@ export function createPaintTool(
     onState(view ? view.state : null);
   };
 
+  // Before the view's own listeners on its canvas: a tap while picking never reaches the brush.
+  host.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (!picking || !view?.state.open || event.button !== 0) return;
+      event.stopPropagation();
+      event.preventDefault();
+      setPicking(false);
+      const rect = (host.querySelector('canvas') ?? host).getBoundingClientRect();
+      const mode = (panel?.pickMode.value ?? 'shown') as PickMode;
+      void view.colourAt(event.clientX - rect.left, event.clientY - rect.top, mode).then((hex) => {
+        if (hex) view?.setColour(hex);
+        else if (panel) panel.perf.textContent = PAINT_COPY.pick.nothing;
+      });
+    },
+    { capture: true },
+  );
+
   if (panel) {
+    panel.pick.textContent = PAINT_COPY.pick.button;
+    panel.pick.title = PAINT_COPY.pick.hint;
+    panel.pickMode.options[0]!.textContent = PAINT_COPY.pick.shown;
+    panel.pickMode.options[1]!.textContent = PAINT_COPY.pick.painted;
+    panel.pick.addEventListener('click', () => setPicking(!picking));
     for (const tool of TOOL_IDS) {
       const button = document.createElement('button');
       button.type = 'button';
