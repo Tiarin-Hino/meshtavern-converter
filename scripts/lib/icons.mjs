@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { format, resolveConfig } from 'prettier';
 
 /** The package and its version, pinned in package.json's devDependencies. */
-export const LUCIDE_VERSION = '1.53.0';
+export const LUCIDE_VERSION = '1.55.0';
 
 /** Each module and the names it holds, in the order written. */
 export const ICON_SETS = {
