@@ -26,7 +26,7 @@ Both WebAssembly modules in the critical path are built by this project from pin
 
 ## Automatic reviews
 
-On PRs from branches of this repo (not forks, not drafts), Claude (Fable 5.1) reviews the change: one pass looks for bugs, another checks that the solution is as simple as the problem and fits the rest of the codebase (instructions in `.github/pr-review.md`, read from `main`). When a maintainer adds the `astra-review` label, GPT Astra reviews with the same instructions too. If no reviewer finds anything blocking, the PR gets `ready-for-human-review`. If one does, the PR gets `changes-requested`, Claude fixes the findings on the branch and the next push is reviewed again; after three rounds the PR gets `needs-human`, which a later pass removes. The labels are advice: a human still reviews and merges.
+On PRs from branches of this repo (not forks, not drafts), Claude (Fable 5.1, or Opus 5.5 while Fable's usage limit is reached) reviews the change: one pass looks for bugs, another checks that the solution is as simple as the problem and fits the rest of the codebase (instructions in `.github/pr-review.md`, read from `main`). When a maintainer adds the `argon-review` label, Gemini 4 Argon reviews with the same instructions too, and GPT Astra with `astra-review`, a third opinion now and then; every review that runs must pass. If no reviewer finds anything blocking, the PR gets `ready-for-human-review`. If one does, the PR gets `changes-requested`, Claude fixes the findings on the branch and the next push is reviewed again; after three rounds the PR gets `needs-human`, which a later pass removes. The labels are advice: a human still reviews and merges.
 
 ## Reviewing an agent PR
 
