@@ -1,8 +1,17 @@
-# MeshTavern Converter
+# PolyWash
 
-Turn a 3D-print STL of a miniature into a lightweight, game-ready 3D mini — entirely in your browser. Your STL file is never uploaded.
+An STL of a miniature in, a game-ready mini out. Everything runs in your browser: your file never leaves your computer.
 
-**Status:** early, but usable end to end. Drop an STL and it is reduced to three detail levels, stood upright, measured (units, base, creature size and its footprint on a 32 mm grid), given a primed-and-washed look, and can be downloaded as a GLB file (the table and far levels). Everything runs in your browser. There is no hosted version yet: run it locally as shown below. See [the Phase 0 spec](docs/specs/phase-0-spike.md) for measurements, and [the Phase 1 spec](docs/specs/phase-1-converter.md) for the converter at product quality and how its exit criteria ended: Phase 1 is finished, and what follows is what the table needs from the library and the release blockers. [The journal](docs/journal/) tells how it was built: what we tried, what failed and why.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/design/look-and-feel/shots/readme-dark.png" />
+  <img alt="PolyWash with a converted mini: the mini on a dark stage, its size and the two downloads in the panel beside it." src="docs/design/look-and-feel/shots/readme-light.png" />
+</picture>
+
+Drop the STL of a miniature you printed or bought. PolyWash stands it upright (and asks you first), measures it (units, base, creature size and its footprint on a 32 mm grid), reduces it to three detail levels, gives it a primed-and-washed look and hands you GLB files for a virtual tabletop. A figure and its base in two files, or a figure in up to six parts, are put together before anything else. The page follows your system's light or dark theme, or the switch in its bar.
+
+**Open PolyWash:** the link goes here once the page is published. Until then, run it on your own computer as shown below.
+
+PolyWash is made for MeshTavern, a virtual tabletop that is still being built; the table application uses this repository as its library. What the page ships and under which licences is under Credits on the page and in [`public/theme/NOTICE.txt`](public/theme/NOTICE.txt).
 
 ## Run it
 
@@ -21,6 +30,8 @@ npm run e2e     # Playwright smoke test (first time: npx playwright install chro
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.md) for conventions (also used by the Claude Code agent).
+
+Where it stands: usable end to end, not yet hosted. See [the Phase 0 spec](docs/specs/phase-0-spike.md) for measurements, and [the Phase 1 spec](docs/specs/phase-1-converter.md) for the converter at product quality and how its exit criteria ended: Phase 1 is finished, and what follows is what the table needs from the library and the release blockers. [The journal](docs/journal/) tells how it was built: what we tried, what failed and why.
 
 ## Use it as a library
 

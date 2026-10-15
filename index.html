@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title data-copy="title"></title>
+    <!--
+      The tab's title and the description read the name and the sentence (#145, spec L3): COPY's
+      documentTitle and description, written here so a link preview sees them without the script;
+      src/page/page-state.test.ts keeps them equal to COPY. The favicon is the name's letter until
+      the mark (#147); public/favicon.svg, served from this origin like the theme.
+    -->
+    <title>PolyWash: an STL of a miniature in, a game-ready mini out</title>
+    <meta
+      name="description"
+      content="An STL of a miniature in, a game-ready mini out. Everything runs in your browser. Your file never leaves your computer."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!--
       MeshTavern's theme (#143), served from this origin under /theme/ (public/theme/): the switch's
       script first, so the page paints in the stored theme at once, then the roles and the
@@ -214,6 +225,8 @@
               <span class="status-icon" data-icon="circle-alert"></span
               ><span class="status-text" data-copy="dropHint"></span>
             </p>
+            <!-- What comes out (#145, spec L3): the empty state's third line, under its two sentences. -->
+            <p id="what-you-get" data-in="empty" data-copy="whatYouGet"></p>
           </div>
           <div
             id="progress"
@@ -651,7 +664,11 @@
         <span class="banner" data-icon="upload"><span data-copy="dropOverlay"></span></span>
       </div>
     </main>
-    <!-- Credits (spec L3, design note §4.6): the application's dialog; its full text is #145's. -->
+    <!--
+      Credits (spec L3, design note §4.6, #145): the application's dialog, listing what the page
+      ships with its licence. public/theme/NOTICE.txt holds the same parts and the full licence
+      texts; src/page/credits.test.ts keeps every part of it here.
+    -->
     <div id="credits" class="scrim" hidden>
       <div
         class="dialog"
@@ -662,15 +679,72 @@
       >
         <h2 id="credits-title" data-copy="credits"></h2>
         <p>
-          The typefaces Inter and Fraunces are under the SIL Open Font License 1.1 (<a
-            href="/theme/fonts/OFL-Inter.txt"
-            >Inter</a
-          >, <a href="/theme/fonts/OFL-Fraunces.txt">Fraunces</a>); the icons are Lucide's, under
-          the <a href="/theme/LICENSE-Lucide.txt">ISC licence</a>.
+          The page is built on these parts, each under its own licence. The full texts are in
+          <a target="_blank" rel="noopener" href="/theme/NOTICE.txt">NOTICE.txt</a>.
         </p>
-        <p>
-          This page collects nothing and sends nothing. It keeps only your theme on this device.
-        </p>
+        <dl class="credits-list">
+          <dt>Inter</dt>
+          <dd>
+            The text face. SIL Open Font License 1.1 (<a
+              target="_blank"
+              rel="noopener"
+              href="/theme/fonts/OFL-Inter.txt"
+              >licence</a
+            >).
+          </dd>
+          <dt>Fraunces</dt>
+          <dd>
+            The heading face. SIL Open Font License 1.1 (<a
+              target="_blank"
+              rel="noopener"
+              href="/theme/fonts/OFL-Fraunces.txt"
+              >licence</a
+            >).
+          </dd>
+          <dt>Lucide 1.53.0</dt>
+          <dd>
+            The icons. ISC License (<a
+              target="_blank"
+              rel="noopener"
+              href="/theme/LICENSE-Lucide.txt"
+              >licence</a
+            >).
+          </dd>
+          <dt>three.js 0.186.0</dt>
+          <dd>
+            Draws the minis. MIT License; its texture loader brings the Basis Universal transcoder
+            (Apache License 2.0) and zstddec (MIT License).
+          </dd>
+          <dt>meshoptimizer 1.2.0</dt>
+          <dd>Reduces the minis to their detail levels. MIT License.</dd>
+          <dt>xatlas</dt>
+          <dd>Unwraps the table level for its texture. MIT License.</dd>
+          <dt>The Basis Universal encoder</dt>
+          <dd>
+            Compresses the texture. Apache License 2.0, with Zstandard (BSD License). "Basis
+            Universal" is a trademark of Binomial LLC.
+          </dd>
+          <dt>System Reference Document 5.1</dt>
+          <dd>
+            The creature size names. This work includes material taken from the System Reference
+            Document 5.1 ("SRD 5.1") by Wizards of the Coast LLC and available at
+            <a
+              target="_blank"
+              rel="noopener"
+              href="https://dnd.wizards.com/resources/systems-reference-document"
+              >dnd.wizards.com</a
+            >. The SRD 5.1 is licensed under the
+            <a
+              target="_blank"
+              rel="noopener"
+              href="https://creativecommons.org/licenses/by/4.0/legalcode"
+              >Creative Commons Attribution 4.0 International License</a
+            >.
+          </dd>
+          <dt>The favicon</dt>
+          <dd>The letter P of the name, set in Fraunces, until the page has its own mark.</dd>
+        </dl>
+        <p data-copy="collectsNothing"></p>
         <div class="dialog-actions">
           <button
             class="btn btn-primary"
