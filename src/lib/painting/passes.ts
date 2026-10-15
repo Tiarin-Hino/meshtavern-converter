@@ -46,6 +46,14 @@ import { dabGain, strokeOpacity, toolPass } from './tools';
 export const DEPTH_BIAS_MM = 0.25;
 /** A texel is painted only where its surface faces the stroke's camera at least this much: about 81°. _(proposal)_ */
 export const FACING_MIN_COS = 0.15;
+/**
+ * A dab reaches at most this far behind its centre along the stroke camera's line of sight, in mm
+ * (#134): the depth a real brush reaches behind the surface it touches. Its full radius stays
+ * sideways. _(proposal)_
+ */
+export const BRUSH_DEPTH_MM = 1.5;
+/** The last stretch before `BRUSH_DEPTH_MM` over which a dab fades out, in mm, so the cut on a receding surface is not a hard line. _(proposal)_ */
+export const BRUSH_DEPTH_SOFT_MM = 0.5;
 /** Rings of gutter texels around every island that take the island's paint (§5.4). _(proposal)_ */
 export const PAINT_DILATION_RINGS = 2;
 /** Dabs per draw of the dab pass; more take further draws. _(proposal)_ */
@@ -140,8 +148,13 @@ void main() {
   if ( dot( normalize( vNormal ), normalize( uEye - vPosition ) ) < ${FACING_MIN_COS.toFixed(4)} ) discard;
   float coverage = 0.0;
   for ( int i = 0; i < uDabCount; i++ ) {
-    float d = distance( vPosition, uDabs[ i ].xyz );
-    float dab = 1.0 - smoothstep( uHardness * uRadius, uRadius, d );
+    vec3 centre = uDabs[ i ].xyz;
+    float d = distance( vPosition, centre );
+    // The sphere, cut behind the dab along the eye's ray through it (#134): a surface in sight
+    // across a gap (the back behind a hand) is beyond the brush's reach.
+    float behind = dot( vPosition - centre, normalize( centre - uEye ) );
+    float dab = ( 1.0 - smoothstep( uHardness * uRadius, uRadius, d ) )
+      * ( 1.0 - smoothstep( ${(BRUSH_DEPTH_MM - BRUSH_DEPTH_SOFT_MM).toFixed(4)}, ${BRUSH_DEPTH_MM.toFixed(4)}, behind ) );
     ${add ? 'coverage += floor( uGain * dab * 255.0 + 0.5 ) / 255.0;' : 'coverage = max( coverage, dab );'}
   }
   fragColor = vec4( coverage, 0.0, 0.0, 1.0 );

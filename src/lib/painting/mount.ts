@@ -38,6 +38,8 @@ import {
 import { ownCopy } from '../three/compressed-texture';
 import { PAINT_COPY, type PaintCopy } from './copy';
 import {
+  BRUSH_DEPTH_MM,
+  BRUSH_DEPTH_SOFT_MM,
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
@@ -50,6 +52,8 @@ import { PaintScene } from './scene';
 import { toolPass } from './tools';
 
 export {
+  BRUSH_DEPTH_MM,
+  BRUSH_DEPTH_SOFT_MM,
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
