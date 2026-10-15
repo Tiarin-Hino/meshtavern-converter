@@ -15,7 +15,11 @@ argument-hint: [issue number]
    - **Second opinion.** If the change is complex or risky, add one line under `Closes #N`: `Suggest the astra-review label: <reason in one line>`. Complex or risky means a new pipeline stage, data shape or structure; a changed spec decision; a moved regression baseline; anything near "the user's STL never leaves the browser"; a large diff across several areas; or work that needed planning, not just building. Never add the label yourself: the PM decides, and GPT Astra is a paid review worth it where a second model family may see what Claude does not.
    - **What changed**: three to six plain-language sentences. What a user or the PM will notice, then the technical gist.
    - **Acceptance criteria**: copied from the issue. Tick only what is proven, and put the evidence next to each tick (test name, measured number with its device, screenshot).
-   - **Needs a human look**: every visual or taste judgement, with before/after screenshots.
+   - **Needs a human look**: every visual or taste judgement, with before/after screenshots. **The pictures are shown in the PR description itself, never only named or linked** (PM rule, 2026-10-15, #159): the PM reviews them there without opening the Playwright report, an artifact or the branch.
+     - **Where the files live.** Embed only files committed on the branch: reference screenshots, `docs/design/` renders (never a real mini or its output), or screenshots committed for the review under `docs/design/<issue>/`.
+     - **How to embed.** `<img src="https://raw.githubusercontent.com/Tiarin-Hino/meshtavern-converter/<short sha>/<path>" width="…">`, pinned to the commit so a later push does not change what was approved. The repository is public, so the PM sees them without signing in.
+     - **Layout.** One table per frame size, rows the states, columns the themes (or before / after), with widths that fit two to four pictures side by side (about 420 px for a desktop shot, 170 px for a phone).
+     - **When the pictures change in a later push,** update the description's pictures to the new commit.
    - **Limits**: what was not verified, not measured, or deliberately left out, with follow-up issue numbers.
    - **Journal**: the path of the entry, or why there is none.
    - Tick the checklist honestly; an unticked box with a reason beats a false tick.
