@@ -275,8 +275,8 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * - `dry`: by the texel's height above flat (`FLAT_CAVITY`) as a share of `reference`'s, the
  *   highest cavity under the stroke's first dab (#133), never less than `DRY_REFERENCE_MIN`: only
  *   where that share is above `DRY_THRESHOLD × (1 − pressure)`, the pressure being the brush's
- *   `opacity`. The reference's own height takes all at any pressure; more pressure reaches
- *   further down from it; flat and creases take nothing.
+ *   `opacity`. The reference's own height takes all at any pressure when it stands at least the floor above
+ *   flat; more pressure reaches further down from it; flat and creases take no alpha.
  * - `airbrush`: with a `direction`, only the surface whose normal faces it (above `AIR_DIR_EDGE`);
  *   without, everything.
  *

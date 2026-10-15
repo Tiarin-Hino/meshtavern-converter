@@ -256,8 +256,8 @@ describe('toolMask', () => {
 
   it('catches the crest of low detail where an absolute threshold leaves it bare', () => {
     // The ridged block of the e2e test: crests at 0.067, four of the texture's steps above flat,
-    // under the floor. An absolute threshold gives them nothing below full pressure, and a faint
-    // quarter coat at full.
+    // under the floor. An absolute threshold gives them nothing below about 0.87 of the pressure,
+    // and a faint quarter coat at full.
     const crest = 0.067;
     for (const pressure of [0.5, 0.75]) expect(dry(crest, pressure, 1)).toBe(0);
     expect(dry(crest, 1, 1)).toBeLessThan(0.3);

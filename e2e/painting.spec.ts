@@ -200,7 +200,7 @@ test('dry-brushes the crests of low detail under a small brush, further down wit
 }) => {
   // Ridges 0.06 mm high every 1.6 mm on a 0.2 mm grid: crests three or four of the detail
   // texture's steps above flat, the low detail of the issue, where an absolute threshold lays
-  // nothing below nine tenths of the pressure. A 1 mm brush across them from above, starting on a
+  // nothing below about 0.87 of the pressure. A 1 mm brush across them from above, starting on a
   // crest.
   await convert(page, generateRidgedBlock(12.8, 8, 0.2, 0.06, 1.6, 0.3), 'ridges.stl');
   const along = [-3.2, -1.6, 0, 1.6, 3.2].map((x): Vec3 => [x, 8.06, 0]);
@@ -221,7 +221,8 @@ test('dry-brushes the crests of low detail under a small brush, further down wit
     // The crests' highest texels (the reference's own reading) are painted, nearly a full coat at
     // full pressure (the read-back's steps leave their height within 0.008 of the reference's), and
     // at three quarters, where an absolute threshold gave them nothing. Under the floor their share
-    // is about a fifth: they start to take paint at about 0.6 of the pressure.
+    // is about a fifth here (software rendering reads the crest at about 0.05; 0.3 on the GPU at
+    // 0.067): they start to take paint at about 0.6 of the pressure here.
     const crests = full.filter((texel) => texel.cavity >= reference - 0.002);
     expect(crests.length).toBeGreaterThan(50);
     for (const texel of crests)
