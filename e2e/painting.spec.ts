@@ -3,8 +3,10 @@ import {
   AIR_HARDNESS,
   DEFAULT_BRUSH,
   DRY_OPACITY,
+  DRY_REFERENCE_MIN,
   DRY_SOFTNESS,
   DRY_THRESHOLD,
+  FLAT_CAVITY,
   INK_FLAT,
   toolMask,
   WASH_FLAT,
@@ -17,6 +19,7 @@ import {
   generatePlate,
   generatePuddleFigure,
   generateRecessBase,
+  generateRidgedBlock,
 } from '../src/regression/shapes';
 
 /**
@@ -189,6 +192,59 @@ test('leaves a surface in sight behind the dab bare beyond BRUSH_DEPTH_MM', asyn
   for (const seen of behind) {
     expect(seen!.distance).toBeLessThan(3.6);
     expect(seen!.alpha).toBe(0);
+  }
+});
+
+test('dry-brushes the crests of low detail under a small brush, further down with more pressure (#133)', async ({
+  page,
+}) => {
+  // Ridges 0.06 mm high every 1.6 mm on a 0.2 mm grid: crests four of the detail texture's steps
+  // above flat, the low detail of the issue, where an absolute threshold lays nothing at half
+  // pressure. A 1 mm brush across them from above, starting on a crest.
+  await convert(page, generateRidgedBlock(12.8, 8, 0.2, 0.06, 1.6, 0.3), 'ridges.stl');
+  const along = [-3.2, -1.6, 0, 1.6, 3.2].map((x): Vec3 => [x, 8.06, 0]);
+  const painted = new Map<number, Map<number, number>>();
+  for (const pressure of [0.25, 0.5, 1]) {
+    const brush = brushWith({ sizeMm: 1, hardness: 0.8, opacity: pressure });
+    const { under, steps, reference } = await brushOver(page, {
+      tool: 'dry',
+      brush,
+      camera: [0, 70, 1.6],
+      along,
+    });
+    expect(steps).toBe(1);
+    // The crest under the first dab: low detail, under the floor, which then scales the rule.
+    expect(reference).toBeGreaterThan(0.04);
+    expect(reference - FLAT_CAVITY).toBeLessThan(DRY_REFERENCE_MIN);
+    const full = expectMasked(under, 'dry', brush, DRY_OPACITY, reference);
+    // The crests' highest texels (the reference's own reading) are painted, a full coat from half
+    // the pressure up, where an absolute threshold gave them nothing below full pressure.
+    const crests = full.filter((texel) => texel.cavity >= reference - 0.002);
+    expect(crests.length).toBeGreaterThan(50);
+    for (const texel of crests)
+      if (pressure >= 0.5) expect(texel.rgba[3]).toBe(Math.round(255 * DRY_OPACITY));
+      else expect(texel.rgba[3]).toBeGreaterThan(0);
+    if (pressure < 1)
+      for (const texel of crests)
+        expect(toolMask('dry', texel.cavity, texel.occlusion, texel.normal, brush)).toBe(0);
+    // The troughs, below flat: not a byte changed.
+    expect(expectBelowFlatBare(under).length).toBeGreaterThan(50);
+    painted.set(
+      pressure,
+      new Map(
+        under.filter((texel) => texel.rgba[3] > 0).map((texel) => [texel.texel, texel.rgba[3]]),
+      ),
+    );
+  }
+  // More pressure reaches further down the ridges: more texels, each at least as painted.
+  for (const [lower, higher] of [
+    [0.25, 0.5],
+    [0.5, 1],
+  ] as const) {
+    const less = painted.get(lower)!;
+    const more = painted.get(higher)!;
+    expect(more.size).toBeGreaterThan(less.size * 1.1);
+    for (const [texel, alpha] of less) expect(more.get(texel) ?? 0).toBeGreaterThanOrEqual(alpha);
   }
 });
 
@@ -848,11 +904,12 @@ interface Under {
 }
 
 /**
- * Opens the shared figure bare and paints with `tool` along the canvas points of `along` (points
+ * Opens the converted mini bare and paints with `tool` along the canvas points of `along` (points
  * of the mini, projected from `camera`), by the surface points under a canvas path through them,
  * `passes` times. First the same stroke with the flat brush at full opacity and `reachHardness`
- * (the reference), undone before the brush paints. Gives every texel the reference reached, and
- * every texel the brush changed.
+ * (the reach), undone before the brush paints. Gives every texel the reach covered, and every
+ * texel the brush changed, and the stroke's reference as the engine measures it (#133): the
+ * highest cavity under its first dab, the texels a one-dab flat stroke there covers (undone too).
  */
 async function brushOver(
   page: Page,
@@ -864,7 +921,7 @@ async function brushOver(
     along: Vec3[];
     passes?: number;
   },
-): Promise<{ under: Under[]; steps: number }> {
+): Promise<{ under: Under[]; steps: number; reference: number }> {
   return page.evaluate(async ({ tool, brush, reachHardness, camera, along, passes = 1 }) => {
     const painting = window.__mt.painting;
     await painting.open();
@@ -885,17 +942,25 @@ async function brushOver(
         if (hit) points.push(hit.point);
       }
     }
-    // The reference, undone; then the brush.
+    // The reach and the first dab's footprint, undone; then the brush.
     view.setTool('flat');
     view.setBrush({ ...brush, opacity: 1, hardness: reachHardness ?? brush.hardness });
     await view.stroke(points);
     const reach = await view.paint();
+    await view.undo();
+    await view.stroke(points.slice(0, 1));
+    const firstDab = await view.paint();
     await view.undo();
     view.setTool(tool);
     view.setBrush(brush);
     for (let pass = 0; pass < passes; pass++) await view.stroke(points);
     const painted = await view.paint();
     const surface = await view.surface();
+    // The highest cavity under the first dab, as the reference is encoded: −1 where none is covered.
+    let reference = -1;
+    for (let texel = 0; texel < 1024 * 1024; texel++)
+      if (firstDab.data[texel * 4 + 3]! > 0)
+        reference = Math.max(reference, surface.cavity[texel]!);
     const under: Under[] = [];
     for (let texel = 0; texel < 1024 * 1024; texel++) {
       const k = texel * 4;
@@ -909,7 +974,7 @@ async function brushOver(
         rgba: [0, 1, 2, 3].map((c) => painted.data[k + c]!) as Under['rgba'],
       });
     }
-    return { under, steps: view.state.steps };
+    return { under, steps: view.state.steps, reference };
   }, options);
 }
 
@@ -923,19 +988,28 @@ const FROM_THE_FRONT: Vec3 = [0, 20, 1];
 
 /**
  * Every texel the stroke reached took the tool's mask: its alpha is `reach × opacity × toolMask`
- * of what the masks read there, within the rounding of the reach, the read-back and the paint;
- * a texel it did not reach is bare. Gives the texels it reached fully.
+ * of what the masks read there (and the stroke's reference, for the dry brush), within the
+ * rounding of the reach, the read-back and the paint; a texel it did not reach is bare. Gives the
+ * texels it reached fully.
  */
 function expectMasked(
   under: Under[],
   tool: ToolId,
   brush: BrushSettings,
   opacity: number,
+  reference?: number,
 ): Under[] {
   for (const texel of under) {
     const masks = [-1, 0, 1].flatMap((dc) =>
       [-1, 0, 1].map((doc) =>
-        toolMask(tool, texel.cavity + dc / 127, texel.occlusion + doc / 255, texel.normal, brush),
+        toolMask(
+          tool,
+          texel.cavity + dc / 127,
+          texel.occlusion + doc / 255,
+          texel.normal,
+          brush,
+          reference,
+        ),
       ),
     );
     const low = Math.max(0, texel.reach - 0.5) * opacity * Math.min(...masks) - 1.5;
@@ -1012,30 +1086,51 @@ test('inks every texel under the stroke, the creases most', async ({ figurePage:
   expect(mean(crease)).toBeGreaterThan(mean(flat) + 30);
 });
 
+/**
+ * The dry brush leaves every texel below flat exactly as it was (#133). The read-back gives the
+ * cavity in steps of 2/255: the encoding's flat (FLAT_CAVITY, 2/255) is a tie in its rounding and
+ * reads 0.004 or 0.012, the texture's step below it −0.004 or −0.012, so a texel reading under 0
+ * lies below flat. Gives those the stroke reached fully.
+ */
+function expectBelowFlatBare(under: Under[]): Under[] {
+  const below = under.filter((texel) => texel.cavity < 0);
+  expect(below.filter((texel) => texel.rgba.some((value) => value !== 0))).toEqual([]);
+  return below.filter((texel) => texel.reach === 255);
+}
+
 test('dry-brushes the raised surface only, the creases left as they were', async ({
   figurePage: page,
 }) => {
   for (const pressure of [1, 0.5]) {
     const brush = brushWith({ sizeMm: 3, hardness: 0.8, opacity: pressure });
-    const { under, steps } = await brushOver(page, {
+    const { under, steps, reference } = await brushOver(page, {
       tool: 'dry',
       brush,
       camera: FROM_THE_FRONT,
       along: DOWN_THE_FRONT,
     });
     expect(steps).toBe(1);
-    const full = expectMasked(under, 'dry', brush, DRY_OPACITY);
-    // A crease, a hollow or a flat texel: not a byte changed, anywhere under the stroke.
-    const notRaised = under.filter((texel) => texel.cavity < -0.01);
-    expect(notRaised.filter((texel) => texel.reach === 255).length).toBeGreaterThan(50);
-    expect(notRaised.filter((texel) => texel.rgba.some((value) => value !== 0))).toEqual([]);
-    // An edge, past the threshold and the softness: painted at the dry brush's opacity.
+    // The chest under the first dab (#133): its highest point is well above the floor.
+    expect(reference).toBeGreaterThan(FLAT_CAVITY + DRY_REFERENCE_MIN);
+    const full = expectMasked(under, 'dry', brush, DRY_OPACITY, reference);
+    // A crease or a hollow: not a byte changed, anywhere under the stroke.
+    expect(expectBelowFlatBare(under).length).toBeGreaterThan(50);
+    // Flat: no paint. The figure's detail texture is the paint's size, so a texel reads its own
+    // byte: flat reads under 2/255 above it, the next step up 0.020. Its share may be a hair over 0
+    // (the GPU's decode of flat and FLAT_CAVITY differ by float rounding), so its colour may take
+    // the brush's at alpha 0, as at any stroke's faintest fringe; its alpha stays 0.
+    const flat = under.filter((texel) => texel.cavity < FLAT_CAVITY + 2 / 255);
+    expect(flat.filter((texel) => texel.reach === 255).length).toBeGreaterThan(500);
+    expect(flat.filter((texel) => texel.rgba[3] !== 0)).toEqual([]);
+    // Relative to the reference: past the threshold and the softness, the dry brush's opacity.
+    const share = (texel: Under): number =>
+      (texel.cavity - FLAT_CAVITY) / (reference - FLAT_CAVITY);
     const threshold = DRY_THRESHOLD * (1 - pressure);
-    const edge = full.filter((texel) => texel.cavity > threshold + DRY_SOFTNESS + 0.01);
+    const edge = full.filter((texel) => share(texel) > threshold + DRY_SOFTNESS + 0.02);
     expect(edge.length).toBeGreaterThan(10);
     for (const texel of edge) expect(texel.rgba[3]).toBe(Math.round(255 * DRY_OPACITY));
-    // Less pressure reaches less far down the edge: what lies below its threshold stays bare.
-    const below = under.filter((texel) => texel.cavity < threshold - 0.01);
+    // Less pressure reaches less far down: what lies below its threshold stays bare.
+    const below = under.filter((texel) => share(texel) < threshold - 0.02);
     expect(below.filter((texel) => texel.rgba[3] !== 0)).toEqual([]);
   }
 });

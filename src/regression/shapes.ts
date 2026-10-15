@@ -307,6 +307,80 @@ export function generatePlate(
 }
 
 /**
+ * A square block, Z-up on z = 0, whose top carries low, parallel ridges along y: its height is
+ * `heightMm` plus `reliefMm × (wave(x / periodMm) + 1) / 2`, a crest every `periodMm` (at whole
+ * multiples of it) and a trough halfway between, on a dome `domeMm` lower at the corners than in
+ * the middle, so the top is no resting plane and the underside is the base. Top and underside are
+ * grids of `stepMm`, the walls follow the top's edge. Low detail for the dry brush's tests
+ * (#133), not the baseline.
+ */
+export function generateRidgedBlock(
+  sideMm: number,
+  heightMm: number,
+  stepMm: number,
+  reliefMm: number,
+  periodMm: number,
+  domeMm: number,
+): Float32Array {
+  const soup: number[] = [];
+  const n = Math.round(sideMm / stepMm);
+  const half = sideMm / 2;
+  const at = (k: number): number => -half + k * stepMm;
+  const top = (i: number, j: number): number => {
+    const x = at(i);
+    const y = at(j);
+    const dome = (domeMm * (x * x + y * y)) / (2 * half * half);
+    return heightMm - dome + (reliefMm * (wave(x / periodMm) + 1)) / 2;
+  };
+  const inside: Vec3 = [0, 0, heightMm / 2];
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      for (const lid of [true, false]) {
+        const z = (a: number, b: number): number => (lid ? top(a, b) : 0);
+        pushOutward(
+          soup,
+          [at(i), at(j), z(i, j)],
+          [at(i + 1), at(j), z(i + 1, j)],
+          [at(i + 1), at(j + 1), z(i + 1, j + 1)],
+          inside,
+        );
+        pushOutward(
+          soup,
+          [at(i), at(j), z(i, j)],
+          [at(i + 1), at(j + 1), z(i + 1, j + 1)],
+          [at(i), at(j + 1), z(i, j + 1)],
+          inside,
+        );
+      }
+    }
+  }
+  // The walls, a strip per step of the top's edge on each of the four sides.
+  for (let k = 0; k < n; k++) {
+    for (const edge of [0, n]) {
+      const y = at(edge);
+      pushOutward(soup, [at(k), y, 0], [at(k + 1), y, 0], [at(k + 1), y, top(k + 1, edge)], inside);
+      pushOutward(
+        soup,
+        [at(k), y, 0],
+        [at(k + 1), y, top(k + 1, edge)],
+        [at(k), y, top(k, edge)],
+        inside,
+      );
+      const x = at(edge);
+      pushOutward(soup, [x, at(k), 0], [x, at(k + 1), 0], [x, at(k + 1), top(edge, k + 1)], inside);
+      pushOutward(
+        soup,
+        [x, at(k), 0],
+        [x, at(k + 1), top(edge, k + 1)],
+        [x, at(k), top(edge, k)],
+        inside,
+      );
+    }
+  }
+  return new Float32Array(soup);
+}
+
+/**
  * The figure without a base, standing on something under its body: `under` adds that
  * something to the soup, from z = 0 up to `heightMm`, and the figure is lifted so its body's
  * lowest point is at that height. Z-up.
