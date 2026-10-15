@@ -18,8 +18,8 @@ Fraunces
   Copyright 2018 The Fraunces Project Authors, https://github.com/undercasetype/Fraunces
   SIL Open Font License 1.1: fonts/OFL-Fraunces.txt
 
-Lucide 1.53.0
-  Icons, bundled as inline SVG in the page from the npm package lucide-static 1.53.0.
+Lucide 1.55.0
+  Icons, bundled as inline SVG in the page from the npm package lucide-static 1.55.0.
   Copyright (c) 2026 Lucide Icons and Contributors, https://lucide.dev
   ISC License: LICENSE-Lucide.txt. The icons Lucide derived from Feather (Copyright (c)
   2013-present Cole Bemis) are also under the MIT License, whose text and list of icons are in
