@@ -240,10 +240,10 @@ describe('toolMask', () => {
 
   it('reaches further down from the reference with more pressure, never taking less', () => {
     for (const reference of [0.067, 0.3, 1]) {
+      // The lowest cavity that takes any paint, along the stroke and under its first dab.
       const lowest = PRESSURES.map((pressure) => {
-        let cavity = reference;
-        while (cavity > -1 && dry(cavity - 0.001, pressure, reference) > 0) cavity -= 0.001;
-        return cavity;
+        for (let k = 0; k <= 2000; k++) if (dry(-1 + k / 1000, pressure, reference) > 0) return k;
+        return Infinity;
       });
       for (let k = 1; k < lowest.length; k++) expect(lowest[k]).toBeLessThan(lowest[k - 1]!);
       for (let cavity = -1; cavity <= 1; cavity += 0.01)
@@ -255,15 +255,19 @@ describe('toolMask', () => {
   });
 
   it('catches the crest of low detail where an absolute threshold leaves it bare', () => {
-    // The ridged block of the e2e test: crests at 0.067, four of the texture's steps above flat.
+    // The ridged block of the e2e test: crests at 0.067, four of the texture's steps above flat,
+    // under the floor. An absolute threshold gives them nothing below full pressure, and a faint
+    // quarter coat at full.
     const crest = 0.067;
-    expect(dry(crest, 0.5, 1)).toBe(0);
-    expect(dry(crest, 0.5, crest)).toBe(1);
-    expect(dry(crest, 0.25, crest)).toBe(1);
-    // Half its height takes something at half pressure, a third of it only at full.
-    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 2, 0.5, crest)).toBeGreaterThan(0);
-    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 3, 0.5, crest)).toBe(0);
-    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 3, 1, crest)).toBeGreaterThan(0);
+    for (const pressure of [0.5, 0.75]) expect(dry(crest, pressure, 1)).toBe(0);
+    expect(dry(crest, 1, 1)).toBeLessThan(0.3);
+    // From half the pressure up they take paint, a full coat at full pressure.
+    expect(dry(crest, 0.5, crest)).toBeGreaterThan(0);
+    expect(dry(crest, 0.75, crest)).toBeGreaterThan(0.5);
+    expect(dry(crest, 1, crest)).toBe(1);
+    // Half their height takes nothing at half pressure, most of a coat at full.
+    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 2, 0.5, crest)).toBe(0);
+    expect(dry(FLAT_CAVITY + (crest - FLAT_CAVITY) / 2, 1, crest)).toBeGreaterThan(0.5);
   });
 
   it('takes a reference under DRY_REFERENCE_MIN above flat as that floor', () => {
@@ -272,8 +276,9 @@ describe('toolMask', () => {
       for (const pressure of PRESSURES)
         for (let cavity = -0.2; cavity <= 0.3; cavity += 0.01)
           expect(dry(cavity, pressure, reference)).toBe(dry(cavity, pressure, floor));
-    // One step of the texture above flat, under a flat footprint: nothing below two thirds of the pressure.
-    expect(dry(FLAT_CAVITY + 4 / 255, 0.6, 0.02)).toBe(0);
+    // One step of the texture above flat, under a flat footprint: nothing below five sixths of the pressure.
+    expect(dry(FLAT_CAVITY + 4 / 255, 0.8, 0.02)).toBe(0);
+    expect(dry(FLAT_CAVITY + 4 / 255, 1, 0.02)).toBeGreaterThan(0);
   });
 
   it('dry-brushes as before #133 when a fully raised texel is under the first dab', () => {

@@ -107,10 +107,12 @@ export const DRY_THRESHOLD = 0.5;
 /** Over this share of the reference's height above the threshold the dry brush goes from nothing to all. */
 export const DRY_SOFTNESS = 0.2;
 /**
- * The smallest height above flat (`FLAT_CAVITY`) the dry brush's reference counts as, about six of
- * the detail texture's steps: lower relief under the first dab is noise, not detail to pick out.
+ * The smallest height above flat (`FLAT_CAVITY`) the dry brush's reference counts as, about
+ * thirteen of the detail texture's steps. Low detail and the gentle curve of a smooth surface
+ * measure alike (a few steps up); a lower floor catches more of the one and blotches more of the
+ * other. PM's choice, 2026-10-15, from 0.1, 0.2 and 0.3 painted side by side.
  */
-export const DRY_REFERENCE_MIN = 0.1;
+export const DRY_REFERENCE_MIN = 0.2;
 /** The dry brush's opacity: its slider is the pressure, not the opacity. */
 export const DRY_OPACITY = 0.9;
 /** The airbrush's dab: soft from its centre out. */
