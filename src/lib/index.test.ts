@@ -157,6 +157,8 @@ describe('the library entries', () => {
 
   it('painting.ts exports exactly the painting view and its words (#127)', () => {
     expect(Object.keys(painting).sort()).toEqual([
+      'BRUSH_DEPTH_MM',
+      'BRUSH_DEPTH_SOFT_MM',
       'BRUSH_MAX_MM',
       'BRUSH_MIN_MM',
       'CURSOR_MIN_PX',

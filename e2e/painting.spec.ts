@@ -127,6 +127,71 @@ test('leaves a plate’s underside bare under a brush wider than the plate is th
   expect(outcome.under.filter((alpha) => alpha !== 0)).toEqual([]);
 });
 
+test('leaves a surface in sight behind the dab bare beyond BRUSH_DEPTH_MM', async ({ page }) => {
+  // A 10 mm plate 1 mm thick, 2 mm above a 30 mm plate (#134), painted near the small plate's
+  // edge from above at an 8 mm brush: the big plate's top beside the edge is in sight and within
+  // the dab's sphere, but 3 mm behind the dab along the line of sight, further than a brush reaches.
+  const lower = generatePlate(30, 2, 1, () => false);
+  const upper = generatePlate(10, 1, 1, () => false);
+  for (let i = 2; i < upper.length; i += 3) upper[i] = upper[i]! + 4;
+  const soup = new Float32Array(lower.length + upper.length);
+  soup.set(lower);
+  soup.set(upper, lower.length);
+  await convert(page, soup, 'plates.stl');
+  await page.evaluate(() => window.__mt.setUp('+z'));
+  await page.evaluate(() => window.__mt.setSizing({ units: 'mm' }));
+  expect(await page.evaluate(() => window.__mt.state.stats!.sizeMm[1])).toBeCloseTo(5, 1);
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setBrush({ sizeMm: 8, hardness: 0.8, opacity: 1 });
+    view.setColour('#ff0000');
+    view.setCamera(0, 80, 1);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const dab = view.texelAt(...view.screenOf([4.5, 5, 0]))!;
+    await view.stroke([dab.point]);
+    const { data } = await view.paint();
+    const look = (x: number, y: number, z: number) => {
+      const hit = view.texelAt(...view.screenOf([x, y, z]));
+      if (!hit) return null;
+      const distance = Math.hypot(
+        hit.point[0] - dab.point[0],
+        hit.point[1] - dab.point[1],
+        hit.point[2] - dab.point[2],
+      );
+      return {
+        y: hit.point[1],
+        distance,
+        alpha: data[(hit.texel[1] * 1024 + hit.texel[0]) * 4 + 3]!,
+      };
+    };
+    const near: ReturnType<typeof look>[] = [];
+    const behind: ReturnType<typeof look>[] = [];
+    for (let i = 0; i <= 4; i++)
+      for (let j = -2; j <= 2; j++) {
+        near.push(look(2 + i * 0.6, 5, j * 0.5));
+        behind.push(look(5.4 + i * 0.2, 2, j * 0.4));
+      }
+    return { dab: dab.point, near, behind };
+  });
+  expect(outcome.dab[1]).toBeCloseTo(5, 1);
+  // The small plate's top around the dab: painted in full.
+  const near = outcome.near.filter((seen) => seen !== null && Math.abs(seen.y - 5) < 0.1);
+  expect(near.length).toBe(25);
+  for (const seen of near) {
+    expect(seen!.distance).toBeLessThan(3.2);
+    expect(seen!.alpha).toBe(255);
+  }
+  // The big plate's top beyond the edge: within the sphere's painted part, and bare.
+  const behind = outcome.behind.filter((seen) => seen !== null && Math.abs(seen.y - 2) < 0.1);
+  expect(behind.length).toBe(25);
+  for (const seen of behind) {
+    expect(seen!.distance).toBeLessThan(3.6);
+    expect(seen!.alpha).toBe(0);
+  }
+});
+
 test.describe('on a phone', () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
 
