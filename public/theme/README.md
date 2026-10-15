@@ -19,4 +19,8 @@ equal to this one by a test once it installs this library, and is brought here b
 files again and naming the new commit above. A role this page needs is added to the
 application's `tokens.css` first. Not copied: `pages.css` (the page takes the measurements it
 needs into `src/page/style.css`), the favicon and the app icon (the page gets its own, #147) and
-`NOTICE.txt` (the page writes its own, #145).
+`NOTICE.txt`.
+
+One file here is the page's own, not the application's: `NOTICE.txt` (#145), what the page ships
+with the full licence texts, which the page's Credits dialog lists; `src/page/credits.test.ts`
+keeps the two in step.

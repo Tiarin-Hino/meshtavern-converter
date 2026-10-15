@@ -15,8 +15,9 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    # The e2e run alone takes about 12 minutes since the painting spec (#127).
-    timeout-minutes: 25
+    # The e2e run alone takes 11–20 minutes since the painting spec (#127), depending on the
+    # runner; 25 minutes in all cut off a run that passed (#156).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

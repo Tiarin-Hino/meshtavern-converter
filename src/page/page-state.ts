@@ -6,6 +6,7 @@ import {
   type CreatureSize,
   type Orientation,
   type Sizing,
+  type UpAxis,
   type Units,
 } from '../lib';
 import { QUESTION_COPY } from '../lib/questions';
@@ -39,16 +40,32 @@ export function pageStateOf(app: {
   return 'empty';
 }
 
+/**
+ * The product's name (#147: PolyWash, the PM's pick and casing of 2026-10-14), the one place it
+ * lives in code: the bar reads it from here, and the tests point at its other copies (index.html's
+ * title and description, the README, NOTICE.txt).
+ */
+const NAME = 'PolyWash';
+/** What the page does, in one sentence (#145, spec L3): an STL in, a game-ready mini out. */
+const SENTENCE = 'An STL of a miniature in, a game-ready mini out.';
+const PROMISE = 'Your file never leaves your computer.';
+
 export const COPY = {
   ...QUESTION_COPY,
-  title: 'MeshTavern Converter',
-  promise: 'Your file never leaves your computer.',
+  title: NAME,
+  // #145: the tab's title and the description tag, written in index.html so a link preview sees
+  // them without the script; page-state.test.ts keeps them equal to these.
+  documentTitle: `${NAME}: an STL of a miniature in, a game-ready mini out`,
+  description: `${SENTENCE} Everything runs in your browser. ${PROMISE}`,
+  promise: PROMISE,
   promiseShort: 'Runs in your browser. Your file never leaves your computer.',
   openStl: 'Open an STL',
   dropHeading: 'Drop an STL here',
   chooseFile: 'Choose a file',
   chooseAnother: 'Choose another file',
-  dropHint: 'You get a game-ready mini in seconds. Everything runs in this tab.',
+  // #145: the empty state's two sentences, then what comes out (a third line).
+  dropHint: `${SENTENCE} Everything runs in this tab.`,
+  whatYouGet: 'You get three detail levels, a look and two downloads.',
   dropOverlay: 'Drop to convert',
   errorHeading: 'This file did not become a mini',
   cancel: 'Cancel',
@@ -57,7 +74,6 @@ export const COPY = {
   downloadTable: 'Download table level',
   downloadFar: 'Download far level',
   adjust: 'Adjust',
-  adjustHint: 'Up and turn · Size · Look · Base',
   pairHint: 'Two files? Drop the figure and its base together.',
   addBase: 'Add a base file',
   removeBase: 'Remove the base',
@@ -65,7 +81,23 @@ export const COPY = {
   // #93: the Base section's buttons.
   markMeeting: 'Mark where they meet',
   markParts: 'Mark where the parts meet',
+  // #144: the bar, the card and the panel on the components.
+  converting: 'Converting',
+  close: 'Close',
+  more: 'More',
+  credits: 'Credits',
+  // #145: the credits dialog's last line (spec L3).
+  collectsNothing:
+    'This page collects nothing and sends nothing. It stores only your own choices, such as the theme, on this device.',
+  meshTavern: 'MeshTavern',
+  expandPanel: 'Expand the panel',
 } as const;
+
+/**
+ * Where the bar's MeshTavern link goes (spec L2: its words and target are the PM's). A placeholder
+ * until the PM names one: this repository, the one public page of the project today. _(proposal)_
+ */
+export const MESHTAVERN_URL = 'https://github.com/Tiarin-Hino/meshtavern-converter';
 
 /** The level chips, in the order of the levels: full detail, then close, table, far. */
 export const LEVEL_LABELS = ['Original', 'Close', 'Table', 'Far'] as const;
@@ -183,4 +215,48 @@ export function describeOrientation(orientation: Orientation, preset = false): s
   if (orientation.tiltDeg > 0) parts.push(`tilted ${Math.round(orientation.tiltDeg)}°`);
   if (orientation.setDownDeg > 0) parts.push(`set down ${Math.round(orientation.setDownDeg)}°`);
   return `${orientation.up} (${parts.join(', ')})`;
+}
+
+/** An up axis as the buttons name it: +Z, −Y, … */
+export const axisLabel = (axis: UpAxis): string =>
+  `${axis[0] === '-' ? '−' : '+'}${axis.slice(1).toUpperCase()}`;
+
+const UP_HOW: Record<Orientation['method'], string> = {
+  base: 'from the base',
+  tallest: 'the taller way',
+  manual: 'chosen',
+  cut: 'from the print cut',
+  marked: 'from the marks',
+};
+
+/**
+ * The hints at the right of Adjust's closed disclosures (#144, design note look-and-feel.md
+ * §4.4): what each one holds now, in a few words. _(proposal)_ "+Z, from the base".
+ * `preset`: the axis is the source preset's, none was chosen by hand (#100).
+ */
+export function describeUpHint(orientation: Orientation, preset = false): string {
+  const how =
+    orientation.method === 'manual' && preset ? 'from the source' : UP_HOW[orientation.method];
+  return `${axisLabel(orientation.up)}, ${how}`;
+}
+
+/** "Medium, mm": the creature size and the units the file was read in. */
+export function describeSizeHint(sizing: Pick<Sizing, 'size' | 'units'>): string {
+  return `${sizeName(sizing.size)}, ${UNIT_NAMES[sizing.units]}`;
+}
+
+/** The look's preset by its label, or "Your own" once a control moved away from every preset. */
+export function describeLookHint(presetLabel: string | null): string {
+  return presetLabel ?? 'Your own';
+}
+
+/** "one file", "with its base", "3 parts", "3 parts and a base". */
+export function describePairHint(
+  pair: { parts: readonly unknown[]; pairing: { baseFile: number | null } } | null,
+): string {
+  if (!pair) return 'one file';
+  const parts = pair.parts.length;
+  const base = pair.pairing.baseFile !== null;
+  if (parts < 2) return base ? 'with its base' : 'one file';
+  return base ? `${parts} parts and a base` : `${parts} parts`;
 }

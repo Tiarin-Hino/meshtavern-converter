@@ -375,7 +375,11 @@ test('asks on a phone, the panel as a sheet under the mesh', async ({ page }, te
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  expect((await page.locator('#viewport').boundingBox())!.height).toBeGreaterThanOrEqual(844 / 2);
+  // The sheet's first screen is at most 44 % of the screen (#144); the viewport keeps the rest of the stage.
+  const sheet = (await page.locator('#panel').boundingBox())!.height;
+  expect(sheet).toBeLessThanOrEqual(844 * 0.44 + 1);
+  const stage = (await page.locator('#stage').boundingBox())!.height;
+  expect((await page.locator('#viewport').boundingBox())!.height + sheet).toBeCloseTo(stage, 0);
   await page.locator('#ask-confirm').scrollIntoViewIfNeeded();
   await expect(page.locator('#ask-confirm')).toBeInViewport();
   await page.waitForTimeout(300);
