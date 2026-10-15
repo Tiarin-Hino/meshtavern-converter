@@ -46,7 +46,7 @@ All on the cloud container (4 cores, Chromium 141 headless shell, SwiftShader).
 ## Still open
 
 - **The look is accepted.** PM decision 2026-10-15 on #159: the 30 pictures in the PR's description are the reference look (https://github.com/Tiarin-Hino/meshtavern-converter/pull/159). CI's own Linux copies of the same screens replace the committed files without a new review.
-- **The Linux set must come from CI.** The first CI run differed by 1–2 % of the pixels in every picture (text drawn by CI's newer Chromium); this session can reach neither CI's artifacts nor that browser build. The comparisons are now soft, so one run writes every actual picture; CI uploads them as `reference-screens-actual`, and `npm run shots:take` puts them in place. Until then the reference test is red on CI.
+- **The Linux set came from CI.** The first CI run differed by 1–2 % of the pixels in every picture (text drawn by CI's newer Chromium), and this session could reach neither CI's artifacts nor that browser build. The comparisons are now soft, CI uploads every actual picture as `reference-screens-actual`, and `npm run shots:take` put the PM's download of them in place.
 - **The Windows set** is written on the development PC's first run and committed from there.
 - The scan reads axe's rules for contrast with the theme's real colours; the contrast of every pair of roles stays the application's check.
 
