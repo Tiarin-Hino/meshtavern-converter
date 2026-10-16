@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type FileChooser, type Locator, type Page } from '@playwright/test';
 import { COPY } from '../src/page/page-state';
 import { asking, converting, cancel, done, error, open, pairsStop, question } from './states';
 
@@ -85,6 +85,19 @@ async function expectSwept(page: Page, state: string): Promise<void> {
   expect(result.rings, `${state}: focus rings that are not the application's`).toEqual([]);
 }
 
+/**
+ * Collects every file picker the page opens from now on. Call it before the page opens: Playwright
+ * asks Chromium to catch pickers when the first listener is added and does not wait for the answer.
+ * A key press goes into the page another way, without a round trip first (a click makes several),
+ * so a `waitForEvent('filechooser')` just before it can lose to it: the picker opens uncaught and
+ * the wait times out (#170). Added before `open`, every round trip after it comes behind the request.
+ */
+function catchPickers(page: Page): FileChooser[] {
+  const pickers: FileChooser[] = [];
+  page.on('filechooser', (picker) => pickers.push(picker));
+  return pickers;
+}
+
 /** Moves the focus to `target` with Tab alone, from where it is; fails after `limit` presses. */
 async function tabTo(page: Page, target: Locator, limit = 80): Promise<void> {
   for (let i = 0; i < limit; i++) {
@@ -133,17 +146,17 @@ test('a phone: Tab reaches the bar, the handle and the sheet', async ({ page }) 
 });
 
 test('the file button, the dialog and the theme switch with keys alone', async ({ page }) => {
+  const pickers = catchPickers(page);
   await open(page);
   // The bar's file button and the card's: Enter and Space open the picker.
   const choose = page.locator('#top').getByRole('button', { name: COPY.openStl });
   await tabTo(page, choose);
-  let chooser = page.waitForEvent('filechooser');
   await page.keyboard.press('Enter');
-  expect((await chooser).isMultiple()).toBe(true);
+  await expect.poll(() => pickers.length).toBe(1);
+  expect(pickers[0]!.isMultiple()).toBe(true);
   await tabTo(page, page.getByRole('button', { name: COPY.chooseFile }));
-  chooser = page.waitForEvent('filechooser');
   await page.keyboard.press('Space');
-  await chooser;
+  await expect.poll(() => pickers.length).toBe(2);
 
   // The theme switch: each choice is a tab stop, Space presses it.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
