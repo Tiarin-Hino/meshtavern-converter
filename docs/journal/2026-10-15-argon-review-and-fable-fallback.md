@@ -3,7 +3,7 @@ title: Gemini 4 Argon becomes the second reviewer, GPT Astra the occasional thir
 date: 2026-10-15
 phase: 1
 issues: []
-prs: [163]
+prs: [163, 169]
 topics: [ci, review]
 ---
 
