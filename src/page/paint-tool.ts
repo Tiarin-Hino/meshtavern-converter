@@ -62,6 +62,7 @@ const SLIDERS: Record<
 > = {
   flat: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
   eraser: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
+  lift: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
   fill: { show: ['opacity', 'tolerance'], opacity: 'opacity' },
   wash: { show: ['sizeMm', 'opacity'], opacity: 'strength' },
   ink: { show: ['sizeMm', 'opacity'], opacity: 'flow' },

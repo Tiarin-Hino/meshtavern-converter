@@ -22,8 +22,20 @@ import {
 /** The paint's side in texels, whatever the detail texture's size (#127). _(proposal)_ */
 export const PAINT_SIZE = 1024;
 
-/** The tools, in the order a panel offers them. `wash` … `airbrush` are the hobby brushes of #128. */
-export const TOOL_IDS = ['flat', 'fill', 'eraser', 'wash', 'ink', 'dry', 'airbrush'] as const;
+/**
+ * The tools, in the order a panel offers them. `wash` … `airbrush` are the hobby brushes of #128;
+ * `lift` takes a step away again where it is the top layer, showing the paint beneath it (#137).
+ */
+export const TOOL_IDS = [
+  'flat',
+  'fill',
+  'eraser',
+  'lift',
+  'wash',
+  'ink',
+  'dry',
+  'airbrush',
+] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
 /** Every slider there is; each tool reads the ones it has (§6). The consumer shows only those. */
@@ -75,6 +87,11 @@ export interface PaintStroke {
   camera: StrokeCamera;
   /** Four numbers a dab: x, y, z on the surface in mesh mm, and the pointer's pressure (0.5 for a mouse). */
   dabs: number[];
+  /**
+   * A `lift` stroke's step to take away (#137, design note `docs/design/lift-eraser.md`): its index
+   * in the history, oldest first, as `history()` gives it. On no other stroke.
+   */
+  lifts?: number;
 }
 
 /** Where a fill starts: a triangle under the finger, or a ready region (§7.2). */
@@ -108,8 +125,8 @@ export const RECENT_COLOURS_MAX = 12;
 /**
  * The colours used in a history, newest first, each once (#136): what a panel offers as swatches
  * to pick a colour from earlier again. Built from the steps alone, so a consumer that kept them
- * shows the same list after reopening a mini. Eraser strokes are left out: their colour is never
- * shown (PM decision on #136, 2026-10-13). Colours are compared and given in lower case, so
+ * shows the same list after reopening a mini. Eraser and lift strokes are left out: their colour
+ * is never shown (PM decision on #136, 2026-10-13; the lift since #137). Colours are compared and given in lower case, so
  * `#B03030` and `#b03030` are one swatch.
  */
 export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_MAX): string[] {
@@ -117,7 +134,7 @@ export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_
   const seen = new Set<string>();
   for (let k = steps.length - 1; k >= 0 && colours.length < max; k--) {
     const step = steps[k]!;
-    if (step.tool === 'eraser') continue;
+    if (step.tool === 'eraser' || step.tool === 'lift') continue;
     const colour = step.colour.toLowerCase();
     if (seen.has(colour)) continue;
     seen.add(colour);
@@ -290,8 +307,8 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * `src/lib/painting/tools.ts`, which `tools.test.ts` keeps in step. `cavity` is the detail
  * texture's, decoded as the material does (−1 crease … +1 edge), `occlusion` the vertex
  * occlusion (0 buried … 1 open), `normal` the detail texture's object-space normal (not
- * necessarily of unit length). The flat brush, the eraser and the fill paint every texel they
- * cover; the hobby brushes of #128 read the surface, with their constants beside the look's:
+ * necessarily of unit length). The flat brush, the eraser, the lift and the fill paint every
+ * texel they cover; the hobby brushes of #128 read the surface, with their constants beside the look's:
  *
  * - `wash`: pools where the cavity is negative and the occlusion low, tints a flat open surface
  *   faintly (`WASH_FLAT`) and evenly, and is shed by a raised edge (`WASH_LIFT`).
@@ -317,6 +334,7 @@ export function toolMask(
   switch (tool) {
     case 'flat':
     case 'eraser':
+    case 'lift':
     case 'fill':
       return 1;
     case 'wash': {

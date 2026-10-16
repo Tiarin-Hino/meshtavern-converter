@@ -86,6 +86,7 @@ describe('the tools', () => {
 
   it('refuses a name that is no tool', () => {
     expect(toolPass('eraser').composite).toBe('erase');
+    expect(toolPass('lift').composite).toBe('lift');
     expect(toolPass('flat').blend).toBe('max');
     expect(() => toolPass('glaze' as never)).toThrow(RangeError);
   });
@@ -102,7 +103,7 @@ describe('the tools', () => {
     expect(dabGain('airbrush', brush)).toBeCloseTo(AIR_FLOW_GAIN * 0.4, 12);
     expect(strokeOpacity('airbrush', brush)).toBe(1);
     expect(strokeOpacity('dry', brush)).toBe(DRY_OPACITY);
-    for (const tool of ['flat', 'eraser', 'fill', 'wash', 'ink'] as const) {
+    for (const tool of ['flat', 'eraser', 'lift', 'fill', 'wash', 'ink'] as const) {
       expect(strokeOpacity(tool, brush)).toBe(0.4);
       expect(dabGain(tool, brush)).toBe(1);
     }

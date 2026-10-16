@@ -10,6 +10,7 @@ export const PAINT_COPY = {
     flat: 'Brush',
     fill: 'Fill',
     eraser: 'Eraser',
+    lift: 'Lift',
     wash: 'Wash',
     ink: 'Ink',
     dry: 'Dry brush',
@@ -20,6 +21,7 @@ export const PAINT_COPY = {
     flat: 'Paints the colour evenly wherever it touches.',
     fill: 'Fills the surface you tap, up to a fold or a crease. Tolerance lets it go further.',
     eraser: 'Takes the paint away again, back to the bare mini.',
+    lift: 'Takes away the stroke you start on, wherever it is still on top, and shows the paint beneath it. Start again on the same spot to lift the layer under that.',
     wash: 'Thin colour that runs into creases and recesses, tints flat areas faintly and leaves raised edges almost bare. Use it to shade.',
     ink: 'Stains everything it covers, darkest in the creases. Stronger than a wash, softer than the brush.',
     dry: 'Catches the highest points under the brush where the stroke starts, and anything as high along it. More pressure reaches further down from them, and is needed for very low detail. Use it to highlight.',
@@ -44,6 +46,11 @@ export const PAINT_COPY = {
     painted: 'As painted',
     hint: 'Tap the mini to take a colour from it. As shown takes it as you see it, light and shade included; as painted takes the paint itself.',
     nothing: 'Nothing to pick there: off the mini, or no paint on it.',
+  },
+  /** Why a lift stroke took nothing away (#137): for a panel to show after it. */
+  lift: {
+    nothingPainted: 'Nothing painted here to lift: the paint the mini came with stays.',
+    tooLongAgo: 'Painted too long ago to lift: only the most recent steps can be taken away.',
   },
   /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
   recent: { label: 'Colours used', swatch: 'Paint with' },
