@@ -3,7 +3,7 @@ title: A mask that protects the mini from every tool
 date: 2026-10-16
 phase: 2
 issues: [138]
-prs: []
+prs: [177]
 topics: [painting, mask, fill]
 ---
 
