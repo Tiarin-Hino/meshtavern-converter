@@ -73,8 +73,11 @@ const run = spawn(
     '-i',
     '--init',
     `--cpus=${cpus}`,
-    // Pinning the cores makes Node, Vitest and Playwright see only these, so they start as many
-    // workers as the container may use instead of one per core of the PC.
+    // Pinning the cores makes Node and Vitest see only these (os.availableParallelism), so they
+    // start as many workers as the container may use instead of one per core of the PC.
+    // Playwright counts os.cpus(), which still lists every core: its workers come from
+    // MT_TEST_CPUS in playwright.config.ts. Every run is pinned to the same cores, so runs of
+    // several sessions at once share them and together never take more than MT_TEST_CPUS.
     `--cpuset-cpus=0-${Math.max(0, Math.ceil(cpus) - 1)}`,
     `--memory=${memory}`,
     `--memory-swap=${memory}`,
