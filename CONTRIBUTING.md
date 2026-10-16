@@ -20,6 +20,10 @@ This project is built by a small team together with the Claude Code agent. Human
 4. Open a PR with `Closes #<issue>` and fill in the checklist.
 5. CI must be green. A PR that changes only the docs and the files that steer the agents and the reviews gets the format check alone (the list is `DOCS_ONLY` in `.github/workflows/ci.yml`); every other PR and every push to `main` get the whole run. A human reviews; only the PM squash-merges. Nobody pushes to `main`.
 
+## Running the checks in a container
+
+`npm run docker:check` and `npm run docker:e2e` run `npm run check` and the e2e tests in a throwaway Linux container (Docker Desktop must be running). The container gets 4 cores and 8 GB by default (`MT_TEST_CPUS`, `MT_TEST_MEMORY`), so the PC stays usable. It has its own network, so several worktrees can test at once without sharing port 4173. Nothing is left behind except the reports in `out/docker-test/`. The image holds `node_modules` and Chromium and is built once per `package-lock.json`, so a fresh worktree needs no `npm ci` and no `playwright install` to be tested. It is Linux like CI, so the reference screens are compared with the committed Linux set.
+
 ## WebAssembly we build ourselves
 
 Both WebAssembly modules in the critical path are built by this project from pinned sources and committed, so `npm ci && npm run dev` needs no toolchain: `wasm/xatlas/xatlas.wasm` (the unwrapper) and `wasm/basis-encoder/basis_encoder.wasm` (the KTX2 encoder). Rebuilding one or bumping its library or Emscripten needs Docker: `npm run xatlas:build` or `npm run basis:build` (from Git Bash or WSL on Windows); how to bump is in the folder's `README.md`. The `xatlas build` and `basis encoder build` workflows rebuild them on every PR that touches their folder and fail if one byte differs from the committed file.

@@ -6,7 +6,7 @@ argument-hint: [issue number]
 
 # Open a PR for the current branch
 
-1. **Pre-flight.** Not on `main`. Working tree clean or changes committed (Conventional Commits). Branch is up to date with its base. `npm run check` and `npm run e2e` pass; if they do not, fix that first or say so in the PR, never hide it.
+1. **Pre-flight.** Not on `main`. Working tree clean or changes committed (Conventional Commits). Branch is up to date with its base. `npm run docker:check` and `npm run docker:e2e` pass (`npm run check` and `npm run e2e` only when Docker is not running, as in `/implement` step 8); if they do not, fix that first or say so in the PR, never hide it.
    Two hand-over cases change the steps below. **A design-pass draft** (the branch holds only a design note in `docs/design/`, from `/implement` on Fable): no journal entry yet, the build writes it; the body is the brief, not the finished template (step 3); the PR is created as a draft (step 4). **An existing PR** (from `/continue-pr`, or any branch that already has one): the body is rewritten, not a second PR created (step 4).
    The branch has its journal entry in `docs/journal/` (or extends an earlier one), unless the change is a dependency bump, a typo or formatting. If it is missing, write it now from the branch's commits, the issue and what happened in the session. Its "Numbers" and "Still open" must agree with the PR description.
 2. **Scan the diff** (`git diff <base>...HEAD`) for things that must not ship: STL files, converted output or renders of real minis, secrets, `.env` files, user data, names of third-party minis, creators or shops, leftover debug code, network calls with user data. This repo is public: nothing about business, pricing, licensing deals or partners.

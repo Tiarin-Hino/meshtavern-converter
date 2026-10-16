@@ -8,7 +8,7 @@ description: Verify a visual or 3D change in the converter by driving the real a
 The canvas has no accessibility tree, so text-based page inspection tells you nothing about the scene. Verify in two layers:
 
 1. **Numbers first.** Drive the app through `window.__mt` (state, `loadDemo()`, and any hooks added for the feature) and assert on values: triangle counts, bounds in mm, LOD chosen, frame time. Add or extend a Playwright test in `e2e/` so the check stays in CI.
-2. **Then pixels.** Run `npm run e2e` and open the screenshot written under `test-results/` with the Read tool. Check: is the mini lit (not black), upright (Y-up), standing on the grid, centred, fully in frame? Compare with the previous screenshot when changing looks.
+2. **Then pixels.** Run `npm run docker:e2e` (or `npm run e2e` without Docker) and open the screenshot written under `out/docker-test/test-results/` (`test-results/`) with the Read tool. Check: is the mini lit (not black), upright (Y-up), standing on the grid, centred, fully in frame? Compare with the previous screenshot when changing looks.
 
 Rules:
 
