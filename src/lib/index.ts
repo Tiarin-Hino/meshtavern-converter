@@ -143,6 +143,8 @@ export {
   TOOL_IDS,
   DEFAULT_BRUSH,
   DAB_SPACING,
+  RECENT_COLOURS_MAX,
+  recentColours,
   spaceDabs,
   toolMask,
   type ToolId,

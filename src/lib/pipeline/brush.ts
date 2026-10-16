@@ -102,6 +102,30 @@ export interface PaintRegions {
 /** One step of the history: what undo takes back and redo puts again. */
 export type PaintStep = PaintStroke | PaintFill;
 
+/** How many colours `recentColours` gives by default: a row of swatches beside a colour picker (#136). _(proposal)_ */
+export const RECENT_COLOURS_MAX = 12;
+
+/**
+ * The colours used in a history, newest first, each once (#136): what a panel offers as swatches
+ * to pick a colour from earlier again. Built from the steps alone, so a consumer that kept them
+ * shows the same list after reopening a mini. Eraser strokes are left out: their colour is never
+ * shown (PM decision on #136, 2026-10-13). Colours are compared and given in lower case, so
+ * `#B03030` and `#b03030` are one swatch.
+ */
+export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_MAX): string[] {
+  const colours: string[] = [];
+  const seen = new Set<string>();
+  for (let k = steps.length - 1; k >= 0 && colours.length < max; k--) {
+    const step = steps[k]!;
+    if (step.tool === 'eraser') continue;
+    const colour = step.colour.toLowerCase();
+    if (seen.has(colour)) continue;
+    seen.add(colour);
+    colours.push(colour);
+  }
+  return colours;
+}
+
 /** The pressure recorded for a pointer that reports none (a mouse). */
 export const MOUSE_PRESSURE = 0.5;
 
