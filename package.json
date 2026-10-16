@@ -33,6 +33,8 @@
     "basis:build": "bash wasm/basis-encoder/build.sh",
     "corpus": "npm run build && node scripts/corpus.mjs",
     "e2e": "playwright test",
+    "docker:check": "node scripts/docker-test.mjs npm run check",
+    "docker:e2e": "node scripts/docker-test.mjs npx playwright test --reporter=list,html",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run check:colours && npm run build",
     "score-placements": "node --max-old-space-size=8192 scripts/score-placements.mjs",
     "feedback": "node scripts/feedback.mjs",

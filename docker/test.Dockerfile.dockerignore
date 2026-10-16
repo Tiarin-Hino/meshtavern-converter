@@ -1,0 +1,5 @@
+# The test image needs the lockfile and its entrypoint only; everything else is copied in per run.
+*
+!package.json
+!package-lock.json
+!docker/test-entrypoint.sh
