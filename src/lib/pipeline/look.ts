@@ -98,10 +98,21 @@ export const WASH_OCCLUSION = 0.5;
 export const WASH_LIFT = 0.8;
 /** The ink's stain on a flat surface; the creases take all of it. */
 export const INK_FLAT = 0.5;
-/** The dry brush catches where the cavity is above this, times (1 − pressure): at full pressure every raised texel. */
+/**
+ * The dry brush catches where a texel's height above flat is above this share of its stroke's
+ * reference's, times (1 − pressure): at full pressure every raised texel (#133, design note
+ * `docs/design/dry-brush-crests.md`).
+ */
 export const DRY_THRESHOLD = 0.5;
-/** Over this much cavity above the threshold the dry brush goes from nothing to all. */
+/** Over this share of the reference's height above the threshold the dry brush goes from nothing to all. */
 export const DRY_SOFTNESS = 0.2;
+/**
+ * The smallest height above flat (`FLAT_CAVITY`) the dry brush's reference counts as, about
+ * thirteen of the detail texture's steps. Low detail and the gentle curve of a smooth surface
+ * measure alike (a few steps up); a lower floor catches more of the one and blotches more of the
+ * other. PM's choice, 2026-10-15, from 0.1, 0.2 and 0.3 painted side by side.
+ */
+export const DRY_REFERENCE_MIN = 0.2;
 /** The dry brush's opacity: its slider is the pressure, not the opacity. */
 export const DRY_OPACITY = 0.9;
 /** The airbrush's dab: soft from its centre out. */
@@ -210,3 +221,10 @@ export function vertexColours(
 /** Raw cavity values are stored in a byte as (cavity + 0.5) * 255, keeping precision where the values are. */
 export const cavityToByte = (cavity: number): number =>
   Math.round((Math.max(-0.5, Math.min(0.5, cavity)) + 0.5) * 255);
+
+/**
+ * The cavity a flat surface decodes to from the detail texture, as the material and the painting
+ * engine decode it (× CAVITY_GAIN): zero is stored as the byte above the middle, half a step
+ * above 0. The dry brush measures a texel's height from here (#133).
+ */
+export const FLAT_CAVITY = (cavityToByte(0) / 255 - 0.5) * CAVITY_GAIN;

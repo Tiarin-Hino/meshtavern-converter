@@ -36,6 +36,8 @@ import { dabGain, strokeOpacity, toolPass } from './tools';
  *   from its owner (the composite and the dilation of §5.4 in one pass: a texel's result is a
  *   function of its owner's inputs alone).
  * - `paint`: the committed paint. A commit copies `live` into it, a cancel copies it back.
+ * - `reference` (a stroke's first dab, for the dry brush, #133): the highest cavity under that
+ *   dab, reduced from the stroke layer and the detail texture into one texel the composite reads.
  *
  * `paint`, `live` and the keyframes are sRGB targets (SRGB8_ALPHA8): the GPU decodes on sampling,
  * encodes on writing, and the material samples `live` as it samples an sRGB `DataTexture`. Copies
@@ -58,6 +60,8 @@ export const BRUSH_DEPTH_SOFT_MM = 0.5;
 export const PAINT_DILATION_RINGS = 2;
 /** Dabs per draw of the dab pass; more take further draws. _(proposal)_ */
 export const DABS_PER_PASS = 64;
+/** The reference's reduction (#133): each texel of a level is the highest of a block this many texels on a side of the level below. */
+export const REFERENCE_BLOCK = 16;
 /** A dab's hardness is at most this, so the falloff's two edges never meet. */
 const HARDEST = 0.999;
 
@@ -171,6 +175,47 @@ void main() {
 }
 `;
 
+/**
+ * The reference's first level (#133, design note `docs/design/dry-brush-crests.md` §5): each texel
+ * the highest cavity, as `cavity × 0.5 + 0.5`, of the texels of its block that the stroke layer
+ * covers (0 where none is). The cavity is read as the composite reads it: at the texel's centre,
+ * level 0, decoded and clamped. A covered texel owns itself (an island's or a border's).
+ */
+const REFERENCE_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uStroke;
+uniform sampler2D uDetail;
+out vec4 fragColor;
+void main() {
+  ivec2 origin = ivec2( gl_FragCoord.xy ) * ${REFERENCE_BLOCK};
+  float highest = 0.0;
+  for ( int y = 0; y < ${REFERENCE_BLOCK}; y++ ) {
+    for ( int x = 0; x < ${REFERENCE_BLOCK}; x++ ) {
+      ivec2 texel = origin + ivec2( x, y );
+      if ( texelFetch( uStroke, texel, 0 ).r <= 0.0 ) continue;
+      vec4 detail = textureLod( uDetail, ( vec2( texel ) + 0.5 ) / ${PAINT_SIZE.toFixed(1)}, 0.0 );
+      float cavity = clamp( ( detail.a - 0.5 ) * ${CAVITY_GAIN.toFixed(1)}, -1.0, 1.0 );
+      highest = max( highest, cavity * 0.5 + 0.5 );
+    }
+  }
+  fragColor = vec4( highest, 0.0, 0.0, 1.0 );
+}
+`;
+
+/** The reference's further levels: each texel the highest of its block of the level below. */
+const HIGHEST_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uSource;
+uniform int uBlock;
+out vec4 fragColor;
+void main() {
+  ivec2 origin = ivec2( gl_FragCoord.xy ) * uBlock;
+  float highest = 0.0;
+  for ( int y = 0; y < uBlock; y++ )
+    for ( int x = 0; x < uBlock; x++ )
+      highest = max( highest, texelFetch( uSource, origin + ivec2( x, y ), 0 ).r );
+  fragColor = vec4( highest, 0.0, 0.0, 1.0 );
+}
+`;
+
 /** A triangle over the whole target: the quad passes. */
 const QUAD_VERTEX = /* glsl */ `${PRECISION}
 in vec3 position;
@@ -243,13 +288,14 @@ uniform sampler2D uStroke;
 uniform sampler2D uOwner;
 uniform sampler2D uAtlas;
 uniform sampler2D uDetail;
+uniform sampler2D uReference;
 uniform vec3 uColour;
 uniform float uOpacity;
 uniform float uPressure;
 uniform vec4 uDirection;
 out vec4 fragColor;
 
-float mtMask( float cavity, float occlusion, vec3 normal ) {
+float mtMask( float cavity, float occlusion, vec3 normal, float reference ) {
   ${pass.mask}
 }
 
@@ -276,7 +322,9 @@ void main() {
   float cavity = clamp( ( detail.a - 0.5 ) * ${CAVITY_GAIN.toFixed(1)}, -1.0, 1.0 );
   vec3 normal = detail.rgb * 2.0 - 1.0;
   float occlusion = texelFetch( uAtlas, from, 0 ).g;
-  float alpha = uOpacity * coverage * mtMask( cavity, occlusion, normal );
+  // The stroke's reference (#133): −1 when its first dab covered nothing.
+  float reference = texelFetch( uReference, ivec2( 0 ), 0 ).r * 2.0 - 1.0;
+  float alpha = uOpacity * coverage * mtMask( cavity, occlusion, normal, reference );
   if ( alpha <= 0.0 ) {
     fragColor = paint;
     return;
@@ -336,6 +384,30 @@ const strokeTarget = (): THREE.WebGLRenderTarget =>
     minFilter: THREE.NearestFilter,
     magFilter: THREE.NearestFilter,
   });
+
+/** A level of the reference's reduction: R8, `size` square, read texel by texel. */
+const referenceTarget = (size: number): THREE.WebGLRenderTarget =>
+  new THREE.WebGLRenderTarget(size, size, {
+    depthBuffer: false,
+    generateMipmaps: false,
+    format: THREE.RedFormat,
+    type: THREE.UnsignedByteType,
+    colorSpace: THREE.NoColorSpace,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+
+/** The reduction's levels from PAINT_SIZE down to one texel: each one's side and the block it reduces. */
+function referenceLevels(): { size: number; block: number }[] {
+  const levels: { size: number; block: number }[] = [];
+  for (let size = PAINT_SIZE; size > 1;) {
+    const block = Math.min(REFERENCE_BLOCK, size);
+    if (size % block !== 0) throw new RangeError(`${PAINT_SIZE} does not reduce by ${block}`);
+    size /= block;
+    levels.push({ size, block });
+  }
+  return levels;
+}
 
 /**
  * A material that writes a texel once a draw: the first fragment there marks the stencil (the
@@ -442,6 +514,19 @@ export class PaintPasses {
     add: onceATexel(raw(TEXTURE_SPACE_VERTEX, dabFragment(true), this.dabUniforms, 'add')),
   };
   private readonly regionMaterial = raw(TEXTURE_SPACE_VERTEX, REGION_FRAGMENT, {}, 'max');
+  /** The reference's levels, the last one texel: what the composite reads (#133). */
+  private readonly reference = referenceLevels().map(({ size, block }) => ({
+    target: referenceTarget(size),
+    block,
+  }));
+  private readonly referenceMaterial = raw(QUAD_VERTEX, REFERENCE_FRAGMENT, {
+    uStroke: { value: this.stroke.texture },
+    uDetail: { value: null },
+  });
+  private readonly highestMaterial = raw(QUAD_VERTEX, HIGHEST_FRAGMENT, {
+    uSource: { value: null },
+    uBlock: { value: REFERENCE_BLOCK },
+  });
   private readonly copyMaterial = raw(QUAD_VERTEX, COPY_FRAGMENT, { uSource: { value: null } });
   private readonly compositeMaterials = new Map<ToolId, THREE.RawShaderMaterial>();
   private readonly compositeUniforms = {
@@ -450,6 +535,7 @@ export class PaintPasses {
     uOwner: { value: null as THREE.Texture | null },
     uAtlas: { value: this.atlas.texture as THREE.Texture },
     uDetail: { value: null as THREE.Texture | null },
+    uReference: { value: this.reference.at(-1)!.target.texture as THREE.Texture },
     uColour: { value: new THREE.Vector3() },
     uOpacity: { value: 1 },
     uPressure: { value: 1 },
@@ -499,6 +585,7 @@ export class PaintPasses {
     const mini = { triangles, edges: lines, depth, geometry: edges, detail };
     this.mini = mini;
     this.compositeUniforms.uDetail.value = detail;
+    this.referenceMaterial.uniforms.uDetail!.value = detail;
 
     // The atlas: islands at 1, their borders at 0.5 (the edges, max-blended under the triangles).
     this.atlasMaterial.uniforms.uLevel!.value = 1;
@@ -572,7 +659,10 @@ export class PaintPasses {
 
   /**
    * The dab pass (§5.3): the coverage of `dabs` (four numbers each, from `from` on, a dab index)
-   * into the stroke layer, `DABS_PER_PASS` a draw.
+   * into the stroke layer, `DABS_PER_PASS` a draw. For a tool that reads a reference (the dry
+   * brush, #133), a draw from the stroke's first dab draws that dab alone, measures the reference
+   * under it (`measureReference`), then the rest: the largest coverage is the same bytes in any
+   * grouping, and the live stroke and its replay both start there.
    */
   drawDabs(dabs: ArrayLike<number>, from: number, brush: BrushSettings, tool: ToolId): void {
     const mini = this.mini;
@@ -589,14 +679,40 @@ export class PaintPasses {
     mini.triangles.material = material;
     mini.edges.material = material;
     const packed = this.dabUniforms.uDabs.value;
-    for (let first = from; first < count; first += DABS_PER_PASS) {
-      const n = Math.min(DABS_PER_PASS, count - first);
+    const draw = (first: number, n: number): void => {
       for (let k = 0; k < n * 4; k++) packed[k] = dabs[first * 4 + k]!;
       this.dabUniforms.uDabCount.value = n;
       this.draw(this.stroke, this.textureScene, pass.blend === 'add' ? 'stencil' : false);
+    };
+    let first = from;
+    if (from === 0 && pass.reference && count > 0) {
+      draw(0, 1);
+      this.measureReference();
+      first = 1;
     }
+    for (; first < count; first += DABS_PER_PASS)
+      draw(first, Math.min(DABS_PER_PASS, count - first));
     mini.triangles.material = this.atlasMaterial;
     mini.edges.material = this.atlasMaterial;
+  }
+
+  /**
+   * The stroke's reference (#133, design note `docs/design/dry-brush-crests.md` §5): the highest
+   * cavity of the texels the stroke layer covers, reduced level by level into one texel, as
+   * `cavity × 0.5 + 0.5` (0 when nothing is covered). Run with the first dab alone in the layer.
+   */
+  private measureReference(): void {
+    let source: THREE.Texture | null = null;
+    for (const { target, block } of this.reference) {
+      if (source === null) this.quad.material = this.referenceMaterial;
+      else {
+        this.highestMaterial.uniforms.uSource!.value = source;
+        this.highestMaterial.uniforms.uBlock!.value = block;
+        this.quad.material = this.highestMaterial;
+      }
+      this.draw(target, this.quadScene, false);
+      source = target.texture;
+    }
   }
 
   /** A fill's region (§7.1) into the stroke layer at full coverage: its triangles and their edges. */
@@ -750,6 +866,7 @@ export class PaintPasses {
     }
     mini.triangles.material = this.atlasMaterial;
     mini.edges.material = this.atlasMaterial;
+    this.measureReference();
     // Nothing covered: no tool changes a texel, whatever its opacity.
     for (const tool of tools) this.composite(tool, [0, 0, 0], DEFAULT_BRUSH);
     this.cancel();
@@ -766,12 +883,20 @@ export class PaintPasses {
     this.owner = null;
     this.compositeUniforms.uOwner.value = null;
     this.compositeUniforms.uDetail.value = null;
+    this.referenceMaterial.uniforms.uDetail!.value = null;
     this.mini = null;
   }
 
   dispose(): void {
     this.close();
-    for (const target of [this.paint, this.live, this.stroke, this.atlas, this.depth])
+    for (const target of [
+      this.paint,
+      this.live,
+      this.stroke,
+      this.atlas,
+      this.depth,
+      ...this.reference.map((level) => level.target),
+    ])
       target?.dispose();
     this.depth?.depthTexture?.dispose();
     for (const material of [
@@ -780,6 +905,8 @@ export class PaintPasses {
       this.dabMaterials.max,
       this.dabMaterials.add,
       this.regionMaterial,
+      this.referenceMaterial,
+      this.highestMaterial,
       this.copyMaterial,
       ...this.compositeMaterials.values(),
     ])

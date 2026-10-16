@@ -5,8 +5,10 @@ import {
   AIR_FLOW_GAIN,
   AIR_HARDNESS,
   DRY_OPACITY,
+  DRY_REFERENCE_MIN,
   DRY_SOFTNESS,
   DRY_THRESHOLD,
+  FLAT_CAVITY,
   INK_FLAT,
   WASH_FLAT,
   WASH_LIFT,
@@ -18,7 +20,7 @@ import {
  * how a dab's coverage goes into the stroke layer, how the stroke goes onto the paint, and the
  * mask, a GLSL function of the texel's surface that `toolMask` in pipeline/brush.ts mirrors
  * (`tools.test.ts` runs the GLSL against it). The hobby brushes of #128 read the surface, with
- * their constants beside the look's (`look.ts`).
+ * their constants beside the look's (`look.ts`); the dry brush also its stroke's reference (#133).
  */
 export interface ToolPass {
   /** Into the stroke layer: the largest coverage so far (a loaded brush), or added up (an airbrush). */
@@ -26,15 +28,19 @@ export interface ToolPass {
   /** Onto the paint: the colour over it, or alpha taken away. */
   composite: 'over' | 'erase';
   /**
-   * The body of `float mtMask( float cavity, float occlusion, vec3 normal )`: cavity −1 crease …
-   * +1 edge (the detail texture's, as the material decodes it), occlusion 0 buried … 1 open, the
-   * object-space normal (not necessarily of unit length). It may read the uniforms `uPressure` (the
-   * brush's `opacity`) and `uDirection` (the brush's `direction` in xyz, w 1, or w 0 for none).
-   * Written so that it is also JavaScript once `float` is `let` (tools.test.ts).
+   * The body of `float mtMask( float cavity, float occlusion, vec3 normal, float reference )`:
+   * cavity −1 crease … +1 edge (the detail texture's, as the material decodes it), occlusion 0
+   * buried … 1 open, the object-space normal (not necessarily of unit length), the stroke's
+   * reference (the highest cavity under its first dab, for a tool with `reference`, #133). It may
+   * read the uniforms `uPressure` (the brush's `opacity`) and `uDirection` (the brush's `direction`
+   * in xyz, w 1, or w 0 for none). Written so that it is also JavaScript once `float` is `let`
+   * (tools.test.ts).
    */
   mask: string;
   /** The dab's hardness when the tool has its own; else the brush's. */
   hardness?: number;
+  /** The mask reads the stroke's reference: measured after the first dab (`PaintPasses.measureReference`, #133). */
+  reference?: boolean;
 }
 
 /** A number as a GLSL float literal. */
@@ -58,8 +64,10 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
   dry: {
     blend: 'max',
     composite: 'over',
-    mask: `float threshold = ${f(DRY_THRESHOLD)} * ( 1.0 - uPressure );
-  return smoothstep( threshold, threshold + ${f(DRY_SOFTNESS)}, cavity );`,
+    mask: `float scale = max( reference - ${f(FLAT_CAVITY)}, ${f(DRY_REFERENCE_MIN)} );
+  float threshold = ${f(DRY_THRESHOLD)} * ( 1.0 - uPressure );
+  return smoothstep( threshold, threshold + ${f(DRY_SOFTNESS)}, ( cavity - ${f(FLAT_CAVITY)} ) / scale );`,
+    reference: true,
   },
   airbrush: {
     blend: 'add',

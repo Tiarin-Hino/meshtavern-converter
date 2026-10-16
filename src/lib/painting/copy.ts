@@ -22,7 +22,7 @@ export const PAINT_COPY = {
     eraser: 'Takes the paint away again, back to the bare mini.',
     wash: 'Thin colour that runs into creases and recesses, tints flat areas faintly and leaves raised edges almost bare. Use it to shade.',
     ink: 'Stains everything it covers, darkest in the creases. Stronger than a wash, softer than the brush.',
-    dry: 'Catches only the raised edges and crests. More pressure reaches further down from the edge. Use it to highlight.',
+    dry: 'Catches the highest points under the brush where the stroke starts, and anything as high along it. More pressure reaches further down from them, and is needed for very low detail. Use it to highlight.',
     airbrush:
       'A soft spray that builds up with every pass. Spraying from above reaches only surfaces that face up: a zenithal highlight in one pass.',
   },

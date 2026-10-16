@@ -154,7 +154,8 @@ export {
   type FillSeed,
   type PaintRegions,
 } from './pipeline/brush';
-// The hobby brushes' masks (#128): what toolMask reads, beside the look's constants.
+// The hobby brushes' masks (#128): what toolMask reads, beside the look's constants; the dry
+// brush's reference (#133) is measured from flat.
 export {
   WASH_FLAT,
   WASH_OCCLUSION,
@@ -163,6 +164,8 @@ export {
   DRY_THRESHOLD,
   DRY_SOFTNESS,
   DRY_OPACITY,
+  DRY_REFERENCE_MIN,
+  FLAT_CAVITY,
   AIR_HARDNESS,
   AIR_FLOW_GAIN,
   AIR_DIR_EDGE,
