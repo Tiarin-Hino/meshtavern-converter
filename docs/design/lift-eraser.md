@@ -83,7 +83,7 @@ interface PaintingState {
 }
 ```
 
-A refused lift stroke draws nothing and leaves no step. `PAINT_COPY.lift` holds the two sentences for a panel to show _(proposals)_: "Nothing painted here to lift: the paint the mini came with stays." and "Painted too long ago to lift: only the last {n} steps can be taken back." (with `UNDO_STEPS` filled in by the panel). The `?dev` tool shows them in its status line, as the pipette's "nothing to pick".
+A refused lift stroke draws nothing and leaves no step. `PAINT_COPY.lift` holds the two sentences for a panel to show _(proposals)_: "Nothing painted here to lift: the paint the mini came with stays." and "Painted too long ago to lift: only the most recent steps can be taken away." (`nothingPainted`, `tooLongAgo`). The `?dev` tool shows them in its status line, as the pipette's "nothing to pick".
 
 ## 8. Build order and proof
 

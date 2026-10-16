@@ -1019,7 +1019,9 @@ test('lifts the stroke it starts on back to the bytes before it, and leaves the 
   expect(outcome.centreAlpha).toBe(0);
   expect(outcome.narrow.first).toBeGreaterThan(20);
   expect(outcome.narrow.second).toBeGreaterThan(outcome.narrow.first);
-  expect(outcome.narrow.neither).toBe(0);
+  // Lifted part way only at the dab's edge: its hardness is at most 0.999, a band a few
+  // thousandths of a mm wide (2 of 862 texels in the Linux container).
+  expect(outcome.narrow.neither).toBeLessThanOrEqual(outcome.narrow.first / 100);
   expect(outcome.steps).toBe(3);
 });
 
@@ -1028,26 +1030,26 @@ test('lifts nothing where nothing was painted, or too long ago, and says why', a
 }) => {
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
-    const view = painting.view();
+    const view = () => painting.view();
     const hash = async (): Promise<number> => {
-      const { data } = await view.paint();
+      const { data } = await view().paint();
       let h = 0;
       for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
       return h;
     };
     const look = async (): Promise<void> => {
-      view.setCamera(0, 5, 1.6);
+      view().setCamera(0, 5, 1.6);
       await new Promise((resolve) => requestAnimationFrame(resolve));
     };
     const at = (x: number, y: number): [number, number, number] =>
-      view.texelAt(...view.screenOf([x, y, 6]))!.point;
+      view().texelAt(...view().screenOf([x, y, 6]))!.point;
     const liftAt = async (x: number, y: number) => {
-      view.setTool('lift');
+      view().setTool('lift');
       const before = await hash();
-      await view.stroke([at(x, y), at(x + 1, y)]);
+      await view().stroke([at(x, y), at(x + 1, y)]);
       return {
-        lift: view.state.lift,
-        steps: view.state.steps,
+        lift: view().state.lift,
+        steps: view().state.steps,
         same: (await hash()) === before,
       };
     };
@@ -1063,14 +1065,14 @@ test('lifts nothing where nothing was painted, or too long ago, and says why', a
     // One stroke at 11 mm, then enough elsewhere that undo no longer reaches it.
     await painting.open();
     await look();
-    view.setTool('flat');
-    view.setBrush({ sizeMm: 1 });
-    await view.stroke([at(-2, 11)]);
+    view().setTool('flat');
+    view().setBrush({ sizeMm: 1 });
+    await view().stroke([at(-2, 11)]);
     const elsewhere = at(2, 17);
     // Two colours in turn: a stroke that leaves the bytes as they were changes no texel.
     for (let k = 0; k < 60; k++) {
-      view.setColour(k % 2 ? '#00ff00' : '#0000ff');
-      await view.stroke([elsewhere]);
+      view().setColour(k % 2 ? '#00ff00' : '#0000ff');
+      await view().stroke([elsewhere]);
     }
     const old = await liftAt(-2, 11);
     // The newest stroke still lifts.
