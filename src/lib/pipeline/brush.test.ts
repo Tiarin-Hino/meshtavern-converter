@@ -6,12 +6,16 @@ import {
   ISLAND_TEXEL,
   NO_OWNER,
   ownerMap,
+  RECENT_COLOURS_MAX,
+  recentColours,
   spaceDabs,
   TOOL_IDS,
   toolMask,
   unitDirection,
   type BrushSettings,
   type DabHit,
+  type PaintStep,
+  type ToolId,
 } from './brush';
 import {
   DRY_REFERENCE_MIN,
@@ -337,5 +341,72 @@ describe('unitDirection', () => {
     expect(unitDirection([0, 0, 0])).toBeNull();
     expect(unitDirection([Number.NaN, 1, 0])).toBeNull();
     expect(unitDirection(null)).toBeNull();
+  });
+});
+
+describe('recentColours', () => {
+  const camera = {
+    position: [0, 0, 100] as [number, number, number],
+    target: [0, 0, 0] as [number, number, number],
+    fovDeg: 40,
+    near: 1,
+    far: 1000,
+    viewport: [800, 600] as [number, number],
+  };
+  const stroke = (colour: string, tool: Exclude<ToolId, 'fill'> = 'flat'): PaintStep => ({
+    kind: 'stroke',
+    tool,
+    colour,
+    brush: DEFAULT_BRUSH,
+    camera,
+    dabs: [0, 0, 0, 0.5],
+  });
+  const fill = (colour: string): PaintStep => ({
+    kind: 'fill',
+    tool: 'fill',
+    colour,
+    brush: DEFAULT_BRUSH,
+    seed: { kind: 'base' },
+  });
+
+  it('gives nothing for no steps', () => {
+    expect(recentColours([])).toEqual([]);
+  });
+
+  it('gives the colours newest first, strokes and fills alike', () => {
+    expect(recentColours([stroke('#111111'), fill('#222222'), stroke('#333333', 'wash')])).toEqual([
+      '#333333',
+      '#222222',
+      '#111111',
+    ]);
+  });
+
+  it('gives each colour once, where it was used last', () => {
+    const steps = [stroke('#111111'), stroke('#222222'), stroke('#111111'), stroke('#222222')];
+    expect(recentColours(steps)).toEqual(['#222222', '#111111']);
+    expect(recentColours([stroke('#aabbcc'), stroke('#AABBCC')])).toEqual(['#aabbcc']);
+  });
+
+  it('leaves the eraser out: its colour is never shown', () => {
+    const steps = [stroke('#111111'), stroke('#222222', 'eraser'), stroke('#333333', 'eraser')];
+    expect(recentColours(steps)).toEqual(['#111111']);
+    expect(recentColours([stroke('#222222', 'eraser')])).toEqual([]);
+  });
+
+  it('stops at the limit, the newest kept', () => {
+    const steps = Array.from({ length: 20 }, (_, k) =>
+      stroke(`#0000${k.toString(16).padStart(2, '0')}`),
+    );
+    const colours = recentColours(steps);
+    expect(colours).toHaveLength(RECENT_COLOURS_MAX);
+    expect(colours[0]).toBe('#000013');
+    expect(colours.at(-1)).toBe('#000008');
+    expect(recentColours(steps, 3)).toEqual(['#000013', '#000012', '#000011']);
+    expect(recentColours(steps, 0)).toEqual([]);
+  });
+
+  it('counts the limit in colours, not steps', () => {
+    const steps = [stroke('#111111'), ...Array.from({ length: 30 }, () => stroke('#222222'))];
+    expect(recentColours(steps, 2)).toEqual(['#222222', '#111111']);
   });
 });

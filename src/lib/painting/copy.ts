@@ -45,6 +45,8 @@ export const PAINT_COPY = {
     hint: 'Tap the mini to take a colour from it. As shown takes it as you see it, light and shade included; as painted takes the paint itself.',
     nothing: 'Nothing to pick there: off the mini, or no paint on it.',
   },
+  /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
+  recent: { label: 'Colours used', swatch: 'Paint with' },
   undo: 'Undo',
   redo: 'Redo',
   navigate: 'Turn the mini',

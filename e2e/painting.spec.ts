@@ -1424,3 +1424,44 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
   await page.waitForFunction(() => window.__mt.painting.view().state.colour === '#b03030');
   expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
 });
+
+test('shows the colours used as swatches in the Paint tool, and a click paints with one again (#136)', async ({
+  figurePage: page,
+}) => {
+  await paintTheChest(page);
+  const swatches = page.locator('#paint-recent .paint-swatch');
+  await page.evaluate(async () => {
+    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
+    const view = window.__mt.painting.view();
+    const points = [-2, 0, 2].flatMap((x) => {
+      const hit = view.texelAt(...view.screenOf([x, 14, 6]));
+      return hit ? [hit.point] : [];
+    });
+    view.setColour('#2050a0');
+    await view.stroke(points);
+    // The eraser carries a colour that is never shown: it is no swatch.
+    view.setTool('eraser');
+    view.setColour('#20a050');
+    await view.stroke(points);
+    view.setTool('flat');
+  });
+  await expect(swatches).toHaveCount(2);
+  expect(await swatches.evaluateAll((all) => all.map((s) => s.dataset.colour))).toEqual([
+    '#2050a0',
+    '#b03030',
+  ]);
+  await expect(swatches.first()).toHaveAccessibleName('Paint with #2050a0');
+
+  await swatches.nth(1).click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.colour)).toBe('#b03030');
+  await expect(page.locator('#paint-colour')).toHaveValue('#b03030');
+
+  // Undone steps are not in the history, so their colours leave the row.
+  await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    await view.undo();
+    await view.undo();
+  });
+  await expect(swatches).toHaveCount(1);
+  await expect(swatches.first()).toHaveAttribute('data-colour', '#b03030');
+});
