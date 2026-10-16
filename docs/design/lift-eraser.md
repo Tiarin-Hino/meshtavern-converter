@@ -1,6 +1,6 @@
 # Design: an eraser that lifts a step and shows the paint beneath it (#137)
 
-Status: design and build by Opus 5.5, 2026-10-16 (the PM said to go on without a Fable pass) · Issue: #137 · Builds on: `docs/design/painting-engine.md` (#127, §5 the passes, §8 undo and redo), `docs/design/dry-brush-crests.md` (#133)
+Status: design and build by Opus 5.5, 2026-10-16 (the PM said to go on without a Fable pass); "top layer only" (§3) decided by the PM on PR #175, 2026-10-16 · Issue: #137 · Builds on: `docs/design/painting-engine.md` (#127, §5 the passes, §8 undo and redo), `docs/design/dry-brush-crests.md` (#133)
 
 Every number and name marked _(proposal)_ is the PM's to change.
 
@@ -18,7 +18,7 @@ A new tool, **`lift`** _(proposal: the painter's word for taking paint off again
 
 The PM's approach says "the paint as replayed without that step". Taken literally across the whole coverage, that is a replay of every step after `i` without `i`, and a lift step among them would need its own replay without its own step, inside that replay: the cost grows with every lift in the history, without a bound the undo schedule (§8 of the engine's note) can hold.
 
-The stamp gives the same bytes without any of it where it matters: at a texel whose stamp is `i`, no step after `i` changed it, so the paint there is step `i` applied to the paint before `i`, and the paint without `i` is exactly the paint before `i`, which the keyframe holds. Texels where a later step lies over step `i` (a wash over the stray stroke) are left as they are; the person lifts the wash first (its stamp is newer, so a lift started on it takes it), then the stroke under it. So one lift stroke takes away one layer, the top one where it starts, and only where that layer is still on top. **This is a narrowing of the PM's wording, asked on the PR**: if the PM wants a lift to reach under a later layer, the build needs the replay without the step and a bound on the lifts it replays (§9).
+The stamp gives the same bytes without any of it where it matters: at a texel whose stamp is `i`, no step after `i` changed it, so the paint there is step `i` applied to the paint before `i`, and the paint without `i` is exactly the paint before `i`, which the keyframe holds. Texels where a later step lies over step `i` (a wash over the stray stroke) are left as they are; the person lifts the wash first (its stamp is newer, so a lift started on it takes it), then the stroke under it. So one lift stroke takes away one layer, the top one where it starts, and only where that layer is still on top. **This narrows the PM's wording; the PM chose it on PR #175 (2026-10-16): top layer only.** A lift that reaches under a later layer would need the replay without the step and a bound on the lifts it replays (§9).
 
 A texel whose bytes a later step left unchanged (a dry brush whose mask was 0 there, a stroke of the same colour at full opacity over itself) keeps its stamp: "changed" is the bytes, compared in the stamp pass.
 
@@ -95,6 +95,6 @@ A refused lift stroke draws nothing and leaves no step. `PAINT_COPY.lift` holds 
 
 ## 9. When to stop and ask
 
-- **The PM wants a lift to reach under a later layer** (§3): the replay without the step over the whole coverage, with a rule for lift steps inside that replay. Ask before building it.
+- **A lift that reaches under a later layer** (§3) is not wanted (PM decision on PR #175, 2026-10-16: top layer only). If that changes: the replay without the step over the whole coverage, with a rule for lift steps inside that replay; ask before building it.
 - **The stamp pass's equality test misses on a GPU** (the decoded values of equal bytes compare unequal): compare the encoded bytes (`round(x × 255)` after encoding back) instead; if that also misses, ask.
 - **Memory**: if pinned keyframes on the phone matter more than lifting many steps, a cap on pins (refusing with "too long ago" past it) is the fallback; the PM's call.
