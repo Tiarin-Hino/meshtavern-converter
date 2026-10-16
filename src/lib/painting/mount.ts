@@ -18,7 +18,7 @@ import {
   type PaintStroke,
   type ToolId,
 } from '../pipeline/brush';
-import { TriangleBvh } from '../pipeline/bvh';
+import { TriangleBvh, type SurfaceHit } from '../pipeline/bvh';
 import {
   fillRegion as floodRegion,
   triangleAdjacency,
@@ -45,6 +45,8 @@ import {
   FACING_MIN_COS,
   PAINT_DILATION_RINGS,
   PaintPasses,
+  stampedStep,
+  type Keyframe,
   type PaintSurface,
 } from './passes';
 import { KEYFRAME_EVERY, PaintHistory, UNDO_STEPS } from './history';
@@ -67,6 +69,8 @@ export const BRUSH_MIN_MM = 0.5;
 export const BRUSH_MAX_MM = 16;
 /** The cursor ring is never drawn smaller than this, in CSS pixels. _(proposal)_ */
 export const CURSOR_MIN_PX = 4;
+/** A lift stroke's first point is a hit on the surface: its texel is found within this, in mm (#137). */
+const LIFT_REACH_MM = 0.01;
 /** A frame longer than this, in ms, is counted as slow: 30 frames a second. _(proposal)_ */
 export const FRAME_BUDGET_MS = 33;
 
@@ -107,6 +111,14 @@ export interface PaintPerf {
   slow: number;
 }
 
+/**
+ * What a lift stroke found under its start (#137, design note `docs/design/lift-eraser.md` §7): the
+ * step it takes away, as an index into `history()`, or why it takes nothing: no step of this
+ * session changed the paint there (bare, or the paint the view was opened with), or the step that
+ * did is older than undo reaches. A refused lift stroke draws nothing and leaves no step.
+ */
+export type LiftOutcome = { lifted: number } | { refused: 'nothing-painted' | 'too-long-ago' };
+
 export interface PaintingState {
   open: boolean;
   tool: ToolId;
@@ -122,6 +134,8 @@ export interface PaintingState {
   painting: boolean;
   /** The frame counter of the last stroke (§11.3). */
   perf: PaintPerf;
+  /** What the last lift stroke since `open` found under its start (#137); null before the first. */
+  lift: LiftOutcome | null;
 }
 
 export interface PaintingView {
@@ -197,6 +211,8 @@ interface LiveStroke {
   drawn: number;
   /** The last dab laid, for spacing the next samples; null after a miss. */
   last: number[] | null;
+  /** A lift stroke that found nothing to take away (#137): it draws nothing and leaves no step. */
+  refused: boolean;
   /** Frame times from the first dab on (§11.3). */
   frames: number[];
 }
@@ -212,7 +228,8 @@ class Painting implements PaintingView {
   private live: LiveStroke | null = null;
   /** The steps and the keyframes (§8): made at `open`. */
   private timeline: PaintHistory | null = null;
-  private readonly keyframes = new Map<number, THREE.WebGLRenderTarget>();
+  private readonly keyframes = new Map<number, Keyframe>();
+  private lift: LiftOutcome | null = null;
   private tool: ToolId = 'flat';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
   private colour = DEFAULT_PAINT_COLOUR;
@@ -262,6 +279,7 @@ class Painting implements PaintingView {
       regions: this.opened?.regions ? ['base', 'figure'] : [],
       painting: this.live !== null,
       perf: this.perf,
+      lift: this.lift,
     };
   }
 
@@ -338,13 +356,16 @@ class Painting implements PaintingView {
     this.timeline = new PaintHistory({
       snapshot: (at) => this.keyframes.set(at, this.passes.snapshot()),
       restore: (at) => this.passes.restore(this.keyframes.get(at)!),
-      apply: (step) => this.replay(step),
+      apply: (step, index) => this.replay(step, index),
       drop: (at) => {
-        this.keyframes.get(at)?.dispose();
+        const keyframe = this.keyframes.get(at);
+        keyframe?.paint.dispose();
+        keyframe?.stamp.dispose();
         this.keyframes.delete(at);
       },
     });
     this.perf = NO_PERF;
+    this.lift = null;
     this.scene.show(shown, [size.x, size.y, size.z]);
     this.passes.warm(this.scene.strokeCamera(), TOOL_IDS);
     await this.scene.nextFrame();
@@ -426,7 +447,7 @@ class Painting implements PaintingView {
       brush: { ...this.brush },
       seed,
     };
-    this.replay(step);
+    this.replay(step, this.timeline.applied);
     this.timeline.push(step);
     this.emit();
     await this.scene.nextFrame();
@@ -495,11 +516,7 @@ class Painting implements PaintingView {
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null {
     const hit = this.hitAt(x, y);
     if (!hit || !this.opened) return null;
-    const [u, v] = uvAt(this.opened.mesh, hit.triangle, hit.point);
-    const texel: [number, number] = [
-      Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(u * PAINT_SIZE))),
-      Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(v * PAINT_SIZE))),
-    ];
+    const texel = texelOf(this.opened.mesh, hit.triangle, hit.point);
     return { texel, point: hit.point, triangle: hit.triangle };
   }
 
@@ -555,8 +572,12 @@ class Painting implements PaintingView {
     if (!this.opened) return;
     const tool = this.tool;
     if (tool === 'fill') throw new RangeError('The fill tool fills; it does not stroke');
+    // A lift finds its step before anything is drawn: making its keyframe may replay steps.
+    const lift = tool === 'lift' ? this.findLift(first.point) : null;
+    const lifted = lift && 'lifted' in lift ? lift.lifted : null;
     const camera = this.scene.strokeCamera();
     this.passes.beginStroke(camera);
+    if (lifted !== null) this.passes.lift(this.keyframes.get(lifted)!, lifted);
     this.scene.controls.enabled = touch;
     this.live = {
       step: {
@@ -566,13 +587,34 @@ class Painting implements PaintingView {
         brush: { ...this.brush },
         camera,
         dabs: [],
+        ...(lifted !== null ? { lifts: lifted } : {}),
       },
       drawn: 0,
       last: null,
+      refused: lift !== null && lifted === null,
       frames: [],
     };
     this.extendLive([first]);
     this.emit();
+  }
+
+  /**
+   * The step a lift stroke starting at `point` takes away (#137, design note
+   * `docs/design/lift-eraser.md` §2): the newest step that changed the texel there, by the stamp
+   * map, with a keyframe of the paint before it pinned in the history. Or why there is none.
+   */
+  private findLift(point: Vec3): LiftOutcome {
+    const opened = this.opened!;
+    const timeline = this.timeline!;
+    const hit: SurfaceHit = { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 };
+    opened.bvh.closest(hit, point[0], point[1], point[2], LIFT_REACH_MM ** 2);
+    const stamp =
+      hit.triangle < 0 ? null : this.passes.readStamp(...texelOf(opened.mesh, hit.triangle, point));
+    const index = stamp ? stampedStep(stamp, timeline.applied) : null;
+    if (index === null) this.lift = { refused: 'nothing-painted' };
+    else if (!timeline.pin(index)) this.lift = { refused: 'too-long-ago' };
+    else this.lift = { lifted: index };
+    return this.lift;
   }
 
   /** More pointer samples: dabs spaced along them; a miss lifts the brush. */
@@ -596,7 +638,7 @@ class Painting implements PaintingView {
   /** The dabs laid since the last frame into the stroke layer, and the stroke onto the paint. */
   private drawLive(): void {
     const live = this.live;
-    if (!live) return;
+    if (!live || live.refused) return;
     const count = live.step.dabs.length / 4;
     if (live.drawn >= count) return;
     const { step } = live;
@@ -612,10 +654,13 @@ class Painting implements PaintingView {
     this.drawLive();
     this.live = null;
     this.scene.controls.enabled = true;
-    if (live.step.dabs.length === 0) this.passes.cancel();
-    else {
-      this.passes.commit();
-      this.timeline?.push(live.step);
+    if (live.step.dabs.length === 0 || live.refused || !this.timeline) {
+      this.passes.cancel();
+      // A lift that leaves no step leaves no keyframe pinned for it.
+      this.timeline?.prune();
+    } else {
+      this.passes.commit(this.timeline.applied, live.step.tool);
+      this.timeline.push(live.step);
     }
     this.perf = perfOf(live.frames);
     this.emit();
@@ -623,13 +668,16 @@ class Painting implements PaintingView {
 
   /**
    * A step applied again, exactly as the first time (§8): a stroke renders its depth map from its
-   * own camera at its own viewport and draws all its dabs; the result is committed.
+   * own camera at its own viewport and draws all its dabs (a lift toward the keyframe the history
+   * keeps for it, #137); the result is committed as step `index`.
    */
-  private replay(step: PaintStep): void {
+  private replay(step: PaintStep, index: number): void {
     const opened = this.opened;
     if (!opened) return;
     if (step.kind === 'stroke') {
       this.passes.beginStroke(step.camera);
+      const beneath = step.lifts === undefined ? undefined : this.keyframes.get(step.lifts);
+      if (beneath) this.passes.lift(beneath, step.lifts!);
       this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
     } else {
       const triangles = floodRegion(opened.mesh, step.seed, {
@@ -641,7 +689,7 @@ class Painting implements PaintingView {
       this.passes.drawRegion(opened.mesh, triangles);
     }
     this.passes.composite(step.tool, parseHexColour(step.colour), step.brush);
-    this.passes.commit();
+    this.passes.commit(index, step.tool);
   }
 
   /** The stroke on the canvas is dropped (a second finger arrived, the pointer was cancelled): no step. */
@@ -651,6 +699,7 @@ class Painting implements PaintingView {
     this.strokePointer = null;
     this.scene.controls.enabled = true;
     this.passes.cancel();
+    this.timeline?.prune();
     this.emit();
   }
 
@@ -756,6 +805,15 @@ function ownTexture(texture: THREE.Texture): THREE.Texture | null {
     return createDetailTexture(data, width);
   }
   return null;
+}
+
+/** The texel under a point on triangle t. */
+function texelOf(mesh: IndexedMesh, t: number, point: Vec3): [number, number] {
+  const [u, v] = uvAt(mesh, t, point);
+  return [
+    Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(u * PAINT_SIZE))),
+    Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(v * PAINT_SIZE))),
+  ];
 }
 
 /** The texture coordinates of a point on triangle t. */

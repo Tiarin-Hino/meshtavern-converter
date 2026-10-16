@@ -23,8 +23,8 @@ export interface HistoryBackend {
   snapshot(at: number): void;
   /** Makes the paint the copy kept after `at` steps. */
   restore(at: number): void;
-  /** Applies a step to the paint, as it was applied the first time. */
-  apply(step: PaintStep): void;
+  /** Applies a step to the paint, as it was applied the first time; `index` is its place in the history. */
+  apply(step: PaintStep, index: number): void;
   /** Lets the copy kept after `at` steps go. */
   drop(at: number): void;
 }
@@ -109,14 +109,14 @@ export class PaintHistory {
     this.cursor--;
     const from = this.nearest(this.cursor);
     this.backend.restore(from);
-    for (let k = from; k < this.cursor; k++) this.backend.apply(this.steps[k]!);
+    for (let k = from; k < this.cursor; k++) this.backend.apply(this.steps[k]!, k);
     return this.cursor - from;
   }
 
   /** Puts the next undone step back: false when there was none. */
   redo(): boolean {
     if (this.undone === 0) return false;
-    this.backend.apply(this.steps[this.cursor]!);
+    this.backend.apply(this.steps[this.cursor]!, this.cursor);
     this.cursor++;
     this.keep();
     return true;
@@ -139,7 +139,7 @@ export class PaintHistory {
     this.backend.snapshot(TEMPORARY);
     const from = this.nearest(at);
     this.backend.restore(from);
-    for (let k = from; k < at; k++) this.backend.apply(this.steps[k]!);
+    for (let k = from; k < at; k++) this.backend.apply(this.steps[k]!, k);
     this.add(at);
     this.backend.restore(TEMPORARY);
     this.backend.drop(TEMPORARY);
