@@ -111,14 +111,21 @@ export interface FillOptions {
   regions?: PaintRegions | null;
   /** Built once per mini (`triangleAdjacency`); made here when left out. */
   adjacency?: TriangleAdjacency;
+  /**
+   * The mask's cut (#138, design note `docs/design/paint-mask.md` §5): a byte a triangle, non-zero
+   * where the mask covers the triangle's middle. A cut triangle bounds a picked fill: it is never
+   * entered, and a seed on one fills nothing. Ready regions take no cut.
+   */
+  cut?: Uint8Array | null;
 }
 
 /**
  * The triangles a fill covers, in ascending order. A `picked` seed floods from its triangle
  * across every shared edge that is not a bound: an edge is a bound when the angle between its
  * two faces exceeds the angle bound, or when both its corners' cavity (`mesh.cavity`, raw) lies
- * below the crease bound. A `base` or `figure` seed takes the ready region's triangles, no flood;
- * it needs `regions`, and a mini without them is refused.
+ * below the crease bound, and a triangle the mask cuts is never entered (#138). A `base` or
+ * `figure` seed takes the ready region's triangles, no flood; it needs `regions`, and a mini
+ * without them is refused.
  */
 export function fillRegion(mesh: IndexedMesh, seed: FillSeed, options: FillOptions): Uint32Array {
   const triangles = mesh.indices.length / 3;
@@ -133,6 +140,10 @@ export function fillRegion(mesh: IndexedMesh, seed: FillSeed, options: FillOptio
   }
   if (!(seed.triangle >= 0 && seed.triangle < triangles))
     throw new RangeError(`No triangle ${seed.triangle} to fill from`);
+  const cut = options.cut ?? null;
+  if (cut && cut.length !== triangles)
+    throw new RangeError('The cut is not this mesh’s: one byte per triangle');
+  if (cut?.[seed.triangle]) return new Uint32Array(0);
   const { start, neighbours, edgeA, edgeB, faceNormals } =
     options.adjacency ?? triangleAdjacency(mesh);
   const tolerance = Math.max(0, Math.min(1, options.tolerance));
@@ -149,7 +160,7 @@ export function fillRegion(mesh: IndexedMesh, seed: FillSeed, options: FillOptio
     const t = queue[head++]!;
     for (let k = start[t]!; k < start[t + 1]!; k++) {
       const n = neighbours[k]!;
-      if (inside[n]) continue;
+      if (inside[n] || cut?.[n]) continue;
       const cos =
         faceNormals[t * 3]! * faceNormals[n * 3]! +
         faceNormals[t * 3 + 1]! * faceNormals[n * 3 + 1]! +

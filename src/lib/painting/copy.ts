@@ -15,6 +15,9 @@ export const PAINT_COPY = {
     ink: 'Ink',
     dry: 'Dry brush',
     airbrush: 'Airbrush',
+    mask: 'Mask',
+    unmask: 'Unmask',
+    'mask-fill': 'Mask fill',
   },
   /** What each tool does, a sentence or two for a panel to show beside it (#128). */
   toolHints: {
@@ -27,6 +30,10 @@ export const PAINT_COPY = {
     dry: 'Catches the highest points under the brush where the stroke starts, and anything as high along it. More pressure reaches further down from them, and is needed for very low detail. Use it to highlight.',
     airbrush:
       'A soft spray that builds up with every pass. Spraying from above reaches only surfaces that face up: a zenithal highlight in one pass.',
+    mask: 'Paints a mask, like liquid mask on a real mini: no tool changes the paint under it until you take it away.',
+    unmask: 'Takes the mask away where it goes, so the tools reach the surface there again.',
+    'mask-fill':
+      'Masks the surface you tap, up to a fold, a crease or the mask already there. Tolerance lets it go further.',
   },
   sliders: {
     sizeMm: 'Size',
@@ -51,6 +58,14 @@ export const PAINT_COPY = {
   lift: {
     nothingPainted: 'Nothing painted here to lift: the paint the mini came with stays.',
     tooLongAgo: 'Painted too long ago to lift: only the most recent steps can be taken away.',
+  },
+  /** The mask's whole changes and its tint (#138): for a panel's buttons. */
+  mask: {
+    clear: 'Clear mask',
+    invert: 'Invert mask',
+    show: 'Show mask',
+    base: 'Mask the base',
+    figure: 'Mask the figure',
   },
   /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
   recent: { label: 'Colours used', swatch: 'Paint with' },

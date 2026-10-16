@@ -14,6 +14,8 @@ import {
   unitDirection,
   type BrushSettings,
   type DabHit,
+  type FillToolId,
+  type PaintFill,
   type PaintStep,
   type ToolId,
 } from './brush';
@@ -353,7 +355,7 @@ describe('recentColours', () => {
     far: 1000,
     viewport: [800, 600] as [number, number],
   };
-  const stroke = (colour: string, tool: Exclude<ToolId, 'fill'> = 'flat'): PaintStep => ({
+  const stroke = (colour: string, tool: Exclude<ToolId, FillToolId> = 'flat'): PaintStep => ({
     kind: 'stroke',
     tool,
     colour,
@@ -395,6 +397,18 @@ describe('recentColours', () => {
 
   it('leaves the lift out too (#137): it brings back colours, it lays none', () => {
     expect(recentColours([stroke('#111111'), stroke('#222222', 'lift')])).toEqual(['#111111']);
+  });
+
+  it('leaves the mask’s steps out (#138): they lay no colour', () => {
+    const steps: PaintStep[] = [
+      stroke('#111111'),
+      stroke('#222222', 'mask'),
+      stroke('#333333', 'unmask'),
+      { ...(fill('#444444') as PaintFill), tool: 'mask-fill' },
+      { kind: 'mask', change: 'invert' },
+      { kind: 'mask', change: 'clear' },
+    ];
+    expect(recentColours(steps)).toEqual(['#111111']);
   });
 
   it('stops at the limit, the newest kept', () => {

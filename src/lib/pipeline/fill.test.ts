@@ -125,6 +125,53 @@ describe('fillRegion', () => {
     expect([...fillRegion(flat, seed, { tolerance: 1 })]).toEqual([0, 1, 2, 3]);
   });
 
+  it('stops at triangles the mask cuts, and fills nothing from one (#138)', () => {
+    // A strip of four squares along x: cut the second, and a fill from the first stays on it.
+    const positions: number[] = [];
+    for (let k = 0; k <= 4; k++) positions.push(k, 0, 0, k, 0, 1);
+    const indices: number[] = [];
+    for (let k = 0; k < 4; k++) {
+      const [a, b, c, d] = [k * 2, k * 2 + 1, k * 2 + 2, k * 2 + 3];
+      indices.push(a, b, d, a, d, c);
+    }
+    const strip: IndexedMesh = {
+      positions: new Float32Array(positions),
+      indices: new Uint32Array(indices),
+    };
+    const seed: FillSeed = { kind: 'picked', triangle: 0, point: [0.2, 0, 0.5] };
+    expect(fillRegion(strip, seed, { tolerance: 0 }).length).toBe(8);
+    const cut = new Uint8Array(8);
+    cut[2] = cut[3] = 1;
+    expect([...fillRegion(strip, seed, { tolerance: 0, cut })]).toEqual([0, 1]);
+    expect([...fillRegion(strip, { ...seed, triangle: 6 }, { tolerance: 0, cut })]).toEqual([
+      4, 5, 6, 7,
+    ]);
+    expect([...fillRegion(strip, { ...seed, triangle: 2 }, { tolerance: 0, cut })]).toEqual([]);
+    expect(() => fillRegion(strip, seed, { tolerance: 0, cut: new Uint8Array(3) })).toThrow(
+      RangeError,
+    );
+  });
+
+  it('cuts the figure’s hand off at a masked band across its arm (#138)', () => {
+    // The chest's fill at tolerance 1, then again with a band of triangles cut across the body
+    // 12–13 mm up: what lies above the band on the far side is no longer reached.
+    const seed = nearest([0, 14, 4], (t) => adjacency.faceNormals[t * 3 + 2]! > 0.5);
+    const picked: FillSeed = { kind: 'picked', triangle: seed, point: centroid(seed) };
+    const whole = fillRegion(table, picked, { tolerance: 1, adjacency });
+    const cut = new Uint8Array(table.indices.length / 3);
+    for (let t = 0; t < cut.length; t++) {
+      const y = centroid(t)[1];
+      if (y > 11 && y < 12.5) cut[t] = 1;
+    }
+    const cutRegion = fillRegion(table, picked, { tolerance: 1, adjacency, cut });
+    expect(cutRegion.length).toBeLessThan(whole.length);
+    expect(cutRegion.length).toBeGreaterThan(20);
+    for (const t of cutRegion) {
+      expect(cut[t]).toBe(0);
+      expect(centroid(t)[1]).toBeGreaterThan(11);
+    }
+  });
+
   it('takes a ready region whole, and refuses one the mini does not have', () => {
     const base = new Uint8Array(table.indices.length / 3);
     for (let t = 0; t < base.length; t++) base[t] = ofDisc(t) ? 1 : 0;

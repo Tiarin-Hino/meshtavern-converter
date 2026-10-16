@@ -27,9 +27,10 @@ export interface ToolPass {
   blend: 'max' | 'add';
   /**
    * Onto the paint: the colour over it, alpha taken away, or the paint beneath a step brought back
-   * where that step is on top (#137, `docs/design/lift-eraser.md`).
+   * where that step is on top (#137, `docs/design/lift-eraser.md`). Or onto the mask instead (#138,
+   * `docs/design/paint-mask.md`): mask laid (`mask`) or taken away (`unmask`).
    */
-  composite: 'over' | 'erase' | 'lift';
+  composite: 'over' | 'erase' | 'lift' | 'mask' | 'unmask';
   /**
    * The body of `float mtMask( float cavity, float occlusion, vec3 normal, float reference )`:
    * cavity −1 crease … +1 edge (the detail texture's, as the material decodes it), occlusion 0
@@ -54,6 +55,9 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
   eraser: { blend: 'max', composite: 'erase', mask: 'return 1.0;' },
   lift: { blend: 'max', composite: 'lift', mask: 'return 1.0;' },
   fill: { blend: 'max', composite: 'over', mask: 'return 1.0;' },
+  mask: { blend: 'max', composite: 'mask', mask: 'return 1.0;' },
+  unmask: { blend: 'max', composite: 'unmask', mask: 'return 1.0;' },
+  'mask-fill': { blend: 'max', composite: 'mask', mask: 'return 1.0;' },
   wash: {
     blend: 'max',
     composite: 'over',
@@ -82,6 +86,10 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
     hardness: AIR_HARDNESS,
   },
 };
+
+/** True for a pass onto the mask, not the paint (#138). */
+export const ontoMask = (pass: ToolPass): boolean =>
+  pass.composite === 'mask' || pass.composite === 'unmask';
 
 /** A tool's pass; a name that is no tool (a string from a consumer's JavaScript) is refused. */
 export function toolPass(tool: ToolId): ToolPass {

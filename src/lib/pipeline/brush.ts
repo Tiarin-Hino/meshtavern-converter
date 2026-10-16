@@ -24,7 +24,9 @@ export const PAINT_SIZE = 1024;
 
 /**
  * The tools, in the order a panel offers them. `wash` … `airbrush` are the hobby brushes of #128;
- * `lift` takes a step away again where it is the top layer, showing the paint beneath it (#137).
+ * `lift` takes a step away again where it is the top layer, showing the paint beneath it (#137);
+ * `mask`, `unmask` and `mask-fill` change the mask that protects the surface from every other
+ * tool (#138, design note `docs/design/paint-mask.md`).
  */
 export const TOOL_IDS = [
   'flat',
@@ -35,8 +37,25 @@ export const TOOL_IDS = [
   'ink',
   'dry',
   'airbrush',
+  'mask',
+  'unmask',
+  'mask-fill',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
+
+/** The tools that change the mask, not the paint (#138): a brush that lays mask, an eraser that takes it away, a fill. */
+export const MASK_TOOL_IDS = ['mask', 'unmask', 'mask-fill'] as const;
+export type MaskToolId = (typeof MASK_TOOL_IDS)[number];
+/** The tools a tap fills with (#138): the paint's fill and the mask's. */
+export const FILL_TOOL_IDS = ['fill', 'mask-fill'] as const;
+export type FillToolId = (typeof FILL_TOOL_IDS)[number];
+
+/** True for a tool that changes the mask (#138). */
+export const isMaskTool = (tool: ToolId): tool is MaskToolId =>
+  (MASK_TOOL_IDS as readonly ToolId[]).includes(tool);
+/** True for a tool a tap fills with (#138). */
+export const isFillTool = (tool: ToolId): tool is FillToolId =>
+  (FILL_TOOL_IDS as readonly ToolId[]).includes(tool);
 
 /** Every slider there is; each tool reads the ones it has (§6). The consumer shows only those. */
 export interface BrushSettings {
@@ -54,6 +73,11 @@ export interface BrushSettings {
 
 /** The colour a painting view starts with: paint, not the theme's (#143 moved it here from the view). _(proposal)_ */
 export const DEFAULT_PAINT_COLOUR = '#b03030';
+
+/** The tint the mask is shown with over the surface (#138): the blue of liquid mask. _(proposal)_ */
+export const MASK_TINT = '#3a78d8';
+/** How much of the tint a fully masked texel shows over the mini. _(proposal)_ */
+export const MASK_TINT_STRENGTH = 0.45;
 
 /** _(proposal)_ */
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -80,8 +104,9 @@ export interface StrokeCamera {
 
 export interface PaintStroke {
   kind: 'stroke';
-  tool: Exclude<ToolId, 'fill'>;
-  /** sRGB hex, as the look's base. */
+  /** A paint tool, or the mask's brush and eraser (`mask`, `unmask`, #138). */
+  tool: Exclude<ToolId, FillToolId>;
+  /** sRGB hex, as the look's base; never used by a mask stroke. */
   colour: string;
   brush: BrushSettings;
   camera: StrokeCamera;
@@ -100,7 +125,8 @@ export type FillSeed =
 
 export interface PaintFill {
   kind: 'fill';
-  tool: 'fill';
+  /** The paint's fill, or the mask's (`mask-fill`, #138). */
+  tool: FillToolId;
   colour: string;
   /** `opacity` and `tolerance` are read; the region is found again from the seed on replay. */
   brush: BrushSettings;
@@ -116,8 +142,25 @@ export interface PaintRegions {
   method: 'pair' | 'plain' | 'disc';
 }
 
+/** The mask changed whole (#138): cleared, or inverted ("paint only the face"). */
+export interface MaskChange {
+  kind: 'mask';
+  change: 'clear' | 'invert';
+}
+
 /** One step of the history: what undo takes back and redo puts again. */
-export type PaintStep = PaintStroke | PaintFill;
+export type PaintStep = PaintStroke | PaintFill | MaskChange;
+
+/**
+ * The mask as pixels (#138): PAINT_SIZE square over the unwrap as the paint, one byte a texel,
+ * 0 open … 255 fully masked, row 0 at v = 0. Kept by the consumer beside the paint, so painting
+ * continues later with the same mask.
+ */
+export interface PaintMask {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
 
 /** How many colours `recentColours` gives by default: a row of swatches beside a colour picker (#136). _(proposal)_ */
 export const RECENT_COLOURS_MAX = 12;
@@ -126,7 +169,8 @@ export const RECENT_COLOURS_MAX = 12;
  * The colours used in a history, newest first, each once (#136): what a panel offers as swatches
  * to pick a colour from earlier again. Built from the steps alone, so a consumer that kept them
  * shows the same list after reopening a mini. Eraser and lift strokes are left out: their colour
- * is never shown (PM decision on #136, 2026-10-13; the lift since #137). Colours are compared and given in lower case, so
+ * is never shown (PM decision on #136, 2026-10-13; the lift since #137), and so are the mask's
+ * steps (#138). Colours are compared and given in lower case, so
  * `#B03030` and `#b03030` are one swatch.
  */
 export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_MAX): string[] {
@@ -134,7 +178,8 @@ export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_
   const seen = new Set<string>();
   for (let k = steps.length - 1; k >= 0 && colours.length < max; k--) {
     const step = steps[k]!;
-    if (step.tool === 'eraser' || step.tool === 'lift') continue;
+    if (step.kind === 'mask' || step.tool === 'eraser' || step.tool === 'lift') continue;
+    if (isMaskTool(step.tool)) continue;
     const colour = step.colour.toLowerCase();
     if (seen.has(colour)) continue;
     seen.add(colour);
@@ -307,8 +352,8 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * `src/lib/painting/tools.ts`, which `tools.test.ts` keeps in step. `cavity` is the detail
  * texture's, decoded as the material does (−1 crease … +1 edge), `occlusion` the vertex
  * occlusion (0 buried … 1 open), `normal` the detail texture's object-space normal (not
- * necessarily of unit length). The flat brush, the eraser, the lift and the fill paint every
- * texel they cover; the hobby brushes of #128 read the surface, with their constants beside the look's:
+ * necessarily of unit length). The flat brush, the eraser, the lift, the fill and the mask's
+ * tools (#138) cover every texel they reach; the hobby brushes of #128 read the surface, with their constants beside the look's:
  *
  * - `wash`: pools where the cavity is negative and the occlusion low, tints a flat open surface
  *   faintly (`WASH_FLAT`) and evenly, and is shed by a raised edge (`WASH_LIFT`).
@@ -336,6 +381,9 @@ export function toolMask(
     case 'eraser':
     case 'lift':
     case 'fill':
+    case 'mask':
+    case 'unmask':
+    case 'mask-fill':
       return 1;
     case 'wash': {
       const pool = saturate(Math.max(-cavity, 0) + WASH_OCCLUSION * (1 - occlusion));
