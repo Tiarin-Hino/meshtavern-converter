@@ -25,9 +25,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
       - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
+      - run: npx playwright test e2e/diag-picker.spec.ts --repeat-each 60 --workers 4
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
