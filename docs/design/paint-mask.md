@@ -72,7 +72,7 @@ interface PaintingView {
 }
 ```
 
-- **The tint** is drawn by the baked material from `maskLive` (`BakedMaterialOptions.tint`: a texture, a colour, a strength), after the look: `mix(colour, MASK_TINT, mask × MASK_TINT_STRENGTH)` _(proposals: `#3a78d8`, the blue of liquid mask, at 0.45)_. The tint colour is paint-like data, beside `DEFAULT_PAINT_COLOUR` in `brush.ts`, one of the colour check's allowed files. Shown or not is the view's state, not a step.
+- **The tint** is drawn by the baked material from `maskLive` (`BakedMaterialOptions.tint`: a texture, a colour, a strength), after the look: `mix(colour, MASK_TINT, mask × MASK_TINT_STRENGTH)` _(proposals: `#3a78d8`, the blue of liquid mask, at 0.45)_. The tint colour is scene data, beside `PAIR_COLOURS` in `src/lib/three/scene-colours.ts` (the colour check's allowed file there), exported from the painting entry (as built: first beside `DEFAULT_PAINT_COLOUR` in `brush.ts`, moved on review). Shown or not is the view's state, not a step.
 - `PAINT_COPY` gets the tools' names and hints, and `mask: { clear, invert, show }` _(proposals)_.
 
 ## 7. Build order and proof

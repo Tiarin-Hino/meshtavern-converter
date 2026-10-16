@@ -22,7 +22,7 @@ The PM asked for it after testing the hobby brushes (#128): mask the face, then 
 - **The keyframes hold the mask.** Undo restores a keyframe and replays, so the mask must be in the keyframe for a mask step to be undone; it is 1 MB more each. Mask steps write no stamp (they change no paint), so a lift never takes one away.
 - **The fill's cut on the GPU.** The flood runs on the CPU over triangles, the mask lives on the GPU, and an undo replays a fill synchronously. So at every picked fill the view draws one point per triangle, at the texture coordinates of its middle, into a small target (`⌈√T⌉` texels square), each 1 where the mask there is at least `MASK_CUT` (0.5), and reads that back at once. That is a few hundred kilobytes once per fill instead of the whole 1 MB mask, and in RGBA, which every GPU can read back. `fillRegion` (pipeline, Node-tested) only takes the bytes as `cut`.
 - **In and out.** `open` takes the mask's bytes (an R8 upload); `mask()` draws it into an RGBA scratch target and reads that, because reading R8 back is not guaranteed on every GPU. `paint()` never contains it.
-- **The tint** is an option of the baked material (`tint`: a texture and a colour with a strength), mixed in after the look, so it is lit like the mini. Its colour is paint-like data beside the default paint colour in `brush.ts`, not a theme role.
+- **The tint** is an option of the baked material (`tint`: a texture and a colour with a strength), mixed in after the look, so it is lit like the mini. Its colour is scene data beside the patches' `PAIR_COLOURS` in `scene-colours.ts`, not a theme role (first put beside the paint colour in `brush.ts`; moved on review, since the tint is an overlay, not paint).
 
 ## Problems and how we solved them
 

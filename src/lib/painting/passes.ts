@@ -1019,9 +1019,9 @@ export class PaintPasses {
   composite(tool: ToolId, colour: readonly [number, number, number], brush: BrushSettings): void {
     const pass = toolPass(tool);
     // The mask's own tools (#138): onto `maskLive`.
-    if (pass.composite === 'mask' || pass.composite === 'unmask') {
+    if (ontoMask(pass)) {
       this.maskUniforms.uOpacity.value = Math.max(0, Math.min(1, brush.opacity));
-      this.quad.material = this.maskMaterials[pass.composite];
+      this.quad.material = this.maskMaterials[pass.composite as 'mask' | 'unmask'];
       this.draw(this.maskLive, this.quadScene, false);
       return;
     }
@@ -1040,7 +1040,7 @@ export class PaintPasses {
     this.draw(this.live, this.quadScene, false);
   }
 
-  /** The mask changed whole (#138): cleared or inverted into `maskLive`, committed by `commit`. */
+  /** The mask changed whole (#138): cleared or inverted into `maskLive`, committed by `commitMask`. */
   changeMask(change: MaskChange['change']): void {
     this.maskChangeMaterial.uniforms.uInvert!.value = change === 'invert';
     this.quad.material = this.maskChangeMaterial;
@@ -1078,10 +1078,10 @@ export class PaintPasses {
    * Step `index` is final: the texels it changed take its stamp (a lift's: the stamp beneath where
    * it took the step away fully, #137), and `live` is the paint now.
    */
-  commit(index: number, tool: ToolId | 'mask-change'): void {
+  commit(index: number, tool: ToolId): void {
     // A step onto the mask (#138) changes no paint: no stamp, the mask committed.
-    if (tool === 'mask-change' || ontoMask(toolPass(tool))) {
-      this.renderer.copyTextureToTexture(this.maskLive.texture, this.mask.texture);
+    if (ontoMask(toolPass(tool))) {
+      this.commitMask();
       return;
     }
     const lift = toolPass(tool).composite === 'lift';
@@ -1100,6 +1100,11 @@ export class PaintPasses {
     }
     this.forgetBeneath();
     this.renderer.copyTextureToTexture(this.live.texture, this.paint.texture);
+  }
+
+  /** A step onto the mask is final (#138): `maskLive` is the mask now. */
+  commitMask(): void {
+    this.renderer.copyTextureToTexture(this.maskLive.texture, this.mask.texture);
   }
 
   /** The lift is over: no keyframe stays bound, as it may be dropped. */

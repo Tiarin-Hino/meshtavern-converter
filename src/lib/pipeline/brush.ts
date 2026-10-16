@@ -74,11 +74,6 @@ export interface BrushSettings {
 /** The colour a painting view starts with: paint, not the theme's (#143 moved it here from the view). _(proposal)_ */
 export const DEFAULT_PAINT_COLOUR = '#b03030';
 
-/** The tint the mask is shown with over the surface (#138): the blue of liquid mask. _(proposal)_ */
-export const MASK_TINT = '#3a78d8';
-/** How much of the tint a fully masked texel shows over the mini. _(proposal)_ */
-export const MASK_TINT_STRENGTH = 0.45;
-
 /** _(proposal)_ */
 export const DEFAULT_BRUSH: BrushSettings = {
   sizeMm: 2,
@@ -178,8 +173,13 @@ export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_
   const seen = new Set<string>();
   for (let k = steps.length - 1; k >= 0 && colours.length < max; k--) {
     const step = steps[k]!;
-    if (step.kind === 'mask' || step.tool === 'eraser' || step.tool === 'lift') continue;
-    if (isMaskTool(step.tool)) continue;
+    if (
+      step.kind === 'mask' ||
+      step.tool === 'eraser' ||
+      step.tool === 'lift' ||
+      isMaskTool(step.tool)
+    )
+      continue;
     const colour = step.colour.toLowerCase();
     if (seen.has(colour)) continue;
     seen.add(colour);

@@ -5,8 +5,6 @@ import {
   DEFAULT_BRUSH,
   DEFAULT_PAINT_COLOUR,
   isFillTool,
-  MASK_TINT,
-  MASK_TINT_STRENGTH,
   MOUSE_PRESSURE,
   PAINT_SIZE,
   TOOL_IDS,
@@ -42,6 +40,7 @@ import {
   updateLookUniforms,
 } from '../three/baked-material';
 import { ownCopy } from '../three/compressed-texture';
+import { MASK_TINT, MASK_TINT_STRENGTH } from '../three/scene-colours';
 import { PAINT_COPY, type PaintCopy } from './copy';
 import {
   BRUSH_DEPTH_MM,
@@ -71,6 +70,8 @@ export {
   PAINT_DILATION_RINGS,
   KEYFRAME_EVERY,
   UNDO_STEPS,
+  MASK_TINT,
+  MASK_TINT_STRENGTH,
 };
 
 /** The mask's tint is shown when a view is mounted (#138). _(proposal)_ */
@@ -231,8 +232,10 @@ interface Opened {
 }
 
 /** The tint's uniform (#138): the mask's colour, linear, and its strength, 0 while hidden. */
-const tintOf = (shown: boolean): THREE.Vector4 =>
-  new THREE.Vector4(...parseHexColour(MASK_TINT), shown ? MASK_TINT_STRENGTH : 0);
+const tintOf = (shown: boolean): THREE.Vector4 => {
+  const { r, g, b } = new THREE.Color(MASK_TINT);
+  return new THREE.Vector4(r, g, b, shown ? MASK_TINT_STRENGTH : 0);
+};
 
 /** The stroke on the canvas, not yet committed. */
 interface LiveStroke {
@@ -758,7 +761,7 @@ class Painting implements PaintingView {
     if (!opened) return;
     if (step.kind === 'mask') {
       this.passes.changeMask(step.change);
-      this.passes.commit(index, 'mask-change');
+      this.passes.commitMask();
       return;
     }
     if (step.kind === 'stroke') {
