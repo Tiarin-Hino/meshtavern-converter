@@ -1,6 +1,6 @@
 # The name (#147)
 
-Status: picked by the PM, checked against the registers, cased PolyWash (section 4) · Date: 2026-10-14 · Spec: `docs/specs/look-and-feel.md`, L5 · Issue: #147
+Status: picked by the PM, checked against the registers, cased PolyWash and kept after the Polymaker finding (section 4) · Date: 2026-10-14 · Spec: `docs/specs/look-and-feel.md`, L5 · Issue: #147
 
 The page's product name replaces the development name "MeshTavern Converter" wherever a person sees it. The PM picks the name; this file records the pick and the check behind it. The mark made from the name has its own record beside this one.
 
@@ -70,7 +70,8 @@ If the name has to be given up later, the order of the issue's comment stands: F
 ## 4. Decided after the check (PM, 2026-10-14)
 
 - **Casing: PolyWash**, with a capital W: the two halves, the polygon and the wash, stay visible. Everywhere a person sees the name it is written this way; the registers and stores above were searched without regard to case.
-- **The favicon's short form: "P".** Until the mark is traced, the favicon is the P set in the display face, as spec L2 allows for the placeholder.
+- **The favicon's short form: "P".** Until the mark is traced, the favicon is the P set in the display face, as spec L2 allows for the placeholder (`public/favicon.svg`, #145).
+- **PolyWash stays after the Polymaker finding (PM, 2026-10-16).** The resemblance to Polymaker's "Poly" family (section 2.4) was put to the PM with the lower-case "Polywash" as the alternative; the PM kept PolyWash, as #145 already ships it.
 - **The domain is registered later**, by the PM, with #47. Nothing was registered by this check: no domain, no GitHub organisation, no npm name.
 
 ## 5. Still the PM's
