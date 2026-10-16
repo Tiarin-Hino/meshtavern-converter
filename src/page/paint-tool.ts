@@ -1,6 +1,7 @@
 import type { Texture } from 'three';
 import {
   PAINT_SIZE,
+  recentColours,
   TOOL_IDS,
   type Albedo,
   type BrushSettings,
@@ -24,8 +25,8 @@ import {
  * step 5): the painting view mounted over the viewport for the converted mini, with a plain panel
  * of the tools, sliders, colour, regions, Undo, Redo, Save and Close. The test harness for the
  * engine's pixel tests and the PM's tool for judging the brushes (the hobby brushes of #128 with
- * their own sliders and the airbrush's direction, and the pipette of #135: Pick, then a tap on
- * the mini takes its colour); not the product page's (it is
+ * their own sliders and the airbrush's direction, the pipette of #135: Pick, then a tap on
+ * the mini takes its colour, and the colours used of #136, a swatch each); not the product page's (it is
  * `data-dev`, removed without ?dev). It uses the entry as any consumer would.
  */
 
@@ -89,6 +90,7 @@ interface Panel {
   tolerance: HTMLInputElement;
   direction: HTMLSelectElement;
   colour: HTMLInputElement;
+  recent: HTMLElement;
   pick: HTMLButtonElement;
   pickMode: HTMLSelectElement;
   base: HTMLButtonElement;
@@ -117,6 +119,7 @@ function findPanel(root: Document): Panel | null {
     tolerance: get('paint-tolerance')!,
     direction: get('paint-direction')!,
     colour: get('paint-colour')!,
+    recent: get('paint-recent')!,
     pick: get('paint-pick')!,
     pickMode: get('paint-pick-mode')!,
     base: get('paint-base')!,
@@ -145,6 +148,8 @@ export function createPaintTool(
   /** Pick is pressed: the next tap on the mini takes its colour instead of painting. */
   let picking = false;
   const panel = findPanel(document);
+  /** The history the swatches were last built for: applied and undone steps, rebuilt when it moves. */
+  let recentFor = '';
 
   const setPicking = (on: boolean): void => {
     picking = on;
@@ -175,6 +180,7 @@ export function createPaintTool(
     panel.opacityLabel.textContent = PAINT_COPY.sliders[sliders.opacity];
     panel.hint.textContent = PAINT_COPY.toolHints[state.tool];
     panel.colour.value = state.colour;
+    showRecent(state);
     panel.base.disabled = !state.regions.includes('base');
     panel.figure.disabled = !state.regions.includes('figure');
     panel.undo.disabled = state.steps === 0;
@@ -185,6 +191,29 @@ export function createPaintTool(
       frames > 0
         ? `Last stroke: ${frames} frames, median ${medianMs.toFixed(1)} ms, worst ${worstMs.toFixed(1)} ms, ${slow} slow`
         : '';
+  };
+
+  /** The colours used as swatches, newest first; a click paints with that colour again. */
+  const showRecent = (state: PaintingState): void => {
+    if (!panel) return;
+    const key = state.open ? `${state.steps}/${state.undone}` : '';
+    if (key === recentFor) return;
+    recentFor = key;
+    const colours = state.open && view ? recentColours(view.history()) : [];
+    panel.recent.replaceChildren(
+      ...colours.map((colour) => {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'btn btn-sm btn-icon paint-swatch';
+        swatch.dataset.colour = colour;
+        swatch.style.backgroundColor = colour;
+        swatch.setAttribute('aria-label', `${PAINT_COPY.recent.swatch} ${colour}`);
+        swatch.title = colour;
+        swatch.addEventListener('click', () => current().setColour(colour));
+        return swatch;
+      }),
+    );
+    panel.recent.hidden = colours.length === 0;
   };
 
   const ensureView = (): PaintingView => {
@@ -245,6 +274,7 @@ export function createPaintTool(
     panel.pick.title = PAINT_COPY.pick.hint;
     panel.pickMode.options[0]!.textContent = PAINT_COPY.pick.shown;
     panel.pickMode.options[1]!.textContent = PAINT_COPY.pick.painted;
+    panel.recent.setAttribute('aria-label', PAINT_COPY.recent.label);
     panel.pick.addEventListener('click', () => setPicking(!picking));
     for (const tool of TOOL_IDS) {
       const button = document.createElement('button');

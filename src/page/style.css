@@ -820,3 +820,8 @@ body[data-dragging] #drop-frame {
     bottom: var(--space-2);
   }
 }
+
+/* The colours used (#136): a swatch each, its paint set from the history as its background. */
+.paint-swatch {
+  border-color: var(--line-strong);
+}
