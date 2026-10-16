@@ -3,7 +3,7 @@ title: The lift, an eraser that takes a stroke away and shows the paint beneath
 date: 2026-10-16
 phase: 2
 issues: [137]
-prs: []
+prs: [175]
 topics: [painting, library, textures]
 ---
 
