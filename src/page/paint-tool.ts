@@ -250,7 +250,10 @@ export function createPaintTool(
     return view;
   };
 
-  const open = async (paint: Albedo | null = null, mask: PaintMask | null = null): Promise<void> => {
+  const open = async (
+    paint: Albedo | null = null,
+    mask: PaintMask | null = null,
+  ): Promise<void> => {
     const found = mini();
     if (!found) throw new Error('No baked mini to paint');
     close();

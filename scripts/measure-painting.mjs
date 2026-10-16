@@ -3,8 +3,8 @@
 // largest brush across the whole canvas with every brush that strokes (the flat brush also at the
 // default size; the hobby brushes since #128, the airbrush sprayed from above; the dry brush also
 // at 2 mm since #133, whose stroke measures its reference under the first dab; the lift since #137,
-// over the strokes of the others; the mask's brush and eraser since #138, the mask laid first so
-// the brushes after it paint over it), the intervals
+// over the strokes of the others; the mask's brush and eraser since #138, first, so the brushes
+// after them paint over the mask's soft edges), the intervals
 // between frames, and the GPU process's memory with the view open against without. One fresh
 // browser per mini.
 // Usage, after `npm run build`:
@@ -28,8 +28,10 @@ const STROKES = 3;
 const SAMPLES = 120;
 /** The brushes measured: each tool that strokes at the largest size, the flat brush and the dry brush also at the default. */
 const RUNS = [
-  // First: a mask the brushes after it paint over (#138).
+  // First: the mask's brush, then its eraser over the same paths, which leaves the mask's soft
+  // edges for the brushes after them to paint over (#138).
   { tool: 'mask', sizeMm: 16 },
+  { tool: 'unmask', sizeMm: 16 },
   { tool: 'flat', sizeMm: 16 },
   { tool: 'flat', sizeMm: 2 },
   { tool: 'wash', sizeMm: 16 },
@@ -37,7 +39,6 @@ const RUNS = [
   { tool: 'dry', sizeMm: 16 },
   { tool: 'dry', sizeMm: 2 },
   { tool: 'airbrush', sizeMm: 16, direction: [0, 1, 0] },
-  { tool: 'unmask', sizeMm: 16 },
   // Last, over what the others painted: each takes away the newest step under its start (#137).
   { tool: 'lift', sizeMm: 16 },
 ];
