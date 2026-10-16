@@ -18,7 +18,7 @@ This project is built by a small team together with the Claude Code agent. Human
 2. Commit with Conventional Commits.
 3. Add an entry to `docs/journal/` (see its `README.md`): what you did, why, what went wrong and how you solved it, with numbers.
 4. Open a PR with `Closes #<issue>` and fill in the checklist.
-5. CI must be green. A human reviews; only the PM squash-merges. Nobody pushes to `main`.
+5. CI must be green. A PR that changes only the docs and the files that steer the agents and the reviews gets the format check alone (the list is `DOCS_ONLY` in `.github/workflows/ci.yml`); every other PR and every push to `main` get the whole run. A human reviews; only the PM squash-merges. Nobody pushes to `main`.
 
 ## WebAssembly we build ourselves
 

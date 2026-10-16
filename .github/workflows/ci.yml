@@ -20,16 +20,37 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # a PR's merge commit and the base it merges into, for the scope step
+      # A PR that changes only the docs and the files that steer the agents and the reviews (DOCS_ONLY)
+      # gets the format check alone. The job still runs, because `ci` is a required check and a
+      # workflow that does not start never reports. Every other PR and every push to main get the
+      # whole run, so main's run is the net behind this list. README.md is code here: tests read it.
+      - name: Scope
+        id: scope
+        if: github.event_name == 'pull_request'
+        env:
+          DOCS_ONLY: '^(docs/|\.claude/|CLAUDE\.md$|CONTRIBUTING\.md$|\.mcp\.json$|\.github/([^/]+|ISSUE_TEMPLATE/.+|workflows/(pr-review|claude)\.yml)$)'
+        run: |
+          changed=$(git diff --name-only --no-renames HEAD^1 HEAD)
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eqv "$DOCS_ONLY"; then code=true; else code=false; fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
+      - if: steps.scope.outputs.code != 'false'
+        run: npm run check
+      - if: steps.scope.outputs.code == 'false'
+        run: npm run format:check
+      - if: steps.scope.outputs.code != 'false'
+        run: npx playwright install --with-deps chromium
+      - if: steps.scope.outputs.code != 'false'
+        run: npm run e2e
       - uses: actions/upload-artifact@v7
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code != 'false' }}
         with:
           name: playwright-report
           path: playwright-report
@@ -37,7 +58,7 @@ jobs:
       # The reference pictures that differ, by name, so the Linux set can be taken from CI's own
       # Chromium (#146, docs/guides/reference-screenshots.md, `npm run shots:take`).
       - uses: actions/upload-artifact@v7
-        if: ${{ failure() }}
+        if: ${{ failure() && steps.scope.outputs.code != 'false' }}
         with:
           name: reference-screens-actual
           path: test-results/reference-screens-*/*-actual.png
