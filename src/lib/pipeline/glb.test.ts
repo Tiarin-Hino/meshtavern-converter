@@ -45,6 +45,7 @@ interface Gltf {
   meshes: { primitives: { attributes: Record<string, number> }[] }[];
   extensionsRequired?: string[];
   extras: { sizeMm: number[]; meshtavern?: Record<string, unknown> };
+  asset: { version: string; generator: string };
 }
 
 function parse(glb: ArrayBuffer): { json: Gltf; bin: Uint8Array } {
@@ -102,6 +103,10 @@ describe('encodeGlb, plain', () => {
     const expected = vertexColours(sheet, DEFAULT_LOOK);
     expect(bin[view.byteOffset]).toBe(Math.round(expected[0]! * 255));
     expect(bin[view.byteOffset + 3]).toBe(255);
+  });
+
+  it("names the product, not the development name, as the file's generator", () => {
+    expect(json.asset).toEqual({ version: '2.0', generator: 'PolyWash' });
   });
 
   it('uses 16-bit indices for small meshes', () => {
