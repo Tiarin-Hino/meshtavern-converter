@@ -3,7 +3,7 @@ title: PolyWash, checked, and the brief for its mark
 date: 2026-10-16
 phase: 2
 issues: [147]
-prs: []
+prs: [176]
 topics: [ui, planning]
 ---
 
