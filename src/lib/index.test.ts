@@ -40,6 +40,8 @@ describe('the library entries', () => {
       'INK_FLAT',
       'LOD_SPECS',
       'LOOK_PRESETS',
+      'MASK_TINT',
+      'MASK_TINT_STRENGTH',
       'MASK_TOOL_IDS',
       'MAX_PAIRS',
       'MAX_PARTS',

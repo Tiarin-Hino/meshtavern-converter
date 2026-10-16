@@ -7,6 +7,7 @@ import {
   type BrushSettings,
   type IndexedMesh,
   type Look,
+  type PaintMask,
   type PaintRegions,
   type ToolId,
 } from '../lib';
@@ -42,8 +43,8 @@ export interface MiniForPainting {
 
 /** The tool's hooks: the view's methods, forwarded, and the tool's own open and close. */
 export interface PaintHooks {
-  /** Opens the view on the converted mini, with a paint to continue from or bare. */
-  open: (paint?: Albedo | null) => Promise<void>;
+  /** Opens the view on the converted mini, with a paint and a mask (#138) to continue from, or bare. */
+  open: (paint?: Albedo | null, mask?: PaintMask | null) => Promise<void>;
   close: () => void;
   /** The view while it is open; its methods are what the tests call. */
   view: () => PaintingView;
@@ -249,7 +250,7 @@ export function createPaintTool(
     return view;
   };
 
-  const open = async (paint: Albedo | null = null): Promise<void> => {
+  const open = async (paint: Albedo | null = null, mask: PaintMask | null = null): Promise<void> => {
     const found = mini();
     if (!found) throw new Error('No baked mini to paint');
     close();
@@ -261,6 +262,7 @@ export function createPaintTool(
       texture: found.texture,
       look: found.look,
       paint,
+      mask,
       regions: found.regions,
     });
   };

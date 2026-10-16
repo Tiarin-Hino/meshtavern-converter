@@ -297,6 +297,8 @@ Constants, beside the look's in `look.ts` or in `brush.ts`, all _(proposal)_: `W
 
 **Changed (2026-10-16, #137):** a tool more, `lift`, beside the eraser (sliders size, hardness, opacity; `stroke` blend max; composite `lift`; mask 1): it takes away the step its stroke starts on, wherever that step is still the top layer, toward a keyframe of the paint before that step. `docs/design/lift-eraser.md` has the decisions: the stamp map that every commit writes, the keyframes that hold it, the keyframes pinned for lifts, and why a lift does not reach under a later layer.
 
+**Changed (2026-10-16, #138):** three tools more, `mask`, `unmask` and `mask-fill`, which change a mask (`mask`, R8) instead of the paint, and a step kind `MaskChange` (clear, invert). Every paint composite multiplies its alpha by `1 − mask` at the owner, so a masked texel keeps its bytes under every tool, the lift included. `docs/design/paint-mask.md` has the decisions: the targets, the mask's composite, the mask in and out as pixels, the tint, and the fill's cut.
+
 The masks are judged by eye in #128 on the corpus (the `?dev` tool of §13 step 5 exists for that), and the tests pin what the issue says: a dry brush across a crease leaves the crease's texels unchanged (mask 0 where `cavity ≤ t`), a wash across an edge leaves the edge's texels within a tolerance and darkens the crease's, an ink changes every texel under it and the crease's more, an airbrush from above changes no texel whose normal faces down (`dot ≤ AIR_DIR_EDGE`). Each is one assertion on `toolMask` in Node and one on the paint read back through the hook (§13).
 
 ## 7. The fill and the ready regions
@@ -320,6 +322,8 @@ The region is painted as coverage: the triangles are drawn in texture space (tri
 
 The consumer calls it after a conversion with what it has (`regionsOf(result.baked.mesh, { source: result.mesh, figureTriangles: result.pair?.figureTriangles, sizing: result.sizing, kind: result.kind })`) and keeps the bytes with the mini or makes them again from a stored table level and its `sizing` (the GLB carries `extras.meshtavern` with the sizing; the triangle order of a plain GLB is the mesh's). That is why `'plain'` and `'disc'` need no full mesh. `fillRegion` with a `'base'` or `'figure'` seed takes the region's triangles (figure = not base), no flood.
 
+**Changed (2026-10-16, #138):** a picked fill never enters a triangle whose middle the mask covers (`FillOptions.cut`, measured on the GPU at every fill, live or replayed; `docs/design/paint-mask.md` §5). Ready regions take no cut.
+
 **As built (2026-10-13, #127):** `'disc'` takes the highest up-facing triangle centroid within the band with the most area as the base's top, not the band's upper edge (`regions.ts`).
 
 ## 8. Undo and redo
@@ -331,6 +335,8 @@ Why replay and not snapshots or tiles: a snapshot per step is 4 MB a step, 200 M
 **As built (2026-10-13, #127):** a step beyond `UNDO_STEPS` drops the oldest keyframe only; the steps it covered stay in the record (`history()` gives every step since the paint was opened), they can no longer be undone.
 
 **Changed (2026-10-16, #137):** a keyframe holds the paint and its stamp map (`docs/design/lift-eraser.md` §5); undo reaches back to `oldest`, the newest keyframe of the schedule that leaves `UNDO_STEPS` to undo, and a keyframe off the schedule is pinned for each step a lift stroke in the history takes away, kept while undo may replay that lift (§6 there). `apply` gets the step's index, the number it stamps.
+
+**Changed (2026-10-16, #138):** a keyframe holds the mask too (`docs/design/paint-mask.md` §4), and the mask's steps are undone and redone as strokes and fills are.
 
 `history.ts` holds this logic over an interface of four operations (`snapshot(i)`, `restore(i)`, `apply(step)`, `drop(i)`), so `history.test.ts` runs in Node with a fake backend and pins the schedule: which keyframes exist after n steps, how many replays an undo at step n costs, what a new step after undo drops.
 

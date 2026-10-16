@@ -142,6 +142,8 @@ export {
   PAINT_SIZE,
   TOOL_IDS,
   MASK_TOOL_IDS,
+  MASK_TINT,
+  MASK_TINT_STRENGTH,
   FILL_TOOL_IDS,
   isMaskTool,
   isFillTool,
