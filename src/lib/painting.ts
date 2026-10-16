@@ -14,6 +14,7 @@ export {
   type PaintingState,
   type MiniToPaint,
   type PaintPerf,
+  type LiftOutcome,
   type PickMode,
   PICK_MODE,
   BRUSH_MIN_MM,

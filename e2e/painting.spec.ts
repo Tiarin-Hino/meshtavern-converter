@@ -887,6 +887,241 @@ test('erases back to bare where the eraser goes, and only there', async ({ figur
   expect(far.filter((seen) => seen.alpha !== 255)).toEqual([]);
   expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
 });
+// The lift (#137, design note `docs/design/lift-eraser.md`): an eraser stroke that takes away the
+// step it starts on, wherever that step is the top layer, and shows the paint beneath it.
+
+/** What a lift test reads: the paint's bytes compared with earlier paints, texel by texel. */
+interface Compared {
+  /** Texels equal to the first paint, not to the second. */
+  first: number;
+  /** Texels equal to the second paint, not to the first. */
+  second: number;
+  /** Texels equal to neither. */
+  neither: number;
+}
+
+test('lifts the stroke it starts on back to the bytes before it, and leaves the rest alone', async ({
+  figurePage: page,
+}) => {
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const at = (x: number, y: number): [number, number, number] =>
+      view.texelAt(...view.screenOf([x, y, 6]))!.point;
+    const read = async (): Promise<Uint8Array> => (await view.paint()).data;
+    const same = (a: Uint8Array, b: Uint8Array): boolean => a.every((value, k) => value === b[k]);
+    const compare = (now: Uint8Array, first: Uint8Array, second: Uint8Array): Compared => {
+      const counts = { first: 0, second: 0, neither: 0 };
+      for (let texel = 0; texel < now.length; texel += 4) {
+        const is = (paint: Uint8Array): boolean =>
+          [0, 1, 2, 3].every((k) => now[texel + k] === paint[texel + k]);
+        const isFirst = is(first);
+        const isSecond = is(second);
+        if (isFirst && !isSecond) counts.first++;
+        else if (isSecond && !isFirst) counts.second++;
+        else if (!isFirst && !isSecond) counts.neither++;
+      }
+      return counts;
+    };
+
+    // A red stroke across the chest at 14 mm, a blue one down across it.
+    view.setColour('#ff0000');
+    view.setBrush({ sizeMm: 3 });
+    await view.stroke([at(-3, 13), at(0, 13), at(3, 13)]);
+    const afterFirst = await read();
+    view.setColour('#0000ff');
+    view.setBrush({ sizeMm: 1.5 });
+    await view.stroke([at(0, 10.5), at(0, 13), at(0, 15.5)]);
+    const afterSecond = await read();
+    const changedBySecond = compare(afterSecond, afterFirst, afterFirst).neither;
+
+    // A lift wider than the blue stroke, started on its end above the red one, along it.
+    view.setTool('lift');
+    view.setBrush({ sizeMm: 5, hardness: 1 });
+    await view.stroke([at(0, 15.5), at(0, 13), at(0, 10.5)]);
+    const lifted = await read();
+    const wide = {
+      backToFirst: same(lifted, afterFirst),
+      lift: view.state.lift,
+      steps: view.state.steps,
+      lifts: (view.history()[2] as { lifts?: number }).lifts,
+    };
+
+    // Undo puts the blue stroke back; redo takes it away again, to the same bytes.
+    await view.undo();
+    const undone = same(await read(), afterSecond);
+    await view.redo();
+    const redone = same(await read(), lifted);
+
+    // A stroke after the lift, undone: the lift is replayed from the paint before the blue stroke.
+    view.setTool('flat');
+    view.setColour('#00ff00');
+    await view.stroke([at(-3, 16), at(3, 16)]);
+    await view.undo();
+    const replayed = same(await read(), lifted);
+
+    // Started again where the two crossed, the next lift takes the layer beneath: the red stroke.
+    view.setTool('lift');
+    view.setBrush({ sizeMm: 1.5, hardness: 1 });
+    await view.stroke([at(0, 13), at(0.5, 13)]);
+    const peeled = {
+      lift: view.state.lift,
+      compared: compare(await read(), afterFirst, afterFirst),
+    };
+    const centre = view.texelAt(...view.screenOf([0, 13, 6]))!.texel;
+    const centreAlpha = (await read())[(centre[1] * 1024 + centre[0]) * 4 + 3];
+
+    // A narrow lift inside a wide blue stroke over the red one: inside it the red comes back,
+    // outside the blue stays.
+    await painting.open();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    view.setTool('flat');
+    view.setColour('#ff0000');
+    view.setBrush({ sizeMm: 3, hardness: 0.8 });
+    await view.stroke([at(-3, 13), at(3, 13)]);
+    const red = await read();
+    view.setColour('#0000ff');
+    view.setBrush({ sizeMm: 5 });
+    await view.stroke([at(-3, 13), at(3, 13)]);
+    const blue = await read();
+    view.setTool('lift');
+    view.setBrush({ sizeMm: 1.5, hardness: 1 });
+    await view.stroke([at(-0.5, 13), at(0.5, 13)]);
+    const narrow = compare(await read(), red, blue);
+    return {
+      changedBySecond,
+      wide,
+      undone,
+      redone,
+      replayed,
+      peeled,
+      centreAlpha,
+      narrow,
+      steps: view.state.steps,
+    };
+  });
+  expect(outcome.changedBySecond).toBeGreaterThan(100);
+  expect(outcome.wide).toEqual({
+    backToFirst: true,
+    lift: { lifted: 1 },
+    steps: 3,
+    lifts: 1,
+  });
+  expect(outcome.undone).toBe(true);
+  expect(outcome.redone).toBe(true);
+  expect(outcome.replayed).toBe(true);
+  expect(outcome.peeled.lift).toEqual({ lifted: 0 });
+  expect(outcome.peeled.compared.neither).toBeGreaterThan(20);
+  expect(outcome.centreAlpha).toBe(0);
+  expect(outcome.narrow.first).toBeGreaterThan(20);
+  expect(outcome.narrow.second).toBeGreaterThan(outcome.narrow.first);
+  // Lifted part way only at the dab's edge: its hardness is at most 0.999, a band a few
+  // thousandths of a mm wide (2 of 862 texels in the Linux container).
+  expect(outcome.narrow.neither).toBeLessThanOrEqual(outcome.narrow.first / 100);
+  expect(outcome.steps).toBe(3);
+});
+
+test('lifts nothing where nothing was painted, or too long ago, and says why', async ({
+  figurePage: page,
+}) => {
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    const view = () => painting.view();
+    const hash = async (): Promise<number> => {
+      const { data } = await view().paint();
+      let h = 0;
+      for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
+      return h;
+    };
+    const look = async (): Promise<void> => {
+      view().setCamera(0, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    };
+    const at = (x: number, y: number): [number, number, number] =>
+      view().texelAt(...view().screenOf([x, y, 6]))!.point;
+    const liftAt = async (x: number, y: number) => {
+      view().setTool('lift');
+      const before = await hash();
+      await view().stroke([at(x, y), at(x + 1, y)]);
+      return {
+        lift: view().state.lift,
+        steps: view().state.steps,
+        same: (await hash()) === before,
+      };
+    };
+
+    await painting.open();
+    await look();
+    const bare = await liftAt(0, 14);
+
+    await painting.open('all');
+    await look();
+    const opened = await liftAt(0, 14);
+
+    // One stroke at 11 mm, then enough elsewhere that undo no longer reaches it.
+    await painting.open();
+    await look();
+    view().setTool('flat');
+    view().setBrush({ sizeMm: 1 });
+    await view().stroke([at(-2, 11)]);
+    const elsewhere = at(2, 17);
+    // Two colours in turn: a stroke that leaves the bytes as they were changes no texel.
+    for (let k = 0; k < 60; k++) {
+      view().setColour(k % 2 ? '#00ff00' : '#0000ff');
+      await view().stroke([elsewhere]);
+    }
+    const old = await liftAt(-2, 11);
+    // The newest stroke still lifts.
+    const recent = await liftAt(2, 17);
+    return { bare, opened, old, recent };
+  });
+  expect(outcome.bare).toEqual({
+    lift: { refused: 'nothing-painted' },
+    steps: 0,
+    same: true,
+  });
+  expect(outcome.opened).toEqual({
+    lift: { refused: 'nothing-painted' },
+    steps: 0,
+    same: true,
+  });
+  expect(outcome.old).toEqual({
+    lift: { refused: 'too-long-ago' },
+    steps: 61,
+    same: true,
+  });
+  expect(outcome.recent.lift).toEqual({ lifted: 60 });
+  expect(outcome.recent.steps).toBe(62);
+  expect(outcome.recent.same).toBe(false);
+});
+
+test('lifts a stroke painted from the canvas with a stroke from the canvas', async ({
+  figurePage: page,
+}) => {
+  await page.evaluate(() => window.__mt.painting.open());
+  const path = await chestPath(page);
+  const outcome = await page.evaluate(async (path) => {
+    const view = window.__mt.painting.view();
+    view.setBrush({ sizeMm: 1.5 });
+    await view.strokeAt(path);
+    view.setTool('lift');
+    view.setBrush({ sizeMm: 4, hardness: 1 });
+    await view.strokeAt(path);
+    const { data } = await view.paint();
+    let painted = 0;
+    for (let k = 3; k < data.length; k += 4) if (data[k]! > 0) painted++;
+    return { painted, state: view.state };
+  }, path);
+  expect(outcome.state.lift).toEqual({ lifted: 0 });
+  expect(outcome.state.steps).toBe(2);
+  expect(outcome.state.perf.frames).toBeGreaterThanOrEqual(path.length);
+  expect(outcome.painted).toBe(0);
+});
+
 // The hobby brushes (#128, design note §6 and §13 step 11). Where a stroke lands is #127's and
 // tested above; what a brush adds is its mask. So each test paints its stroke twice on the bare
 // figure: with the flat brush at full opacity (what the stroke reaches, texel by texel: `reach`),

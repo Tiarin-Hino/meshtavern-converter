@@ -185,8 +185,8 @@ describe('ownerMap', () => {
 });
 
 describe('toolMask', () => {
-  it('paints every texel with the flat brush, the eraser and the fill', () => {
-    for (const tool of ['flat', 'eraser', 'fill'] as const)
+  it('paints every texel with the flat brush, the eraser, the lift and the fill', () => {
+    for (const tool of ['flat', 'eraser', 'lift', 'fill'] as const)
       for (const cavity of [-1, 0, 1])
         expect(toolMask(tool, cavity, 0.3, [0, 1, 0], DEFAULT_BRUSH)).toBe(1);
   });
@@ -391,6 +391,10 @@ describe('recentColours', () => {
     const steps = [stroke('#111111'), stroke('#222222', 'eraser'), stroke('#333333', 'eraser')];
     expect(recentColours(steps)).toEqual(['#111111']);
     expect(recentColours([stroke('#222222', 'eraser')])).toEqual([]);
+  });
+
+  it('leaves the lift out too (#137): it brings back colours, it lays none', () => {
+    expect(recentColours([stroke('#111111'), stroke('#222222', 'lift')])).toEqual(['#111111']);
   });
 
   it('stops at the limit, the newest kept', () => {

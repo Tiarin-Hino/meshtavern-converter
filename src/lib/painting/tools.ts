@@ -25,8 +25,11 @@ import {
 export interface ToolPass {
   /** Into the stroke layer: the largest coverage so far (a loaded brush), or added up (an airbrush). */
   blend: 'max' | 'add';
-  /** Onto the paint: the colour over it, or alpha taken away. */
-  composite: 'over' | 'erase';
+  /**
+   * Onto the paint: the colour over it, alpha taken away, or the paint beneath a step brought back
+   * where that step is on top (#137, `docs/design/lift-eraser.md`).
+   */
+  composite: 'over' | 'erase' | 'lift';
   /**
    * The body of `float mtMask( float cavity, float occlusion, vec3 normal, float reference )`:
    * cavity −1 crease … +1 edge (the detail texture's, as the material decodes it), occlusion 0
@@ -49,6 +52,7 @@ const f = (value: number): string => (Number.isInteger(value) ? value.toFixed(1)
 export const TOOL_PASSES: Record<ToolId, ToolPass> = {
   flat: { blend: 'max', composite: 'over', mask: 'return 1.0;' },
   eraser: { blend: 'max', composite: 'erase', mask: 'return 1.0;' },
+  lift: { blend: 'max', composite: 'lift', mask: 'return 1.0;' },
   fill: { blend: 'max', composite: 'over', mask: 'return 1.0;' },
   wash: {
     blend: 'max',

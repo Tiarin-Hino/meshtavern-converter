@@ -2,7 +2,8 @@
 // in real Chrome with the GPU on: the time of `open`, the engine's frame counter for strokes of the
 // largest brush across the whole canvas with every brush that strokes (the flat brush also at the
 // default size; the hobby brushes since #128, the airbrush sprayed from above; the dry brush also
-// at 2 mm since #133, whose stroke measures its reference under the first dab), the intervals
+// at 2 mm since #133, whose stroke measures its reference under the first dab; the lift since #137,
+// over the strokes of the others), the intervals
 // between frames, and the GPU process's memory with the view open against without. One fresh
 // browser per mini.
 // Usage, after `npm run build`:
@@ -33,6 +34,8 @@ const RUNS = [
   { tool: 'dry', sizeMm: 16 },
   { tool: 'dry', sizeMm: 2 },
   { tool: 'airbrush', sizeMm: 16, direction: [0, 1, 0] },
+  // Last, over what the others painted: each takes away the newest step under its start (#137).
+  { tool: 'lift', sizeMm: 16 },
 ];
 
 /** The generated figure on its base (src/regression/shapes.ts), as an STL in a temporary folder. */
@@ -172,15 +175,20 @@ try {
               await view.strokeAt(path);
               running = false;
               const dabs = view.history().at(-1)?.dabs?.length ?? 0;
-              return { perf: view.state.perf, intervals: intervals.slice(1), dabs: dabs / 4 };
+              return {
+                perf: view.state.perf,
+                intervals: intervals.slice(1),
+                dabs: dabs / 4,
+                lift: tool === 'lift' ? view.state.lift : null,
+              };
             },
             { tool, sizeMm, direction, samples: SAMPLES, stroke },
           );
           rows.push(result);
         }
-        for (const [k, { perf, intervals, dabs }] of rows.entries())
+        for (const [k, { perf, intervals, dabs, lift }] of rows.entries())
           console.log(
-            `${tool} ${sizeMm} mm, stroke ${k + 1}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms`,
+            `${tool} ${sizeMm} mm, stroke ${k + 1}${lift ? ` (${JSON.stringify(lift)})` : ''}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms`,
           );
       }
       await page.waitForTimeout(1000);

@@ -38,6 +38,9 @@ import { dabGain, strokeOpacity, toolPass } from './tools';
  * - `paint`: the committed paint. A commit copies `live` into it, a cancel copies it back.
  * - `reference` (a stroke's first dab, for the dry brush, #133): the highest cavity under that
  *   dab, reduced from the stroke layer and the detail texture into one texel the composite reads.
+ * - `stamp` (at every commit, #137): at each texel the number of the newest step that changed its
+ *   bytes, which a lift stroke reads to find the step it takes away, and by which its composite
+ *   changes only the texels where that step is the top layer (`docs/design/lift-eraser.md`).
  *
  * `paint`, `live` and the keyframes are sRGB targets (SRGB8_ALPHA8): the GPU decodes on sampling,
  * encodes on writing, and the material samples `live` as it samples an sRGB `DataTexture`. Copies
@@ -62,6 +65,12 @@ export const PAINT_DILATION_RINGS = 2;
 export const DABS_PER_PASS = 64;
 /** The reference's reduction (#133): each texel of a level is the highest of a block this many texels on a side of the level below. */
 export const REFERENCE_BLOCK = 16;
+/**
+ * A stamp holds a step's index + 1 modulo this (two bytes), 0 for no step: bare, or the paint as
+ * opened (#137). After this many steps in one session a stamp may name a step this far back as a
+ * recent one; a lift there finds the paint beneath equal to the paint and takes nothing away.
+ */
+export const STAMP_MODULUS = 65536;
 /** A dab's hardness is at most this, so the falloff's two edges never meet. */
 const HARDEST = 0.999;
 
@@ -233,6 +242,43 @@ void main() {
 `;
 
 /**
+ * The stamp pass (#137, design note `docs/design/lift-eraser.md` §5), into the stamp map before a
+ * commit: a texel whose bytes the step left as they were keeps its stamp (equal bytes decode to
+ * equal values); elsewhere the step's number, or for a lift the stamp beneath where the texel is
+ * now the paint beneath, and the stamp it had where it was lifted only partly.
+ */
+const STAMP_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uPaint;
+uniform sampler2D uLive;
+uniform sampler2D uBeneath;
+uniform sampler2D uBeneathStamp;
+uniform bool uLift;
+uniform vec2 uValue;
+out vec4 fragColor;
+void main() {
+  ivec2 texel = ivec2( gl_FragCoord.xy );
+  vec4 live = texelFetch( uLive, texel, 0 );
+  if ( live == texelFetch( uPaint, texel, 0 ) ) discard;
+  if ( uLift ) {
+    if ( live != texelFetch( uBeneath, texel, 0 ) ) discard;
+    fragColor = texelFetch( uBeneathStamp, texel, 0 );
+  } else {
+    fragColor = vec4( uValue, 0.0, 1.0 );
+  }
+}
+`;
+
+/** One texel of a texture into a 1 × 1 target, to be read back. */
+const PROBE_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uSource;
+uniform ivec2 uTexel;
+out vec4 fragColor;
+void main() {
+  fragColor = texelFetch( uSource, uTexel, 0 );
+}
+`;
+
+/**
  * What the masks read at every texel, at its owner as the composite reads it (#128, for tests):
  * with `uPart` 0 the cavity (R, as `cavity × 0.5 + 0.5`), the occlusion (G) and in B 1 where the
  * texel has an owner; with 1 the normal (RGB, as `n × 0.5 + 0.5`).
@@ -276,12 +322,30 @@ export interface PaintSurface {
 /** The composite and the dilation in one pass (§5.4), for one tool. */
 function compositeFragment(tool: ToolId): string {
   const pass = toolPass(tool);
-  const apply =
-    pass.composite === 'erase'
-      ? /* glsl */ `fragColor = vec4( paint.rgb, paint.a * ( 1.0 - alpha ) );`
-      : /* glsl */ `float outA = alpha + paint.a * ( 1.0 - alpha );
+  const apply = {
+    erase: /* glsl */ `fragColor = vec4( paint.rgb, paint.a * ( 1.0 - alpha ) );`,
+    over: /* glsl */ `float outA = alpha + paint.a * ( 1.0 - alpha );
     vec3 rgb = outA > 0.0 ? ( uColour * alpha + paint.rgb * paint.a * ( 1.0 - alpha ) ) / outA : uColour;
-    fragColor = vec4( rgb, outA );`;
+    fragColor = vec4( rgb, outA );`,
+    // Toward the paint beneath the lifted step (#137), straight alpha mixed premultiplied; all the
+    // way, its bytes.
+    lift: /* glsl */ `vec4 beneath = texelFetch( uBeneath, from, 0 );
+    if ( alpha >= 1.0 ) {
+      fragColor = beneath;
+      return;
+    }
+    float outA = mix( paint.a, beneath.a, alpha );
+    vec3 rgb = outA > 0.0 ? mix( paint.rgb * paint.a, beneath.rgb * beneath.a, alpha ) / outA : beneath.rgb;
+    fragColor = vec4( rgb, outA );`,
+  }[pass.composite];
+  // A lift changes only the texels whose newest step is the one it takes away (#137).
+  const gate =
+    pass.composite === 'lift'
+      ? /* glsl */ `if ( floor( texelFetch( uStamp, from, 0 ).rg * 255.0 + 0.5 ) != uLifted ) {
+    fragColor = paint;
+    return;
+  }`
+      : '';
   return /* glsl */ `${PRECISION}
 uniform sampler2D uPaint;
 uniform sampler2D uStroke;
@@ -289,6 +353,9 @@ uniform sampler2D uOwner;
 uniform sampler2D uAtlas;
 uniform sampler2D uDetail;
 uniform sampler2D uReference;
+uniform sampler2D uStamp;
+uniform sampler2D uBeneath;
+uniform vec2 uLifted;
 uniform vec3 uColour;
 uniform float uOpacity;
 uniform float uPressure;
@@ -315,6 +382,7 @@ void main() {
     fragColor = paint;
     return;
   }
+  ${gate}
   // The full-size level, named: after the return above the implicit derivatives a mip level
   // comes from are undefined, and the surface a texel reads would follow which of its neighbours
   // the stroke covered (#128: a second airbrush pass found other normals than the first).
@@ -371,6 +439,42 @@ const textureTarget = (format: 'srgb' | 'rgba'): THREE.WebGLRenderTarget => {
   });
   return target;
 };
+
+/** The stamp map (#137): RG8, a step's number in two bytes, low first. */
+const stampTarget = (): THREE.WebGLRenderTarget =>
+  new THREE.WebGLRenderTarget(PAINT_SIZE, PAINT_SIZE, {
+    depthBuffer: false,
+    generateMipmaps: false,
+    format: THREE.RGFormat,
+    type: THREE.UnsignedByteType,
+    colorSpace: THREE.NoColorSpace,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+
+/** A keyframe (§8): the paint and, since #137, its stamp map. */
+export interface Keyframe {
+  paint: THREE.WebGLRenderTarget;
+  stamp: THREE.WebGLRenderTarget;
+}
+
+/** A stamp's two bytes for step `index` (0-based): index + 1 modulo STAMP_MODULUS, low byte first. */
+export function stampBytes(index: number): [number, number] {
+  const value = (index + 1) % STAMP_MODULUS;
+  return [value & 255, value >> 8];
+}
+
+/**
+ * The step a stamp names, as an index: of the steps it may name, the newest of the `applied`
+ * ones. Null for no step.
+ */
+export function stampedStep(bytes: readonly [number, number], applied: number): number | null {
+  const value = bytes[0] + bytes[1] * 256;
+  if (value === 0) return null;
+  const back = (((applied - value) % STAMP_MODULUS) + STAMP_MODULUS) % STAMP_MODULUS;
+  const index = applied - back - 1;
+  return index >= 0 ? index : null;
+}
 
 /** The stroke layer: R8, with a stencil for the adding draws (`onceATexel`). */
 const strokeTarget = (): THREE.WebGLRenderTarget =>
@@ -472,6 +576,15 @@ export class PaintPasses {
   /** The committed paint and the paint with the stroke in progress (what the material shows). */
   readonly paint = textureTarget('srgb');
   readonly live = textureTarget('srgb');
+  /** The newest step to change each texel (#137): kept with the keyframes. */
+  private readonly stamp = stampTarget();
+  /** One texel read back: the stamp under a lift's start. */
+  private readonly probe = new THREE.WebGLRenderTarget(1, 1, {
+    depthBuffer: false,
+    generateMipmaps: false,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
   private readonly stroke = strokeTarget();
   private readonly atlas = textureTarget('rgba');
   private depth: THREE.WebGLRenderTarget | null = null;
@@ -528,6 +641,20 @@ export class PaintPasses {
     uBlock: { value: REFERENCE_BLOCK },
   });
   private readonly copyMaterial = raw(QUAD_VERTEX, COPY_FRAGMENT, { uSource: { value: null } });
+  private readonly stampMaterial = raw(QUAD_VERTEX, STAMP_FRAGMENT, {
+    uPaint: { value: this.paint.texture },
+    uLive: { value: this.live.texture },
+    uBeneath: { value: null },
+    uBeneathStamp: { value: null },
+    uLift: { value: false },
+    uValue: { value: new THREE.Vector2() },
+  });
+  private readonly probeMaterial = raw(QUAD_VERTEX, PROBE_FRAGMENT, {
+    uSource: { value: this.stamp.texture },
+    uTexel: { value: new THREE.Vector2() },
+  });
+  /** The paint beneath the step a lift takes away, while it strokes or replays (#137). */
+  private beneath: Keyframe | null = null;
   private readonly compositeMaterials = new Map<ToolId, THREE.RawShaderMaterial>();
   private readonly compositeUniforms = {
     uPaint: { value: this.paint.texture as THREE.Texture },
@@ -536,6 +663,9 @@ export class PaintPasses {
     uAtlas: { value: this.atlas.texture as THREE.Texture },
     uDetail: { value: null as THREE.Texture | null },
     uReference: { value: this.reference.at(-1)!.target.texture as THREE.Texture },
+    uStamp: { value: this.stamp.texture as THREE.Texture },
+    uBeneath: { value: this.paint.texture as THREE.Texture },
+    uLifted: { value: new THREE.Vector2() },
     uColour: { value: new THREE.Vector3() },
     uOpacity: { value: 1 },
     uPressure: { value: 1 },
@@ -616,6 +746,8 @@ export class PaintPasses {
     this.owner = ownerTexture(ownerMap(mask, PAINT_SIZE, PAINT_DILATION_RINGS));
     this.compositeUniforms.uOwner.value = this.owner;
 
+    // No step changed a texel yet.
+    this.draw(this.stamp, null, true);
     // The paint: a byte copy into `paint`, then into `live`.
     this.renderer.initRenderTarget(this.paint);
     this.renderer.initRenderTarget(this.live);
@@ -752,27 +884,75 @@ export class PaintPasses {
     this.draw(this.live, this.quadScene, false);
   }
 
-  /** The stroke is final: `live` is the paint now. */
-  commit(): void {
+  /**
+   * The paint a lift composites toward (#137): the keyframe before step `index`, which it takes
+   * away where that step is the top layer. Holds until the next `commit` or `cancel`.
+   */
+  lift(beneath: Keyframe, index: number): void {
+    this.beneath = beneath;
+    this.compositeUniforms.uBeneath.value = beneath.paint.texture;
+    this.compositeUniforms.uLifted.value.set(...stampBytes(index));
+  }
+
+  /**
+   * Step `index` is final: the texels it changed take its stamp (a lift's: the stamp beneath where
+   * it took the step away fully, #137), and `live` is the paint now.
+   */
+  commit(index: number, tool: ToolId): void {
+    const lift = toolPass(tool).composite === 'lift';
+    const beneath = this.beneath;
+    // A lift with nothing beneath composited nothing: no stamp changes.
+    if (!lift || beneath) {
+      const uniforms = this.stampMaterial.uniforms;
+      uniforms.uLift!.value = lift;
+      uniforms.uBeneath!.value = beneath?.paint.texture ?? this.paint.texture;
+      // Never the stamp map itself: it is the target, and a sampler on it would be a feedback loop.
+      uniforms.uBeneathStamp!.value = beneath?.stamp.texture ?? this.paint.texture;
+      const [low, high] = stampBytes(index);
+      (uniforms.uValue!.value as THREE.Vector2).set(low / 255, high / 255);
+      this.quad.material = this.stampMaterial;
+      this.draw(this.stamp, this.quadScene, false);
+    }
+    this.forgetBeneath();
     this.renderer.copyTextureToTexture(this.live.texture, this.paint.texture);
+  }
+
+  /** The lift is over: no keyframe stays bound, as it may be dropped. */
+  private forgetBeneath(): void {
+    this.beneath = null;
+    this.compositeUniforms.uBeneath.value = this.paint.texture;
+  }
+
+  /** The stamp's two bytes at a texel (#137): drawn into a 1 × 1 target and read back now, a GPU sync. */
+  readStamp(x: number, y: number): [number, number] {
+    (this.probeMaterial.uniforms.uTexel!.value as THREE.Vector2).set(x, y);
+    this.quad.material = this.probeMaterial;
+    this.draw(this.probe, this.quadScene, false);
+    const bytes = new Uint8Array(4);
+    this.renderer.readRenderTargetPixels(this.probe, 0, 0, 1, 1, bytes);
+    return [bytes[0]!, bytes[1]!];
   }
 
   /** The stroke is dropped: `live` shows the paint again. */
   cancel(): void {
+    this.forgetBeneath();
     this.renderer.copyTextureToTexture(this.paint.texture, this.live.texture);
   }
 
-  /** A keyframe (§8): a copy of the paint as it is. */
-  snapshot(): THREE.WebGLRenderTarget {
-    const keyframe = textureTarget('srgb');
-    this.renderer.initRenderTarget(keyframe);
-    this.renderer.copyTextureToTexture(this.paint.texture, keyframe.texture);
+  /** A keyframe (§8): a copy of the paint as it is, and of its stamp map (#137). */
+  snapshot(): Keyframe {
+    const keyframe = { paint: textureTarget('srgb'), stamp: stampTarget() };
+    this.renderer.initRenderTarget(keyframe.paint);
+    this.renderer.initRenderTarget(keyframe.stamp);
+    this.renderer.copyTextureToTexture(this.paint.texture, keyframe.paint.texture);
+    this.renderer.copyTextureToTexture(this.stamp.texture, keyframe.stamp.texture);
     return keyframe;
   }
 
-  /** Back to a keyframe: the paint and `live` are its bytes again. */
-  restore(keyframe: THREE.WebGLRenderTarget): void {
-    this.renderer.copyTextureToTexture(keyframe.texture, this.paint.texture);
+  /** Back to a keyframe: the paint, its stamp map and `live` are its bytes again. */
+  restore(keyframe: Keyframe): void {
+    this.renderer.copyTextureToTexture(keyframe.paint.texture, this.paint.texture);
+    this.renderer.copyTextureToTexture(keyframe.stamp.texture, this.stamp.texture);
     this.cancel();
   }
 
@@ -870,6 +1050,14 @@ export class PaintPasses {
     // Nothing covered: no tool changes a texel, whatever its opacity.
     for (const tool of tools) this.composite(tool, [0, 0, 0], DEFAULT_BRUSH);
     this.cancel();
+    // The stamp pass with `live` equal to the paint changes no stamp; the probe reads nothing back.
+    this.stampMaterial.uniforms.uLift!.value = false;
+    this.stampMaterial.uniforms.uBeneath!.value = this.paint.texture;
+    this.stampMaterial.uniforms.uBeneathStamp!.value = this.paint.texture;
+    for (const material of [this.stampMaterial, this.probeMaterial]) {
+      this.quad.material = material;
+      this.draw(material === this.probeMaterial ? this.probe : this.stamp, this.quadScene, false);
+    }
   }
 
   /** Releases what belongs to the mini; the targets stay for the next. */
@@ -892,6 +1080,8 @@ export class PaintPasses {
     for (const target of [
       this.paint,
       this.live,
+      this.stamp,
+      this.probe,
       this.stroke,
       this.atlas,
       this.depth,
@@ -908,6 +1098,8 @@ export class PaintPasses {
       this.referenceMaterial,
       this.highestMaterial,
       this.copyMaterial,
+      this.stampMaterial,
+      this.probeMaterial,
       ...this.compositeMaterials.values(),
     ])
       material.dispose();

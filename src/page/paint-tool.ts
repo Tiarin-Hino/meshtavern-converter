@@ -62,6 +62,7 @@ const SLIDERS: Record<
 > = {
   flat: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
   eraser: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
+  lift: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
   fill: { show: ['opacity', 'tolerance'], opacity: 'opacity' },
   wash: { show: ['sizeMm', 'opacity'], opacity: 'strength' },
   ink: { show: ['sizeMm', 'opacity'], opacity: 'flow' },
@@ -187,8 +188,14 @@ export function createPaintTool(
     panel.redo.disabled = state.undone === 0;
     panel.navigate.setAttribute('aria-pressed', String(state.navigating));
     const { frames, medianMs, worstMs, slow } = state.perf;
-    panel.perf.textContent =
-      frames > 0
+    // Why the last lift stroke took nothing away (#137), while the lift is the tool.
+    const refused =
+      state.tool === 'lift' && state.lift && 'refused' in state.lift ? state.lift.refused : null;
+    panel.perf.textContent = refused
+      ? refused === 'too-long-ago'
+        ? PAINT_COPY.lift.tooLongAgo
+        : PAINT_COPY.lift.nothingPainted
+      : frames > 0
         ? `Last stroke: ${frames} frames, median ${medianMs.toFixed(1)} ms, worst ${worstMs.toFixed(1)} ms, ${slow} slow`
         : '';
   };

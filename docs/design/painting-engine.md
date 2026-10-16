@@ -295,6 +295,8 @@ Constants, beside the look's in `look.ts` or in `brush.ts`, all _(proposal)_: `W
 
 **Changed (2026-10-15, #133):** the dry brush's threshold is relative, not absolute. Each stroke measures its reference, the highest cavity under its first dab, on the GPU, and the mask takes a texel's height above flat as a share of the reference's, never less than `DRY_REFERENCE_MIN` = 0.2 (the PM's choice from pictures, 2026-10-15); `DRY_THRESHOLD` and `DRY_SOFTNESS` are now shares of that height. `toolMask` takes the reference as its last parameter. The dry-brush tests now pin mask 0 at and below flat (`FLAT_CAVITY`), not at or below `t` as the next paragraph says. `docs/design/dry-brush-crests.md` has the rule, the measurements behind it and why nothing new is recorded in `PaintStroke`.
 
+**Changed (2026-10-16, #137):** a tool more, `lift`, beside the eraser (sliders size, hardness, opacity; `stroke` blend max; composite `lift`; mask 1): it takes away the step its stroke starts on, wherever that step is still the top layer, toward a keyframe of the paint before that step. `docs/design/lift-eraser.md` has the decisions: the stamp map that every commit writes, the keyframes that hold it, the keyframes pinned for lifts, and why a lift does not reach under a later layer.
+
 The masks are judged by eye in #128 on the corpus (the `?dev` tool of §13 step 5 exists for that), and the tests pin what the issue says: a dry brush across a crease leaves the crease's texels unchanged (mask 0 where `cavity ≤ t`), a wash across an edge leaves the edge's texels within a tolerance and darkens the crease's, an ink changes every texel under it and the crease's more, an airbrush from above changes no texel whose normal faces down (`dot ≤ AIR_DIR_EDGE`). Each is one assertion on `toolMask` in Node and one on the paint read back through the hook (§13).
 
 ## 7. The fill and the ready regions
@@ -327,6 +329,8 @@ The history is the list of `PaintStep`s applied, a cursor, and **keyframes**: co
 Why replay and not snapshots or tiles: a snapshot per step is 4 MB a step, 200 MB for fifty; tiles need the stroke's footprint read back after every stroke; replay needs nothing read back, makes the stroke data the truth, and is bounded by the keyframes. A replayed stroke equals the live stroke because every input is in the step (the camera and its viewport decide the depth map, the dabs the coverage) and the passes are deterministic on one GPU; §13 step 7 proves it with a pixel test (undo, redo, compare the bytes).
 
 **As built (2026-10-13, #127):** a step beyond `UNDO_STEPS` drops the oldest keyframe only; the steps it covered stay in the record (`history()` gives every step since the paint was opened), they can no longer be undone.
+
+**Changed (2026-10-16, #137):** a keyframe holds the paint and its stamp map (`docs/design/lift-eraser.md` §5); undo reaches back to `oldest`, the newest keyframe of the schedule that leaves `UNDO_STEPS` to undo, and a keyframe off the schedule is pinned for each step a lift stroke in the history takes away, kept while undo may replay that lift (§6 there). `apply` gets the step's index, the number it stamps.
 
 `history.ts` holds this logic over an interface of four operations (`snapshot(i)`, `restore(i)`, `apply(step)`, `drop(i)`), so `history.test.ts` runs in Node with a fake backend and pins the schedule: which keyframes exist after n steps, how many replays an undo at step n costs, what a new step after undo drops.
 
