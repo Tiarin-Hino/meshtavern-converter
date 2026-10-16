@@ -177,7 +177,8 @@ describe('PaintHistory and the lift (#137)', () => {
     expect(history.oldest).toBe(10);
     expect(history.pin(9)).toBe(false);
     expect(history.pin(10)).toBe(true);
-    expect(history.pin(66)).toBe(false);
+    // Only an applied step can be lifted: the paint before it is never the paint as it is.
+    expect(history.pin(65)).toBe(false);
   });
 
   it('lets a pin go that no lift stroke took: cancelled, or nothing laid', () => {

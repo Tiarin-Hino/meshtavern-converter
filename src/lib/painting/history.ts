@@ -124,18 +124,14 @@ export class PaintHistory {
 
   /**
    * A keyframe of the paint after `at` steps, for a lift stroke starting now that takes away step
-   * `at` (#137): false when undo no longer reaches there (painted too long ago). When none is kept
+   * `at` (#137): false when undo no longer reaches there (painted too long ago), or `at` is no applied step. When none is kept
    * at `at`, it is made: the paint as it is kept aside, the nearest keyframe restored, the steps up
    * to `at` replayed, the keyframe taken, the paint put back. It stays while a lift step points at
    * it; until the stroke is pushed, `prune` lets it go.
    */
   pin(at: number): boolean {
-    if (!Number.isInteger(at) || at < this.floor || at > this.cursor) return false;
+    if (!Number.isInteger(at) || at < this.floor || at >= this.cursor) return false;
     if (this.keyframes.includes(at)) return true;
-    if (at === this.cursor) {
-      this.add(at);
-      return true;
-    }
     this.backend.snapshot(TEMPORARY);
     const from = this.nearest(at);
     this.backend.restore(from);
