@@ -1,8 +1,8 @@
 # Design: a mask that protects parts of the mini from every tool (#138)
 
-Status: design and build by Opus 5.5, 2026-10-16 (the PM said to go on without a Fable pass) · Issue: #138 · Builds on: `docs/design/painting-engine.md` (#127, §5 the passes, §7 the fill, §8 undo and redo), `docs/design/lift-eraser.md` (#137, the stamp map and the keyframes)
+Status: design and build by Opus 5.5, 2026-10-16 (the PM said to go on without a Fable pass); every _(proposal)_ below accepted by the PM on PR #177, 2026-10-17: the tint's colour and strength, the tint shown and hidden as a view setting shown at open, `MASK_CUT` 0.5, partial mask at partial opacity, the words, and hidden parts left to #139 · Issue: #138 · Builds on: `docs/design/painting-engine.md` (#127, §5 the passes, §7 the fill, §8 undo and redo), `docs/design/lift-eraser.md` (#137, the stamp map and the keyframes)
 
-Every number and name marked _(proposal)_ is the PM's to change.
+Every number and name marked _(proposal)_ was the PM's to change; all were accepted as they are (PR #177, 2026-10-17).
 
 ## 1. What the PM asked
 

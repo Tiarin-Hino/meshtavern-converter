@@ -45,4 +45,4 @@ None in the engine. The ring of cast points in the test is the one dropped appro
 
 - Whether a hidden part (#139) is also masked is #139's decision; nothing here assumes it.
 - When the paint file (#165) lands, the mask's steps are in the history it saves; the mask's pixels go with the paint's where a consumer keeps pixels.
-- The tint's colour and strength (`MASK_TINT`, `MASK_TINT_STRENGTH`), `MASK_CUT` and the words in `PAINT_COPY` are proposals for the PM.
+- The tint's colour and strength (`MASK_TINT`, `MASK_TINT_STRENGTH`), the tint as a view setting, `MASK_CUT` and the words in `PAINT_COPY` were proposals; the PM accepted all of them on PR #177 (2026-10-17).
