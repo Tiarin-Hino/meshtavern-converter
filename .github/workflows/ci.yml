@@ -16,8 +16,8 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     # The e2e run alone takes 11–20 minutes since the painting spec (#127), depending on the
-    # runner; 25 minutes in all cut off a run that passed (#156). Since the mask's tests (#138)
-    # the e2e run takes about 31 minutes, and 35 in all cut it off.
+    # runner; 25 minutes in all cut off a run that passed (#156). It had grown to 28.5 minutes on
+    # main by #175; with the mask's tests (#138) it takes about 31, and 35 in all cut it off.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
