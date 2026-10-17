@@ -1700,3 +1700,320 @@ test('shows the colours used as swatches in the Paint tool, and a click paints w
   await expect(swatches).toHaveCount(1);
   await expect(swatches.first()).toHaveAttribute('data-colour', '#b03030');
 });
+// The mask (#138, design note `docs/design/paint-mask.md`): masked surface keeps its bytes under
+// every tool; the mask is made with its own tools, each one step, goes in and out as pixels, shows
+// as a tint, and cuts the fill.
+
+/** Lays a band of mask on the chest, 14 mm up, across it from the front at a 4 mm brush. */
+async function maskTheChest(page: Page, paint: 'all' | null = null): Promise<void> {
+  await page.evaluate(async (paint) => {
+    const painting = window.__mt.painting;
+    await painting.open(paint);
+    const view = painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const at = (x: number): [number, number, number] =>
+      view.texelAt(...view.screenOf([x, 14, 6]))!.point;
+    view.setTool('mask');
+    view.setBrush({ sizeMm: 4, hardness: 0.8, opacity: 1 });
+    await view.stroke([at(-3), at(-1.5), at(0), at(1.5), at(3)]);
+  }, paint);
+}
+
+test('keeps a masked area’s bytes under every tool, a wash over the whole figure included (#138)', async ({
+  figurePage: page,
+}) => {
+  await maskTheChest(page, 'all');
+  const outcome = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const at = (x: number, y: number): [number, number, number] =>
+      view.texelAt(...view.screenOf([x, y, 6]))!.point;
+    const mask = (await view.mask()).data;
+    const opened = window.__mt.painting.testPaint('all').data;
+    // Every stroke tool down the whole front of the figure at the largest brush, a fill of the
+    // figure, then a flat stroke across the mask and a lift started beside the mask.
+    view.setColour('#0000ff');
+    const down = [24, 19, 14, 9, 4].map((y) => at(0, y));
+    for (const tool of ['flat', 'wash', 'ink', 'dry', 'airbrush', 'eraser'] as const) {
+      view.setTool(tool);
+      view.setBrush({ sizeMm: 16, hardness: 0.8, opacity: 1 });
+      await view.stroke(down);
+    }
+    await view.fillRegion('figure');
+    view.setTool('flat');
+    view.setColour('#00ff00');
+    view.setBrush({ sizeMm: 6 });
+    await view.stroke([at(-4, 14), at(4, 14)]);
+    view.setTool('lift');
+    await view.stroke([at(0, 16.8), at(0, 11.2)]);
+    const lift = view.state.lift;
+    const { data } = await view.paint();
+    let masked = 0;
+    let kept = 0;
+    let changed = 0;
+    for (let texel = 0; texel < mask.length; texel++) {
+      const same = [0, 1, 2, 3].every((k) => data[texel * 4 + k] === opened[texel * 4 + k]);
+      if (mask[texel] === 255) {
+        masked++;
+        if (same) kept++;
+      } else if (!same) changed++;
+    }
+    return { masked, kept, changed, lift, steps: view.state.steps };
+  });
+  expect(outcome.masked).toBeGreaterThan(500);
+  expect(outcome.kept).toBe(outcome.masked);
+  expect(outcome.changed).toBeGreaterThan(10_000);
+  // The lift took a step away beside the mask (which one is on top there is the brushes' business).
+  expect(outcome.lift).toHaveProperty('lifted');
+  expect(outcome.steps).toBe(10);
+});
+
+test('makes the mask with its brush, eraser, fill, clear and invert, each one step, undone and redone to the same bytes (#138)', async ({
+  figurePage: page,
+}) => {
+  await maskTheChest(page);
+  await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const store = window as unknown as { masks: Uint8Array[] };
+    store.masks = [new Uint8Array(1024 * 1024), (await view.mask()).data];
+    // The mask eraser, narrower, along the band; the base masked as a ready region.
+    view.setTool('unmask');
+    view.setBrush({ sizeMm: 1.5 });
+    await view.stroke([-3, 0, 3].map((x) => view.texelAt(...view.screenOf([x, 14, 6]))!.point));
+    store.masks.push((await view.mask()).data);
+    await view.maskRegion('base');
+    store.masks.push((await view.mask()).data);
+    view.setTool('mask-fill');
+    view.setBrush({ tolerance: 0.5 });
+  });
+  // A tap with the mask fill on the head.
+  const head = await page.evaluate(() => window.__mt.painting.view().screenOf([0, 28.5, 3.8]));
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  await page.mouse.click(box.x + head[0], box.y + head[1]);
+  await page.waitForFunction(() => window.__mt.painting.view().state.steps === 4);
+  const outcome = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const store = window as unknown as { masks: Uint8Array[] };
+    store.masks.push((await view.mask()).data);
+    await view.invertMask();
+    store.masks.push((await view.mask()).data);
+    await view.clearMask();
+    store.masks.push((await view.mask()).data);
+    const masks = store.masks;
+    const count = (mask: Uint8Array): number => mask.filter((value) => value === 255).length;
+    const same = (a: Uint8Array, b: Uint8Array): boolean => a.every((value, k) => value === b[k]);
+    const within = (a: Uint8Array, b: Uint8Array): boolean => a.every((value, k) => value <= b[k]!);
+    const inverted = masks[5]!.every((value, k) => value === 255 - masks[4]![k]!);
+    const kinds = view
+      .history()
+      .map((step) => `${step.kind}:${'tool' in step ? step.tool : step.change}`);
+    // The paint stays bare all along: the mask is not in it.
+    const paint = (await view.paint()).data;
+    let painted = 0;
+    for (let k = 3; k < paint.length; k += 4) if (paint[k] !== 0) painted++;
+    // Undo all six, each back to the mask before it; redo all six.
+    const undone: boolean[] = [];
+    for (let k = 5; k >= 0; k--) {
+      await view.undo();
+      undone.push(same((await view.mask()).data, masks[k]!));
+    }
+    const redone: boolean[] = [];
+    for (let k = 1; k <= 6; k++) {
+      await view.redo();
+      redone.push(same((await view.mask()).data, masks[k]!));
+    }
+    return {
+      counts: masks.map(count),
+      erasedWithin: within(masks[2]!, masks[1]!),
+      baseAdded: within(masks[2]!, masks[3]!),
+      headAdded: within(masks[3]!, masks[4]!),
+      inverted,
+      kinds,
+      painted,
+      undone,
+      redone,
+    };
+  });
+  const [none, brushed, erased, base, onHead, inverse, cleared] = outcome.counts as number[];
+  expect(none).toBe(0);
+  expect(brushed).toBeGreaterThan(500);
+  expect(erased).toBeLessThan(brushed!);
+  expect(erased).toBeGreaterThan(100);
+  expect(outcome.erasedWithin).toBe(true);
+  expect(base).toBeGreaterThan(erased! + 5000);
+  expect(outcome.baseAdded).toBe(true);
+  expect(onHead).toBeGreaterThan(base! + 500);
+  expect(outcome.headAdded).toBe(true);
+  expect(outcome.inverted).toBe(true);
+  expect(inverse).toBeGreaterThan(onHead!);
+  expect(cleared).toBe(0);
+  expect(outcome.kinds).toEqual([
+    'stroke:mask',
+    'stroke:unmask',
+    'fill:mask-fill',
+    'fill:mask-fill',
+    'mask:invert',
+    'mask:clear',
+  ]);
+  expect(outcome.painted).toBe(0);
+  expect(outcome.undone).toEqual([true, true, true, true, true, true]);
+  expect(outcome.redone).toEqual([true, true, true, true, true, true]);
+});
+
+test('gives the mask back as pixels, opens on it again, inverted paints only where it was, and tints it (#138)', async ({
+  figurePage: page,
+}) => {
+  await maskTheChest(page);
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    const frame = (): Promise<unknown> => new Promise((resolve) => requestAnimationFrame(resolve));
+    let view = painting.view();
+    const mask = await view.mask();
+    // The tint: the masked chest looks bluer than with the tint off; the head the same either way.
+    const chest = view.screenOf([0, 14, 6]);
+    const head = view.screenOf([0, 28.5, 3.8]);
+    const rgb = (hex: string | null): number[] =>
+      [1, 3, 5].map((k) => parseInt(hex!.slice(k, k + 2), 16));
+    const look = async (): Promise<{ chest: number[]; head: number[] }> => ({
+      chest: rgb(await view.colourAt(...chest)),
+      head: rgb(await view.colourAt(...head)),
+    });
+    const shown = await look();
+    view.setMaskShown(false);
+    const hidden = await look();
+    const maskShown = view.state.maskShown;
+    view.setMaskShown(true);
+
+    // Opened again on the mask: the same bytes, no step.
+    await painting.open(null, mask);
+    view = painting.view();
+    view.setCamera(0, 5, 1.6);
+    await frame();
+    const reopened = (await view.mask()).data.every((value, k) => value === mask.data[k]);
+    const steps = view.state.steps;
+    const across = [-4, -2, 0, 2, 4].map((x) => view.texelAt(...view.screenOf([x, 14, 6]))!.point);
+    const paintAcross = async (): Promise<{
+      inside: number[];
+      outside: number;
+    }> => {
+      view.setTool('flat');
+      view.setBrush({ sizeMm: 16, hardness: 0.8, opacity: 1 });
+      await view.stroke(across);
+      const { data } = await view.paint();
+      const inside: number[] = [];
+      let outside = 0;
+      for (let texel = 0; texel < mask.data.length; texel++) {
+        const alpha = data[texel * 4 + 3]!;
+        if (mask.data[texel] === 255) inside.push(alpha);
+        else if (mask.data[texel] === 0 && alpha !== 0) outside++;
+      }
+      return { inside, outside };
+    };
+    const masked = await paintAcross();
+    await view.undo();
+    await view.invertMask();
+    const inverted = await paintAcross();
+    return {
+      shown,
+      hidden,
+      maskShown,
+      reopened,
+      steps,
+      masked: {
+        inside: masked.inside.filter((a) => a !== 0).length,
+        outside: masked.outside,
+      },
+      inverted: {
+        inside: inverted.inside.filter((a) => a !== 255).length,
+        count: inverted.inside.length,
+        outside: inverted.outside,
+      },
+    };
+  });
+  expect(outcome.maskShown).toBe(false);
+  // Bluer under the tint, and less red; the head untouched by it.
+  expect(outcome.shown.chest[2]! - outcome.shown.chest[0]!).toBeGreaterThan(
+    outcome.hidden.chest[2]! - outcome.hidden.chest[0]! + 20,
+  );
+  for (let k = 0; k < 3; k++)
+    expect(Math.abs(outcome.shown.head[k]! - outcome.hidden.head[k]!)).toBeLessThanOrEqual(1);
+  expect(outcome.reopened).toBe(true);
+  expect(outcome.steps).toBe(0);
+  // Masked: nothing inside the mask, plenty around it.
+  expect(outcome.masked.inside).toBe(0);
+  expect(outcome.masked.outside).toBeGreaterThan(5000);
+  // Inverted ("paint only the chest"): all of the band painted, nothing that was open.
+  expect(outcome.inverted.count).toBeGreaterThan(500);
+  expect(outcome.inverted.inside).toBe(0);
+  expect(outcome.inverted.outside).toBe(0);
+});
+
+test('stops a fill at a band of mask around the body, and fills past it without the band (#138)', async ({
+  figurePage: page,
+}) => {
+  const fillFromTheChest = async (): Promise<void> => {
+    const chest = await page.evaluate(async () => {
+      const view = window.__mt.painting.view();
+      view.setCamera(0, 5, 1.6);
+      view.setTool('fill');
+      view.setBrush({ tolerance: 1, opacity: 1 });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return view.screenOf([0, 17, 6]);
+    });
+    const box = (await page.locator('#paint-view canvas').boundingBox())!;
+    const before = await page.evaluate(() => window.__mt.painting.view().state.steps);
+    await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+    await page.waitForFunction(
+      (before) => window.__mt.painting.view().state.steps === before + 1,
+      before,
+    );
+  };
+  const above = Array.from({ length: 5 }, (_, k): [number, number, number] => [-2 + k, 18, 6]);
+  const below = Array.from({ length: 5 }, (_, k): [number, number, number] => [-2 + k, 6.5, 6]);
+
+  await page.evaluate(() => window.__mt.painting.open());
+  await fillFromTheChest();
+  const whole = {
+    above: await alphasAt(page, [0, 5, 1.6], above),
+    below: await alphasAt(page, [0, 5, 1.6], below),
+  };
+
+  // A band of mask all round the body 10 mm up: from eight sides, a stroke along the table
+  // level's vertices there that the side has in sight, in order round the body; then the same fill.
+  const strokes = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    const table = painting.table()!;
+    const ring: [number, number, number][] = [];
+    for (let v = 0; v < table.positions.length / 3; v++) {
+      const [x, y, z] = [0, 1, 2].map((k) => table.positions[v * 3 + k]!);
+      // The body only: the arms hang beside it from 12 mm up, 4 mm out and more.
+      if (Math.abs(y! - 10) < 0.3 && Math.abs(x!) < 5.6) ring.push([x!, y!, z!]);
+    }
+    ring.sort((a, b) => Math.atan2(a[2], a[0]) - Math.atan2(b[2], b[0]));
+    view.setTool('mask');
+    view.setBrush({ sizeMm: 5, hardness: 0.9, opacity: 1 });
+    for (let side = 0; side < 8; side++) {
+      view.setCamera(side * 45, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const seen = ring.filter((point) => {
+        const hit = view.texelAt(...view.screenOf(point));
+        return hit !== null && Math.hypot(...point.map((c, k) => c - hit.point[k]!)) < 0.3;
+      });
+      await view.stroke(seen);
+    }
+    return view.state.steps;
+  });
+  expect(strokes).toBe(8);
+  await fillFromTheChest();
+  const cut = {
+    above: await alphasAt(page, [0, 5, 1.6], above),
+    below: await alphasAt(page, [0, 5, 1.6], below),
+  };
+  for (const seen of [whole.above, whole.below, cut.above, cut.below]) expect(seen).toHaveLength(5);
+  expect(whole.above.filter((seen) => seen.alpha !== 255)).toEqual([]);
+  expect(whole.below.filter((seen) => seen.alpha !== 255)).toEqual([]);
+  expect(cut.above.filter((seen) => seen.alpha !== 255)).toEqual([]);
+  expect(cut.below.filter((seen) => seen.alpha !== 0)).toEqual([]);
+});

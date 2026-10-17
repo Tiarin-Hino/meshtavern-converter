@@ -4,6 +4,7 @@ import {
   DAB_SPACING,
   DEFAULT_BRUSH,
   DEFAULT_PAINT_COLOUR,
+  isFillTool,
   MOUSE_PRESSURE,
   PAINT_SIZE,
   TOOL_IDS,
@@ -11,6 +12,9 @@ import {
   unitDirection,
   type BrushSettings,
   type DabHit,
+  type FillToolId,
+  type MaskChange,
+  type PaintMask,
   type PaintRegions,
   type FillSeed,
   type PaintFill,
@@ -36,6 +40,7 @@ import {
   updateLookUniforms,
 } from '../three/baked-material';
 import { ownCopy } from '../three/compressed-texture';
+import { MASK_TINT, MASK_TINT_STRENGTH } from '../three/scene-colours';
 import { PAINT_COPY, type PaintCopy } from './copy';
 import {
   BRUSH_DEPTH_MM,
@@ -43,8 +48,10 @@ import {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  MASK_CUT,
   PAINT_DILATION_RINGS,
   PaintPasses,
+  disposeKeyframe,
   stampedStep,
   type Keyframe,
   type PaintSurface,
@@ -59,10 +66,16 @@ export {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  MASK_CUT,
   PAINT_DILATION_RINGS,
   KEYFRAME_EVERY,
   UNDO_STEPS,
+  MASK_TINT,
+  MASK_TINT_STRENGTH,
 };
+
+/** The mask's tint is shown when a view is mounted (#138). _(proposal)_ */
+export const MASK_SHOWN = true;
 
 /** The brush's diameter on the surface, in mm, at least and at most. _(proposal)_ */
 export const BRUSH_MIN_MM = 0.5;
@@ -100,6 +113,8 @@ export interface MiniToPaint {
   paint?: Albedo | null;
   /** The ready regions of the fill (§7.2): `regionsOf(...)`, kept by the consumer or made again. Left out: no ready regions. */
   regions?: PaintRegions | null;
+  /** The mask to continue from (#138), PAINT_SIZE square, a byte a texel, as `mask()` gave it; left out or null: nothing masked. */
+  mask?: PaintMask | null;
 }
 
 export interface PaintPerf {
@@ -136,6 +151,8 @@ export interface PaintingState {
   perf: PaintPerf;
   /** What the last lift stroke since `open` found under its start (#137); null before the first. */
   lift: LiftOutcome | null;
+  /** The mask's tint is drawn over the masked surface (#138). */
+  maskShown: boolean;
 }
 
 export interface PaintingView {
@@ -151,6 +168,16 @@ export interface PaintingView {
   setNavigating(on: boolean): void;
   /** Fills a ready region (§7.2); a tap with the fill tool fills the region under it. */
   fillRegion(region: 'base' | 'figure'): Promise<void>;
+  /** Masks a ready region (#138): a mask fill of it, one step; a tap with `mask-fill` masks the region under it. */
+  maskRegion(region: 'base' | 'figure'): Promise<void>;
+  /** Clears the mask (#138): one step. */
+  clearMask(): Promise<void>;
+  /** Inverts the mask, masked texels open and open ones masked (#138): one step. */
+  invertMask(): Promise<void>;
+  /** The mask as pixels (#138): PAINT_SIZE square, a byte a texel, 0 open … 255 masked, row 0 at v = 0. Never part of `paint()`. */
+  mask(): Promise<PaintMask>;
+  /** Draws the mask's tint over the masked surface, or not (#138): no step. */
+  setMaskShown(on: boolean): void;
   undo(): Promise<void>;
   redo(): Promise<void>;
   /** The paint as pixels: PAINT_SIZE square, sRGB, straight alpha, row 0 at v = 0. Resolves after the GPU read. */
@@ -204,6 +231,12 @@ interface Opened {
   uniforms: ReturnType<typeof createLookUniforms>;
 }
 
+/** The tint's uniform (#138): the mask's colour, linear, and its strength, 0 while hidden. */
+const tintOf = (shown: boolean): THREE.Vector4 => {
+  const { r, g, b } = new THREE.Color(MASK_TINT);
+  return new THREE.Vector4(r, g, b, shown ? MASK_TINT_STRENGTH : 0);
+};
+
 /** The stroke on the canvas, not yet committed. */
 interface LiveStroke {
   step: PaintStroke;
@@ -230,6 +263,9 @@ class Painting implements PaintingView {
   private timeline: PaintHistory | null = null;
   private readonly keyframes = new Map<number, Keyframe>();
   private lift: LiftOutcome | null = null;
+  /** The mask's tint (#138), shared by every mini this view opens. */
+  private readonly tint = { value: tintOf(MASK_SHOWN) };
+  private maskShown = MASK_SHOWN;
   private tool: ToolId = 'flat';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
   private colour = DEFAULT_PAINT_COLOUR;
@@ -280,6 +316,7 @@ class Painting implements PaintingView {
       painting: this.live !== null,
       perf: this.perf,
       lift: this.lift,
+      maskShown: this.maskShown,
     };
   }
 
@@ -290,7 +327,7 @@ class Painting implements PaintingView {
   }
 
   open(mini: MiniToPaint): Promise<void> {
-    const { mesh, paint, regions } = mini;
+    const { mesh, paint, regions, mask } = mini;
     if (!mesh.uvs || !mesh.normals) throw new RangeError(this.copy.cannotPaint);
     if (
       paint &&
@@ -299,6 +336,13 @@ class Painting implements PaintingView {
         paint.data.length !== PAINT_SIZE * PAINT_SIZE * 4)
     )
       throw new RangeError(`A paint is ${PAINT_SIZE} × ${PAINT_SIZE} texels, four bytes each`);
+    if (
+      mask &&
+      (mask.width !== PAINT_SIZE ||
+        mask.height !== PAINT_SIZE ||
+        mask.data.length !== PAINT_SIZE * PAINT_SIZE)
+    )
+      throw new RangeError(`A mask is ${PAINT_SIZE} × ${PAINT_SIZE} texels, a byte each`);
     if (regions && regions.base.length !== mesh.indices.length / 3)
       throw new RangeError('The regions are not this mesh’s: one byte per triangle');
     const texture = ownTexture(mini.texture);
@@ -329,7 +373,7 @@ class Painting implements PaintingView {
       texture.dispose();
     };
     try {
-      await this.passes.open(geometry, mesh, texture, mini.paint ?? null);
+      await this.passes.open(geometry, mesh, texture, mini.paint ?? null, mini.mask ?? null);
     } catch (error) {
       drop();
       if (abandoned()) return;
@@ -340,7 +384,10 @@ class Painting implements PaintingView {
       drop();
       return;
     }
-    const material = createBakedMaterial(texture, uniforms, { map: this.passes.liveTexture });
+    const material = createBakedMaterial(texture, uniforms, {
+      map: this.passes.liveTexture,
+      tint: { map: this.passes.maskTexture, uniform: this.tint },
+    });
     const shown = new THREE.Mesh(geometry, material);
     const box = new THREE.Box3().setFromArray(mesh.positions);
     const size = box.getSize(new THREE.Vector3());
@@ -359,8 +406,7 @@ class Painting implements PaintingView {
       apply: (step, index) => this.replay(step, index),
       drop: (at) => {
         const keyframe = this.keyframes.get(at);
-        keyframe?.paint.dispose();
-        keyframe?.stamp.dispose();
+        if (keyframe) disposeKeyframe(keyframe);
         this.keyframes.delete(at);
       },
     });
@@ -433,22 +479,60 @@ class Painting implements PaintingView {
   fillRegion(region: 'base' | 'figure'): Promise<void> {
     if (!this.opened?.regions)
       return Promise.reject(new RangeError('This mini has no ready regions to fill'));
-    return this.fill({ kind: region });
+    return this.fill({ kind: region }, 'fill');
   }
 
-  /** A fill (§7): one step, its region found from its seed, applied as a replay would. */
-  private async fill(seed: FillSeed): Promise<void> {
+  maskRegion(region: 'base' | 'figure'): Promise<void> {
+    if (!this.opened?.regions)
+      return Promise.reject(new RangeError('This mini has no ready regions to mask'));
+    return this.fill({ kind: region }, 'mask-fill');
+  }
+
+  clearMask(): Promise<void> {
+    return this.changeMask('clear');
+  }
+
+  invertMask(): Promise<void> {
+    return this.changeMask('invert');
+  }
+
+  async mask(): Promise<PaintMask> {
+    this.commitLive();
+    const data = await this.passes.readMask();
+    return { width: PAINT_SIZE, height: PAINT_SIZE, data };
+  }
+
+  setMaskShown(on: boolean): void {
+    this.maskShown = on;
+    this.tint.value.w = on ? MASK_TINT_STRENGTH : 0;
+    this.emit();
+  }
+
+  /** A fill (§7), of the paint or of the mask (#138): one step, its region found from its seed, applied as a replay would. */
+  private async fill(seed: FillSeed, tool: FillToolId): Promise<void> {
     this.commitLive();
     if (!this.opened || !this.timeline) return;
     const step: PaintFill = {
       kind: 'fill',
-      tool: 'fill',
+      tool,
       colour: this.colour,
       brush: { ...this.brush },
       seed,
     };
-    this.replay(step, this.timeline.applied);
-    this.timeline.push(step);
+    await this.apply(step);
+  }
+
+  /** The mask cleared or inverted (#138): one step. */
+  private async changeMask(change: MaskChange['change']): Promise<void> {
+    this.commitLive();
+    if (!this.opened || !this.timeline) return;
+    await this.apply({ kind: 'mask', change });
+  }
+
+  /** A step that is not a stroke, applied as its replay and pushed. */
+  private async apply(step: PaintFill | MaskChange): Promise<void> {
+    this.replay(step, this.timeline!.applied);
+    this.timeline!.push(step);
     this.emit();
     await this.scene.nextFrame();
   }
@@ -571,7 +655,7 @@ class Painting implements PaintingView {
   private beginLive(first: NonNullable<DabHit>, touch = false): void {
     if (!this.opened) return;
     const tool = this.tool;
-    if (tool === 'fill') throw new RangeError('The fill tool fills; it does not stroke');
+    if (isFillTool(tool)) throw new RangeError('A fill tool fills; it does not stroke');
     // A lift finds its step before anything is drawn: making its keyframe may replay steps.
     const lift = tool === 'lift' ? this.findLift(first.point) : null;
     const lifted = lift && 'lifted' in lift ? lift.lifted : null;
@@ -669,11 +753,17 @@ class Painting implements PaintingView {
   /**
    * A step applied again, exactly as the first time (§8): a stroke renders its depth map from its
    * own camera at its own viewport and draws all its dabs (a lift toward the keyframe the history
-   * keeps for it, #137); the result is committed as step `index`.
+   * keeps for it, #137); a picked fill floods up to the mask as it is now (#138); the result is
+   * committed as step `index`.
    */
   private replay(step: PaintStep, index: number): void {
     const opened = this.opened;
     if (!opened) return;
+    if (step.kind === 'mask') {
+      this.passes.changeMask(step.change);
+      this.passes.commitMask();
+      return;
+    }
     if (step.kind === 'stroke') {
       this.passes.beginStroke(step.camera);
       const beneath = step.lifts === undefined ? undefined : this.keyframes.get(step.lifts);
@@ -684,6 +774,7 @@ class Painting implements PaintingView {
         tolerance: step.brush.tolerance,
         regions: opened.regions,
         adjacency: opened.adjacency,
+        cut: step.seed.kind === 'picked' ? this.passes.readCut() : null,
       });
       this.passes.clearStroke();
       this.passes.drawRegion(opened.mesh, triangles);
@@ -731,8 +822,8 @@ class Painting implements PaintingView {
         if (!this.opened || this.scene.isNavigating || event.button !== 0) return;
         const hit = this.hitAt(...at(event));
         if (!hit) return;
-        if (this.tool === 'fill') {
-          void this.fillAt(hit.triangle, hit.point);
+        if (isFillTool(this.tool)) {
+          void this.fillAt(this.tool, hit.triangle, hit.point);
           return;
         }
         this.commitLive();
@@ -768,7 +859,7 @@ class Painting implements PaintingView {
 
   /** The cursor ring (§9): the brush's size at the surface under the pointer; not on touch, off the mini or with the fill tool. */
   private moveCursor(event: PointerEvent, [x, y]: [number, number]): void {
-    const hit = event.pointerType === 'touch' || this.tool === 'fill' ? null : this.hitAt(x, y);
+    const hit = event.pointerType === 'touch' || isFillTool(this.tool) ? null : this.hitAt(x, y);
     this.cursor.hidden = hit === null;
     if (!hit) return;
     const size = Math.max(CURSOR_MIN_PX, this.brush.sizeMm * this.scene.pixelsPerMm(hit.point));
@@ -779,9 +870,9 @@ class Painting implements PaintingView {
     style.height = `${size}px`;
   }
 
-  /** A tap with the fill tool (§9): the region the flood finds from the triangle under it. */
-  private fillAt(triangle: number, point: Vec3): Promise<void> {
-    return this.fill({ kind: 'picked', triangle, point });
+  /** A tap with a fill tool (§9): the region the flood finds from the triangle under it. */
+  private fillAt(tool: FillToolId, triangle: number, point: Vec3): Promise<void> {
+    return this.fill({ kind: 'picked', triangle, point }, tool);
   }
 }
 

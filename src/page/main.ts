@@ -47,6 +47,7 @@ import {
   type PartsOptions,
   type KindGuess,
   type Albedo,
+  type PaintMask,
   PAINT_SIZE,
   regionsOf,
 } from '../lib';
@@ -208,10 +209,11 @@ declare global {
       state: AppState;
       /**
        * The team's Paint tool (#127, under ?dev): opens the painting view on the converted mini,
-       * with the test paint `paint` (#125's) to continue from, and gives the view for the tests.
+       * with the test paint `paint` (#125's) and a mask (#138) to continue from, and gives the
+       * view for the tests.
        */
       painting: Omit<PaintHooks, 'open'> & {
-        open: (paint?: TestPaint) => Promise<void>;
+        open: (paint?: TestPaint | null, mask?: PaintMask | null) => Promise<void>;
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
       };
@@ -1873,7 +1875,8 @@ window.__mt = {
   state,
   painting: {
     ...paintTool,
-    open: (paint) => paintTool.open(paint && baked ? testPaintAlbedo(baked.mesh, paint) : null),
+    open: (paint, mask) =>
+      paintTool.open(paint && baked ? testPaintAlbedo(baked.mesh, paint) : null, mask),
     testPaint: (paint) => {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);

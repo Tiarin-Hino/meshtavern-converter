@@ -7,6 +7,7 @@ import {
   type BrushSettings,
   type IndexedMesh,
   type Look,
+  type PaintMask,
   type PaintRegions,
   type ToolId,
 } from '../lib';
@@ -42,8 +43,8 @@ export interface MiniForPainting {
 
 /** The tool's hooks: the view's methods, forwarded, and the tool's own open and close. */
 export interface PaintHooks {
-  /** Opens the view on the converted mini, with a paint to continue from or bare. */
-  open: (paint?: Albedo | null) => Promise<void>;
+  /** Opens the view on the converted mini, with a paint and a mask (#138) to continue from, or bare. */
+  open: (paint?: Albedo | null, mask?: PaintMask | null) => Promise<void>;
   close: () => void;
   /** The view while it is open; its methods are what the tests call. */
   view: () => PaintingView;
@@ -68,6 +69,9 @@ const SLIDERS: Record<
   ink: { show: ['sizeMm', 'opacity'], opacity: 'flow' },
   dry: { show: ['sizeMm', 'opacity'], opacity: 'pressure' },
   airbrush: { show: ['sizeMm', 'opacity', 'direction'], opacity: 'flow' },
+  mask: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
+  unmask: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
+  'mask-fill': { show: ['opacity', 'tolerance'], opacity: 'opacity' },
 };
 
 type Vec3 = [number, number, number];
@@ -96,6 +100,11 @@ interface Panel {
   pickMode: HTMLSelectElement;
   base: HTMLButtonElement;
   figure: HTMLButtonElement;
+  maskBase: HTMLButtonElement;
+  maskFigure: HTMLButtonElement;
+  maskClear: HTMLButtonElement;
+  maskInvert: HTMLButtonElement;
+  maskShow: HTMLButtonElement;
   undo: HTMLButtonElement;
   redo: HTMLButtonElement;
   navigate: HTMLButtonElement;
@@ -125,6 +134,11 @@ function findPanel(root: Document): Panel | null {
     pickMode: get('paint-pick-mode')!,
     base: get('paint-base')!,
     figure: get('paint-figure')!,
+    maskBase: get('paint-mask-base')!,
+    maskFigure: get('paint-mask-figure')!,
+    maskClear: get('paint-mask-clear')!,
+    maskInvert: get('paint-mask-invert')!,
+    maskShow: get('paint-mask-show')!,
     undo: get('paint-undo')!,
     redo: get('paint-redo')!,
     navigate: get('paint-navigate')!,
@@ -184,6 +198,9 @@ export function createPaintTool(
     showRecent(state);
     panel.base.disabled = !state.regions.includes('base');
     panel.figure.disabled = !state.regions.includes('figure');
+    panel.maskBase.disabled = !state.regions.includes('base');
+    panel.maskFigure.disabled = !state.regions.includes('figure');
+    panel.maskShow.setAttribute('aria-pressed', String(state.maskShown));
     panel.undo.disabled = state.steps === 0;
     panel.redo.disabled = state.undone === 0;
     panel.navigate.setAttribute('aria-pressed', String(state.navigating));
@@ -233,7 +250,10 @@ export function createPaintTool(
     return view;
   };
 
-  const open = async (paint: Albedo | null = null): Promise<void> => {
+  const open = async (
+    paint: Albedo | null = null,
+    mask: PaintMask | null = null,
+  ): Promise<void> => {
     const found = mini();
     if (!found) throw new Error('No baked mini to paint');
     close();
@@ -245,6 +265,7 @@ export function createPaintTool(
       texture: found.texture,
       look: found.look,
       paint,
+      mask,
       regions: found.regions,
     });
   };
@@ -312,6 +333,18 @@ export function createPaintTool(
     panel.colour.addEventListener('input', () => current().setColour(panel.colour.value));
     panel.base.addEventListener('click', () => void current().fillRegion('base'));
     panel.figure.addEventListener('click', () => void current().fillRegion('figure'));
+    panel.maskBase.textContent = PAINT_COPY.mask.base;
+    panel.maskFigure.textContent = PAINT_COPY.mask.figure;
+    panel.maskClear.textContent = PAINT_COPY.mask.clear;
+    panel.maskInvert.textContent = PAINT_COPY.mask.invert;
+    panel.maskShow.textContent = PAINT_COPY.mask.show;
+    panel.maskBase.addEventListener('click', () => void current().maskRegion('base'));
+    panel.maskFigure.addEventListener('click', () => void current().maskRegion('figure'));
+    panel.maskClear.addEventListener('click', () => void current().clearMask());
+    panel.maskInvert.addEventListener('click', () => void current().invertMask());
+    panel.maskShow.addEventListener('click', () =>
+      current().setMaskShown(!current().state.maskShown),
+    );
     panel.undo.addEventListener('click', () => void current().undo());
     panel.redo.addEventListener('click', () => void current().redo());
     panel.navigate.addEventListener('click', () =>

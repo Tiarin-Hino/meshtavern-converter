@@ -9,6 +9,8 @@ import {
   PAINT_SIZE,
   unitDirection,
   type BrushSettings,
+  type MaskChange,
+  type PaintMask,
   type StrokeCamera,
   type ToolId,
 } from '../pipeline/brush';
@@ -16,7 +18,7 @@ import { CAVITY_GAIN } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
 import { BLACK } from '../three/scene-colours';
-import { dabGain, strokeOpacity, toolPass } from './tools';
+import { dabGain, ontoMask, strokeOpacity, toolPass } from './tools';
 
 /**
  * The painting engine's GPU side (issue #127, design note `docs/design/painting-engine.md` §5): the
@@ -41,6 +43,10 @@ import { dabGain, strokeOpacity, toolPass } from './tools';
  * - `stamp` (at every commit, #137): at each texel the number of the newest step that changed its
  *   bytes, which a lift stroke reads to find the step it takes away, and by which its composite
  *   changes only the texels where that step is the top layer (`docs/design/lift-eraser.md`).
+ * - `mask` and `maskLive` (#138, `docs/design/paint-mask.md`): a byte a texel, 1 where the surface
+ *   is masked. Every paint composite multiplies its alpha by `1 − mask` at the owner, so a masked
+ *   texel keeps its bytes; the mask's own tools composite into `maskLive`, committed as the paint.
+ * - `cut` (at a picked fill, #138): a texel a triangle, whether the mask covers its middle.
  *
  * `paint`, `live` and the keyframes are sRGB targets (SRGB8_ALPHA8): the GPU decodes on sampling,
  * encodes on writing, and the material samples `live` as it samples an sRGB `DataTexture`. Copies
@@ -71,6 +77,8 @@ export const REFERENCE_BLOCK = 16;
  * recent one; a lift there finds the paint beneath equal to the paint and takes nothing away.
  */
 export const STAMP_MODULUS = 65536;
+/** A triangle is cut from a fill where the mask at its middle is at least this (#138). _(proposal)_ */
+export const MASK_CUT = 0.5;
 /** A dab's hardness is at most this, so the falloff's two edges never meet. */
 const HARDEST = 0.999;
 
@@ -279,6 +287,78 @@ void main() {
 `;
 
 /**
+ * The mask's composite (#138, design note `docs/design/paint-mask.md` §4), into `maskLive`: at the
+ * texel's owner, as the paint's, the stroke's coverage by its opacity laid over the mask or taken
+ * from it. Untouched texels keep their byte.
+ */
+const maskCompositeFragment = (lay: boolean): string => /* glsl */ `${PRECISION}
+uniform sampler2D uMask;
+uniform sampler2D uStroke;
+uniform sampler2D uOwner;
+uniform float uOpacity;
+out vec4 fragColor;
+void main() {
+  ivec2 texel = ivec2( gl_FragCoord.xy );
+  vec4 owner = floor( texelFetch( uOwner, texel, 0 ) * 255.0 + 0.5 );
+  if ( owner.a == 255.0 ) {
+    fragColor = vec4( texelFetch( uMask, texel, 0 ).r, 0.0, 0.0, 1.0 );
+    return;
+  }
+  ivec2 from = ivec2( int( owner.r + owner.g * 256.0 ), int( owner.b + owner.a * 256.0 ) );
+  float mask = texelFetch( uMask, from, 0 ).r;
+  float alpha = uOpacity * texelFetch( uStroke, from, 0 ).r;
+  if ( alpha <= 0.0 ) {
+    fragColor = vec4( mask, 0.0, 0.0, 1.0 );
+    return;
+  }
+  fragColor = vec4( ${lay ? 'mask + alpha * ( 1.0 - mask )' : 'mask * ( 1.0 - alpha )'}, 0.0, 0.0, 1.0 );
+}
+`;
+
+/** The mask changed whole (#138): cleared, or inverted at every texel. */
+const MASK_CHANGE_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uMask;
+uniform bool uInvert;
+out vec4 fragColor;
+void main() {
+  float mask = texelFetch( uMask, ivec2( gl_FragCoord.xy ), 0 ).r;
+  fragColor = vec4( uInvert ? 1.0 - mask : 0.0, 0.0, 0.0, 1.0 );
+}
+`;
+
+/** The fill's cut (#138, §5): a point a triangle, at its slot, the mask at its middle's texel. */
+const CUT_VERTEX = /* glsl */ `${PRECISION}
+in vec3 position;
+in vec2 uv;
+out vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4( position.xy, 0.0, 1.0 );
+  gl_PointSize = 1.0;
+}
+`;
+
+const CUT_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uMask;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  ivec2 texel = clamp( ivec2( floor( vUv * ${PAINT_SIZE.toFixed(1)} ) ), ivec2( 0 ), ivec2( ${PAINT_SIZE - 1} ) );
+  float cut = texelFetch( uMask, texel, 0 ).r >= ${MASK_CUT.toFixed(4)} ? 1.0 : 0.0;
+  fragColor = vec4( cut, 0.0, 0.0, 1.0 );
+}
+`;
+
+/** The mask into an RGBA target, to be read back (#138): R8 is not a format every GPU reads. */
+const MASK_OUT_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uMask;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4( texelFetch( uMask, ivec2( gl_FragCoord.xy ), 0 ).r, 0.0, 0.0, 1.0 );
+}
+`;
+
+/**
  * What the masks read at every texel, at its owner as the composite reads it (#128, for tests):
  * with `uPart` 0 the cavity (R, as `cavity × 0.5 + 0.5`), the occlusion (G) and in B 1 where the
  * texel has an owner; with 1 the normal (RGB, as `n × 0.5 + 0.5`).
@@ -337,6 +417,8 @@ function compositeFragment(tool: ToolId): string {
     float outA = mix( paint.a, beneath.a, alpha );
     vec3 rgb = outA > 0.0 ? mix( paint.rgb * paint.a, beneath.rgb * beneath.a, alpha ) / outA : beneath.rgb;
     fragColor = vec4( rgb, outA );`,
+    mask: '',
+    unmask: '',
   }[pass.composite];
   // A lift changes only the texels whose newest step is the one it takes away (#137).
   const gate =
@@ -355,6 +437,7 @@ uniform sampler2D uDetail;
 uniform sampler2D uReference;
 uniform sampler2D uStamp;
 uniform sampler2D uBeneath;
+uniform sampler2D uMask;
 uniform vec2 uLifted;
 uniform vec3 uColour;
 uniform float uOpacity;
@@ -392,7 +475,9 @@ void main() {
   float occlusion = texelFetch( uAtlas, from, 0 ).g;
   // The stroke's reference (#133): −1 when its first dab covered nothing.
   float reference = texelFetch( uReference, ivec2( 0 ), 0 ).r * 2.0 - 1.0;
-  float alpha = uOpacity * coverage * mtMask( cavity, occlusion, normal, reference );
+  // The mask protects the texel from every tool (#138): fully masked, its bytes as they are.
+  float alpha = uOpacity * coverage * mtMask( cavity, occlusion, normal, reference )
+    * ( 1.0 - texelFetch( uMask, from, 0 ).r );
   if ( alpha <= 0.0 ) {
     fragColor = paint;
     return;
@@ -452,10 +537,21 @@ const stampTarget = (): THREE.WebGLRenderTarget =>
     magFilter: THREE.NearestFilter,
   });
 
-/** A keyframe (§8): the paint and, since #137, its stamp map. */
+/** The mask (#138): R8, a byte a texel, nearest. */
+const maskTarget = (): THREE.WebGLRenderTarget => referenceTarget(PAINT_SIZE);
+
+/** A keyframe (§8): the paint, since #137 its stamp map, since #138 its mask. */
 export interface Keyframe {
   paint: THREE.WebGLRenderTarget;
   stamp: THREE.WebGLRenderTarget;
+  mask: THREE.WebGLRenderTarget;
+}
+
+/** Releases a keyframe's targets. */
+export function disposeKeyframe(keyframe: Keyframe): void {
+  keyframe.paint.dispose();
+  keyframe.stamp.dispose();
+  keyframe.mask.dispose();
 }
 
 /** A stamp's two bytes for step `index` (0-based): index + 1 modulo STAMP_MODULUS, low byte first. */
@@ -578,6 +674,9 @@ export class PaintPasses {
   readonly live = textureTarget('srgb');
   /** The newest step to change each texel (#137): kept with the keyframes. */
   private readonly stamp = stampTarget();
+  /** The committed mask and the mask with a mask stroke in progress (#138): what the tint shows. */
+  private readonly mask = maskTarget();
+  private readonly maskLive = maskTarget();
   /** One texel read back: the stamp under a lift's start. */
   private readonly probe = new THREE.WebGLRenderTarget(1, 1, {
     depthBuffer: false,
@@ -601,6 +700,8 @@ export class PaintPasses {
     depth: THREE.Mesh;
     geometry: THREE.BufferGeometry;
     detail: THREE.Texture;
+    /** A point a triangle at its middle's texture coordinates, and the target they draw into (#138). */
+    cut: CutPoints;
   } | null = null;
   private readonly atlasMaterial = raw(
     TEXTURE_SPACE_VERTEX,
@@ -653,6 +754,27 @@ export class PaintPasses {
     uSource: { value: this.stamp.texture },
     uTexel: { value: new THREE.Vector2() },
   });
+  private readonly maskUniforms = {
+    uMask: { value: this.mask.texture as THREE.Texture },
+    uStroke: { value: this.stroke.texture as THREE.Texture },
+    uOwner: { value: null as THREE.Texture | null },
+    uOpacity: { value: 1 },
+  };
+  private readonly maskMaterials = {
+    mask: raw(QUAD_VERTEX, maskCompositeFragment(true), this.maskUniforms),
+    unmask: raw(QUAD_VERTEX, maskCompositeFragment(false), this.maskUniforms),
+  };
+  private readonly maskChangeMaterial = raw(QUAD_VERTEX, MASK_CHANGE_FRAGMENT, {
+    uMask: { value: this.mask.texture },
+    uInvert: { value: false },
+  });
+  private readonly cutMaterial = raw(CUT_VERTEX, CUT_FRAGMENT, {
+    uMask: { value: this.mask.texture },
+  });
+  private readonly maskOutMaterial = raw(QUAD_VERTEX, MASK_OUT_FRAGMENT, {
+    uMask: { value: this.mask.texture },
+  });
+  private readonly cutScene = new THREE.Scene();
   /** The paint beneath the step a lift takes away, while it strokes or replays (#137). */
   private beneath: Keyframe | null = null;
   private readonly compositeMaterials = new Map<ToolId, THREE.RawShaderMaterial>();
@@ -665,6 +787,7 @@ export class PaintPasses {
     uReference: { value: this.reference.at(-1)!.target.texture as THREE.Texture },
     uStamp: { value: this.stamp.texture as THREE.Texture },
     uBeneath: { value: this.paint.texture as THREE.Texture },
+    uMask: { value: this.mask.texture as THREE.Texture },
     uLifted: { value: new THREE.Vector2() },
     uColour: { value: new THREE.Vector3() },
     uOpacity: { value: 1 },
@@ -691,16 +814,23 @@ export class PaintPasses {
     return this.live.texture;
   }
 
+  /** The mask with a mask stroke in progress (#138): what the tint is drawn from. */
+  get maskTexture(): THREE.Texture {
+    return this.maskLive.texture;
+  }
+
   /**
    * Prepares the passes for a mini (§5.1): the atlas maps, the owner map read back from them, the
-   * paint (bare when null) in `paint` and `live`. `geometry` is the display's
-   * (`createBakedGeometry`), shared; `detail` the view's own copy of the detail texture.
+   * paint (bare when null) in `paint` and `live`, the mask (none when null, #138) in `mask` and
+   * `maskLive`. `geometry` is the display's (`createBakedGeometry`), shared; `detail` the view's
+   * own copy of the detail texture.
    */
   async open(
     geometry: THREE.BufferGeometry,
     mesh: IndexedMesh,
     detail: THREE.Texture,
     paint: Albedo | null,
+    mask: PaintMask | null = null,
   ): Promise<void> {
     this.close();
     const edges = sharing(geometry, edgeIndex(mesh.indices));
@@ -712,7 +842,9 @@ export class PaintPasses {
     lines.renderOrder = 1;
     this.textureScene.add(triangles, lines);
     this.depthScene.add(depth);
-    const mini = { triangles, edges: lines, depth, geometry: edges, detail };
+    const cut = cutPoints(mesh, this.cutMaterial);
+    this.cutScene.add(cut.points);
+    const mini = { triangles, edges: lines, depth, geometry: edges, detail, cut };
     this.mini = mini;
     this.compositeUniforms.uDetail.value = detail;
     this.referenceMaterial.uniforms.uDetail!.value = detail;
@@ -738,13 +870,14 @@ export class PaintPasses {
     );
     // Closed or disposed while the read-back was pending: nothing more to prepare.
     if (this.mini !== mini) return;
-    const mask = new Uint8Array(PAINT_SIZE * PAINT_SIZE);
-    for (let texel = 0; texel < mask.length; texel++) {
+    const islands = new Uint8Array(PAINT_SIZE * PAINT_SIZE);
+    for (let texel = 0; texel < islands.length; texel++) {
       const level = texels[texel * 4]!;
-      mask[texel] = level > 191 ? ISLAND_TEXEL : level > 63 ? BORDER_TEXEL : GUTTER_TEXEL;
+      islands[texel] = level > 191 ? ISLAND_TEXEL : level > 63 ? BORDER_TEXEL : GUTTER_TEXEL;
     }
-    this.owner = ownerTexture(ownerMap(mask, PAINT_SIZE, PAINT_DILATION_RINGS));
+    this.owner = ownerTexture(ownerMap(islands, PAINT_SIZE, PAINT_DILATION_RINGS));
     this.compositeUniforms.uOwner.value = this.owner;
+    this.maskUniforms.uOwner.value = this.owner;
 
     // No step changed a texel yet.
     this.draw(this.stamp, null, true);
@@ -755,6 +888,21 @@ export class PaintPasses {
     const upload = new THREE.DataTexture(bytes, PAINT_SIZE, PAINT_SIZE);
     this.renderer.copyTextureToTexture(upload, this.paint.texture);
     upload.dispose();
+    // The mask (#138): its bytes uploaded, or nothing masked.
+    this.renderer.initRenderTarget(this.mask);
+    this.renderer.initRenderTarget(this.maskLive);
+    if (mask) {
+      const masked = new THREE.DataTexture(
+        mask.data,
+        PAINT_SIZE,
+        PAINT_SIZE,
+        THREE.RedFormat,
+        THREE.UnsignedByteType,
+      );
+      masked.unpackAlignment = 1;
+      this.renderer.copyTextureToTexture(masked, this.mask.texture);
+      masked.dispose();
+    } else this.draw(this.mask, null, true);
     this.cancel();
   }
 
@@ -869,6 +1017,14 @@ export class PaintPasses {
 
   /** The stroke onto the paint into `live`, through the tool's mask, every gutter texel from its owner (§5.4). */
   composite(tool: ToolId, colour: readonly [number, number, number], brush: BrushSettings): void {
+    const pass = toolPass(tool);
+    // The mask's own tools (#138): onto `maskLive`.
+    if (ontoMask(pass)) {
+      this.maskUniforms.uOpacity.value = Math.max(0, Math.min(1, brush.opacity));
+      this.quad.material = this.maskMaterials[pass.composite as 'mask' | 'unmask'];
+      this.draw(this.maskLive, this.quadScene, false);
+      return;
+    }
     let material = this.compositeMaterials.get(tool);
     if (!material) {
       material = raw(QUAD_VERTEX, compositeFragment(tool), this.compositeUniforms);
@@ -882,6 +1038,30 @@ export class PaintPasses {
     else this.compositeUniforms.uDirection.value.set(0, 0, 0, 0);
     this.quad.material = material;
     this.draw(this.live, this.quadScene, false);
+  }
+
+  /** The mask changed whole (#138): cleared or inverted into `maskLive`, committed by `commitMask`. */
+  changeMask(change: MaskChange['change']): void {
+    this.maskChangeMaterial.uniforms.uInvert!.value = change === 'invert';
+    this.quad.material = this.maskChangeMaterial;
+    this.draw(this.maskLive, this.quadScene, false);
+  }
+
+  /**
+   * The fill's cut (#138, design note `docs/design/paint-mask.md` §5): a byte a triangle, 1 where
+   * the committed mask at its middle is at least MASK_CUT. A point a triangle drawn and read back
+   * now, a GPU sync: only at a picked fill, live or replayed.
+   */
+  readCut(): Uint8Array {
+    const cut = this.mini?.cut;
+    if (!cut) return new Uint8Array(0);
+    this.draw(cut.target, this.cutScene, true);
+    const { width, height } = cut.target;
+    const bytes = new Uint8Array(width * height * 4);
+    this.renderer.readRenderTargetPixels(cut.target, 0, 0, width, height, bytes);
+    const out = new Uint8Array(cut.triangles);
+    for (let t = 0; t < out.length; t++) out[t] = bytes[t * 4]! > 127 ? 1 : 0;
+    return out;
   }
 
   /**
@@ -899,6 +1079,11 @@ export class PaintPasses {
    * it took the step away fully, #137), and `live` is the paint now.
    */
   commit(index: number, tool: ToolId): void {
+    // A step onto the mask (#138) changes no paint: no stamp, the mask committed.
+    if (ontoMask(toolPass(tool))) {
+      this.commitMask();
+      return;
+    }
     const lift = toolPass(tool).composite === 'lift';
     const beneath = this.beneath;
     // A lift with nothing beneath composited nothing: no stamp changes.
@@ -917,6 +1102,11 @@ export class PaintPasses {
     this.renderer.copyTextureToTexture(this.live.texture, this.paint.texture);
   }
 
+  /** A step onto the mask is final (#138): `maskLive` is the mask now. */
+  commitMask(): void {
+    this.renderer.copyTextureToTexture(this.maskLive.texture, this.mask.texture);
+  }
+
   /** The lift is over: no keyframe stays bound, as it may be dropped. */
   private forgetBeneath(): void {
     this.beneath = null;
@@ -933,27 +1123,47 @@ export class PaintPasses {
     return [bytes[0]!, bytes[1]!];
   }
 
-  /** The stroke is dropped: `live` shows the paint again. */
+  /** The stroke is dropped: `live` shows the paint again, `maskLive` the mask (#138). */
   cancel(): void {
     this.forgetBeneath();
     this.renderer.copyTextureToTexture(this.paint.texture, this.live.texture);
+    this.renderer.copyTextureToTexture(this.mask.texture, this.maskLive.texture);
   }
 
-  /** A keyframe (§8): a copy of the paint as it is, and of its stamp map (#137). */
+  /** A keyframe (§8): a copy of the paint as it is, of its stamp map (#137) and of the mask (#138). */
   snapshot(): Keyframe {
-    const keyframe = { paint: textureTarget('srgb'), stamp: stampTarget() };
+    const keyframe = { paint: textureTarget('srgb'), stamp: stampTarget(), mask: maskTarget() };
     this.renderer.initRenderTarget(keyframe.paint);
     this.renderer.initRenderTarget(keyframe.stamp);
+    this.renderer.initRenderTarget(keyframe.mask);
     this.renderer.copyTextureToTexture(this.paint.texture, keyframe.paint.texture);
     this.renderer.copyTextureToTexture(this.stamp.texture, keyframe.stamp.texture);
+    this.renderer.copyTextureToTexture(this.mask.texture, keyframe.mask.texture);
     return keyframe;
   }
 
-  /** Back to a keyframe: the paint, its stamp map and `live` are its bytes again. */
+  /** Back to a keyframe: the paint, its stamp map, the mask, `live` and `maskLive` are its bytes again. */
   restore(keyframe: Keyframe): void {
     this.renderer.copyTextureToTexture(keyframe.paint.texture, this.paint.texture);
     this.renderer.copyTextureToTexture(keyframe.stamp.texture, this.stamp.texture);
+    this.renderer.copyTextureToTexture(keyframe.mask.texture, this.mask.texture);
     this.cancel();
+  }
+
+  /** The committed mask's bytes (#138): PAINT_SIZE square, a byte a texel, row 0 at v = 0. */
+  async readMask(): Promise<Uint8Array> {
+    const target = textureTarget('rgba');
+    const rgba = new Uint8Array(PAINT_SIZE * PAINT_SIZE * 4);
+    try {
+      this.quad.material = this.maskOutMaterial;
+      this.draw(target, this.quadScene, true);
+      await this.renderer.readRenderTargetPixelsAsync(target, 0, 0, PAINT_SIZE, PAINT_SIZE, rgba);
+    } finally {
+      target.dispose();
+    }
+    const bytes = new Uint8Array(PAINT_SIZE * PAINT_SIZE);
+    for (let texel = 0; texel < bytes.length; texel++) bytes[texel] = rgba[texel * 4]!;
+    return bytes;
   }
 
   /** The committed paint's bytes: PAINT_SIZE square, sRGB, straight alpha, row 0 at v = 0. */
@@ -1049,6 +1259,9 @@ export class PaintPasses {
     this.measureReference();
     // Nothing covered: no tool changes a texel, whatever its opacity.
     for (const tool of tools) this.composite(tool, [0, 0, 0], DEFAULT_BRUSH);
+    // The mask's whole changes and its cut (#138), into `maskLive` and the cut's target: dropped.
+    this.changeMask('invert');
+    this.draw(mini.cut.target, this.cutScene, true);
     this.cancel();
     // The stamp pass with `live` equal to the paint changes no stamp; the probe reads nothing back.
     this.stampMaterial.uniforms.uLift!.value = false;
@@ -1066,10 +1279,14 @@ export class PaintPasses {
     if (!mini) return;
     this.textureScene.remove(mini.triangles, mini.edges);
     this.depthScene.remove(mini.depth);
+    this.cutScene.remove(mini.cut.points);
+    mini.cut.points.geometry.dispose();
+    mini.cut.target.dispose();
     releaseShared(mini.geometry);
     this.owner?.dispose();
     this.owner = null;
     this.compositeUniforms.uOwner.value = null;
+    this.maskUniforms.uOwner.value = null;
     this.compositeUniforms.uDetail.value = null;
     this.referenceMaterial.uniforms.uDetail!.value = null;
     this.mini = null;
@@ -1081,6 +1298,8 @@ export class PaintPasses {
       this.paint,
       this.live,
       this.stamp,
+      this.mask,
+      this.maskLive,
       this.probe,
       this.stroke,
       this.atlas,
@@ -1100,6 +1319,11 @@ export class PaintPasses {
       this.copyMaterial,
       this.stampMaterial,
       this.probeMaterial,
+      this.maskMaterials.mask,
+      this.maskMaterials.unmask,
+      this.maskChangeMaterial,
+      this.cutMaterial,
+      this.maskOutMaterial,
       ...this.compositeMaterials.values(),
     ])
       material.dispose();
@@ -1132,6 +1356,47 @@ export class PaintPasses {
     renderer.setClearColor(clearColour, clearAlpha);
     renderer.autoClear = autoClear;
   }
+}
+
+/** The cut's points (#138) and the target they draw into: a texel a triangle. */
+interface CutPoints {
+  points: THREE.Points;
+  target: THREE.WebGLRenderTarget;
+  triangles: number;
+}
+
+/**
+ * The cut's points (#138): one a triangle, at a pixel of its own of a target `⌈√T⌉` texels on a
+ * side, with the texture coordinates of its middle.
+ */
+function cutPoints(mesh: IndexedMesh, material: THREE.RawShaderMaterial): CutPoints {
+  const triangles = mesh.indices.length / 3;
+  const side = Math.max(1, Math.ceil(Math.sqrt(triangles)));
+  const positions = new Float32Array(triangles * 3);
+  const uvs = new Float32Array(triangles * 2);
+  const meshUvs = mesh.uvs!;
+  for (let t = 0; t < triangles; t++) {
+    positions[t * 3] = (((t % side) + 0.5) / side) * 2 - 1;
+    positions[t * 3 + 1] = ((Math.floor(t / side) + 0.5) / side) * 2 - 1;
+    for (let axis = 0; axis < 2; axis++) {
+      let sum = 0;
+      for (let corner = 0; corner < 3; corner++)
+        sum += meshUvs[mesh.indices[t * 3 + corner]! * 2 + axis]!;
+      uvs[t * 2 + axis] = sum / 3;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  const target = new THREE.WebGLRenderTarget(side, side, {
+    depthBuffer: false,
+    generateMipmaps: false,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  return { points, target, triangles };
 }
 
 /** The owner map as a texture: x in R and G, y in B and A (low byte first); A 255 for a texel with no owner. */
