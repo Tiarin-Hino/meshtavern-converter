@@ -36,11 +36,13 @@ describe('the library entries', () => {
       'FILL_TOOL_IDS',
       'FLAT_CAVITY',
       'GRID_SQUARE_MM',
+      'GROUP_TOOL_IDS',
       'IDENTITY',
       'INK_FLAT',
       'LOD_SPECS',
       'LOOK_PRESETS',
       'MASK_TOOL_IDS',
+      'MAX_GROUPS',
       'MAX_PAIRS',
       'MAX_PARTS',
       'MAX_STROKES',
@@ -49,6 +51,7 @@ describe('the library entries', () => {
       'PROBLEM_MESSAGES',
       'RECENT_COLOURS_MAX',
       'REGION_REACH_MM',
+      'SHELL_MIN_TRIANGLES',
       'SIZES',
       'SNIFF_BYTES',
       'SOURCE_PRESETS',
@@ -69,7 +72,9 @@ describe('the library entries', () => {
       'footprintMm',
       'fromAxisAngle',
       'glbEncoderReady',
+      'groupsOf',
       'isFillTool',
+      'isGroupTool',
       'isMaskTool',
       'memoryBudgetBytes',
       'multiply',
@@ -163,7 +168,7 @@ describe('the library entries', () => {
     ]);
   });
 
-  it('painting.ts exports exactly the painting view and its words (#127, #135)', () => {
+  it('painting.ts exports exactly the painting view and its words (#127, #135, #139)', () => {
     expect(Object.keys(painting).sort()).toEqual([
       'BRUSH_DEPTH_MM',
       'BRUSH_DEPTH_SOFT_MM',
@@ -174,6 +179,10 @@ describe('the library entries', () => {
       'DEPTH_BIAS_MM',
       'FACING_MIN_COS',
       'FRAME_BUDGET_MS',
+      'GROUP_COLOURS',
+      'GROUP_COVER',
+      'GROUP_TINT_SHOWN',
+      'GROUP_TINT_STRENGTH',
       'KEYFRAME_EVERY',
       'MASK_CUT',
       'MASK_SHOWN',
@@ -183,6 +192,7 @@ describe('the library entries', () => {
       'PAINT_DILATION_RINGS',
       'PICK_MODE',
       'UNDO_STEPS',
+      'describeGroup',
       'mountPainting',
     ]);
   });

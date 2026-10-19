@@ -4,7 +4,8 @@
 // default size; the hobby brushes since #128, the airbrush sprayed from above; the dry brush also
 // at 2 mm since #133, whose stroke measures its reference under the first dab; the lift since #137,
 // over the strokes of the others; the mask's brush and eraser since #138, first, so the brushes
-// after them paint over the mask's soft edges), the intervals
+// after them paint over the mask's soft edges; since #139 the flat brush with the largest group
+// but the body hidden, and the group brush, which reads back its cover at each commit), the intervals
 // between frames, and the GPU process's memory with the view open against without. One fresh
 // browser per mini.
 // Usage, after `npm run build`:
@@ -39,6 +40,10 @@ const RUNS = [
   { tool: 'dry', sizeMm: 16 },
   { tool: 'dry', sizeMm: 2 },
   { tool: 'airbrush', sizeMm: 16, direction: [0, 1, 0] },
+  // The groups (#139): with the largest group but the body hidden, and the group brush, each
+  // stroke a new group.
+  { tool: 'flat', sizeMm: 16, hide: true },
+  { tool: 'group', sizeMm: 16 },
   // Last, over what the others painted: each takes away the newest step under its start (#137).
   { tool: 'lift', sizeMm: 16 },
 ];
@@ -150,12 +155,23 @@ try {
       );
       console.log(`open: ${openMs.toFixed(0)} ms`);
 
-      for (const { tool, sizeMm, direction = null } of RUNS) {
+      const { groups, hideable } = await page.evaluate(() => {
+        const { list } = window.__mt.painting.view().state.groups;
+        let largest = -1;
+        for (let k = 1; k < list.length; k++)
+          if (largest < 0 || list[k].triangles > list[largest].triangles) largest = k;
+        return { groups: list.length, hideable: largest };
+      });
+      console.log(`groups: ${groups}, hidden in the runs that hide one: group ${hideable}`);
+      for (const { tool, sizeMm, direction = null, hide = false } of RUNS) {
         const rows = [];
         for (let stroke = 0; stroke < STROKES; stroke++) {
           const result = await page.evaluate(
-            async ({ tool, sizeMm, direction, samples, stroke }) => {
+            async ({ tool, sizeMm, direction, samples, stroke, hidden }) => {
               const view = window.__mt.painting.view();
+              view.showAllGroups();
+              if (hidden >= 0) view.setGroupShown(hidden, false);
+              view.setGroupTarget('new');
               view.setTool(tool);
               view.setBrush({ sizeMm, hardness: 0.8, opacity: 1, direction });
               view.setColour(['#b03030', '#30b030', '#3030b0'][stroke % 3]);
@@ -177,23 +193,28 @@ try {
                 if (running) requestAnimationFrame(tick);
               };
               requestAnimationFrame(tick);
+              const strokeStart = performance.now();
               await view.strokeAt(path);
+              const strokeMs = performance.now() - strokeStart;
               running = false;
+              view.showAllGroups();
               const dabs = view.history().at(-1)?.dabs?.length ?? 0;
               return {
                 perf: view.state.perf,
                 intervals: intervals.slice(1),
                 dabs: dabs / 4,
                 lift: tool === 'lift' ? view.state.lift : null,
+                strokeMs,
               };
             },
-            { tool, sizeMm, direction, samples: SAMPLES, stroke },
+            { tool, sizeMm, direction, samples: SAMPLES, stroke, hidden: hide ? hideable : -1 },
           );
           rows.push(result);
         }
-        for (const [k, { perf, intervals, dabs, lift }] of rows.entries())
+        const label = `${tool} ${sizeMm} mm${hide ? `, group ${hideable} hidden` : ''}`;
+        for (const [k, { perf, intervals, dabs, lift, strokeMs }] of rows.entries())
           console.log(
-            `${tool} ${sizeMm} mm, stroke ${k + 1}${lift ? ` (${JSON.stringify(lift)})` : ''}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms`,
+            `${label}, stroke ${k + 1}${lift ? ` (${JSON.stringify(lift)})` : ''}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms · stroke with its commit ${strokeMs.toFixed(0)} ms`,
           );
       }
       await page.waitForTimeout(1000);

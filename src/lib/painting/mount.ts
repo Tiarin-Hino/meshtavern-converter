@@ -5,6 +5,8 @@ import {
   DEFAULT_BRUSH,
   DEFAULT_PAINT_COLOUR,
   isFillTool,
+  isGroupTool,
+  MAX_GROUPS,
   MOUSE_PRESSURE,
   PAINT_SIZE,
   TOOL_IDS,
@@ -13,13 +15,16 @@ import {
   type BrushSettings,
   type DabHit,
   type FillToolId,
+  type GroupOrigin,
   type MaskChange,
+  type PaintGroups,
   type PaintMask,
   type PaintRegions,
   type FillSeed,
   type PaintFill,
   type PaintStep,
   type PaintStroke,
+  type StepGroups,
   type ToolId,
 } from '../pipeline/brush';
 import { TriangleBvh, type SurfaceHit } from '../pipeline/bvh';
@@ -32,7 +37,6 @@ import { DEFAULT_LOOK, parseHexColour, type Look } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
 import {
-  createBakedGeometry,
   createBakedMaterial,
   createDetailTexture,
   createLookUniforms,
@@ -40,14 +44,22 @@ import {
   updateLookUniforms,
 } from '../three/baked-material';
 import { ownCopy } from '../three/compressed-texture';
-import { MASK_TINT, MASK_TINT_STRENGTH } from '../three/scene-colours';
+import {
+  GROUP_COLOURS,
+  GROUP_STROKE_TINT_STRENGTH,
+  GROUP_TINT_STRENGTH,
+  MASK_TINT,
+  MASK_TINT_STRENGTH,
+} from '../three/scene-colours';
 import { PAINT_COPY, type PaintCopy } from './copy';
+import { createGroupedGeometry, writeGroups } from './geometry';
 import {
   BRUSH_DEPTH_MM,
   BRUSH_DEPTH_SOFT_MM,
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
   MASK_CUT,
   PAINT_DILATION_RINGS,
   PaintPasses,
@@ -66,16 +78,21 @@ export {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
   MASK_CUT,
   PAINT_DILATION_RINGS,
   KEYFRAME_EVERY,
   UNDO_STEPS,
   MASK_TINT,
   MASK_TINT_STRENGTH,
+  GROUP_COLOURS,
+  GROUP_TINT_STRENGTH,
 };
 
 /** The mask's tint is shown when a view is mounted (#138). _(proposal)_ */
 export const MASK_SHOWN = true;
+/** The groups' tint is shown when a view is mounted (#139). _(proposal)_ */
+export const GROUP_TINT_SHOWN = false;
 
 /** The brush's diameter on the surface, in mm, at least and at most. _(proposal)_ */
 export const BRUSH_MIN_MM = 0.5;
@@ -115,6 +132,11 @@ export interface MiniToPaint {
   regions?: PaintRegions | null;
   /** The mask to continue from (#138), PAINT_SIZE square, a byte a texel, as `mask()` gave it; left out or null: nothing masked. */
   mask?: PaintMask | null;
+  /**
+   * The groups to continue with (#139), as `groups()` gave them, or `groupsOf(...)`; left out or
+   * null: the whole mini is group 0.
+   */
+  groups?: PaintGroups | null;
 }
 
 export interface PaintPerf {
@@ -153,6 +175,22 @@ export interface PaintingState {
   lift: LiftOutcome | null;
   /** The mask's tint is drawn over the masked surface (#138). */
   maskShown: boolean;
+  /** The groups (#139): each one's origin and triangles now, which are hidden, which apart, and the group tools' target. */
+  groups: GroupsState;
+  /** Every group but 0 is drawn in its colour (#139). */
+  groupTint: boolean;
+}
+
+/** The groups as the view shows them (#139, design note `docs/design/paint-groups.md` §6.3). */
+export interface GroupsState {
+  /** Groups 0 … n − 1: how each was made and how many triangles it has now. */
+  list: { origin: GroupOrigin; triangles: number }[];
+  /** The groups not drawn, ascending. */
+  hidden: number[];
+  /** The groups pulled apart and their offsets in mm: none until pulling apart is built (#139's follow-up). */
+  apart: { group: number; offset: Vec3 }[];
+  /** The group the group tools add to; `list.length` for a new one. */
+  target: number;
 }
 
 export interface PaintingView {
@@ -178,6 +216,20 @@ export interface PaintingView {
   mask(): Promise<PaintMask>;
   /** Draws the mask's tint over the masked surface, or not (#138): no step. */
   setMaskShown(on: boolean): void;
+  /** The groups as data (#139): the map and how each group was made. Synchronous: the map is CPU data. */
+  groups(): PaintGroups;
+  /** Draws group `group` or not (#139); a hidden group takes no paint, and what lies behind it can be painted. Not a step. */
+  setGroupShown(group: number, shown: boolean): void;
+  /** Draws every group again (#139). Not a step. */
+  showAllGroups(): void;
+  /** The group the group tools add to (#139); `'new'` makes a new one at the next group step. */
+  setGroupTarget(group: number | 'new'): void;
+  /** Draws every group but 0 in its colour, or not (#139). Not a step. */
+  setGroupTint(on: boolean): void;
+  /** A paint fill of a group's triangles (#139): one `fill` step with a `group` seed. */
+  fillGroup(group: number): Promise<void>;
+  /** A group's triangles masked or unmasked (#139): one `mask-fill` or `unmask-fill` step with a `group` seed. */
+  maskGroup(group: number, masked: boolean): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
   /** The paint as pixels: PAINT_SIZE square, sRGB, straight alpha, row 0 at v = 0. Resolves after the GPU read. */
@@ -223,6 +275,8 @@ const NO_PERF: PaintPerf = { frames: 0, medianMs: 0, worstMs: 0, slow: 0 };
 /** A mini open for painting: what the view holds until `close`. */
 interface Opened {
   mesh: IndexedMesh;
+  /** The group map (#139), the live truth, and how each group was made. */
+  groups: PaintGroups;
   bvh: TriangleBvh;
   adjacency: TriangleAdjacency;
   regions: PaintRegions | null;
@@ -230,6 +284,19 @@ interface Opened {
   material: THREE.MeshStandardMaterial;
   uniforms: ReturnType<typeof createLookUniforms>;
 }
+
+/** A keyframe of the view (#139): the passes' targets and the groups as they were. */
+interface ViewKeyframe extends Keyframe {
+  groups: Uint8Array;
+  made: GroupOrigin[];
+}
+
+/** The groups' colours (#139), linear, for the material's uniform. */
+const groupColours = (): THREE.Vector3[] =>
+  GROUP_COLOURS.map((hex) => {
+    const { r, g, b } = new THREE.Color(hex);
+    return new THREE.Vector3(r, g, b);
+  });
 
 /** The tint's uniform (#138): the mask's colour, linear, and its strength, 0 while hidden. */
 const tintOf = (shown: boolean): THREE.Vector4 => {
@@ -261,11 +328,22 @@ class Painting implements PaintingView {
   private live: LiveStroke | null = null;
   /** The steps and the keyframes (§8): made at `open`. */
   private timeline: PaintHistory | null = null;
-  private readonly keyframes = new Map<number, Keyframe>();
+  private readonly keyframes = new Map<number, ViewKeyframe>();
   private lift: LiftOutcome | null = null;
   /** The mask's tint (#138), shared by every mini this view opens. */
   private readonly tint = { value: tintOf(MASK_SHOWN) };
   private maskShown = MASK_SHOWN;
+  /** The groups not drawn (#139): view state, not steps. */
+  private readonly hidden = new Set<number>();
+  /** The group tools' target (#139). */
+  private target: number | 'new' = 'new';
+  private groupTint = GROUP_TINT_SHOWN;
+  /** The groups' tint and colours, and the group stroke's (#139), shared by every mini this view opens. */
+  private readonly groupTintUniform = {
+    value: new THREE.Vector4(GROUP_TINT_SHOWN ? GROUP_TINT_STRENGTH : 0, 0, 0, 0),
+  };
+  private readonly groupColours = { value: groupColours() };
+  private readonly strokeTint = { value: new THREE.Vector4(0, 0, 0, 0) };
   private tool: ToolId = 'flat';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
   private colour = DEFAULT_PAINT_COLOUR;
@@ -317,7 +395,31 @@ class Painting implements PaintingView {
       perf: this.perf,
       lift: this.lift,
       maskShown: this.maskShown,
+      groups: this.groupsState(),
+      groupTint: this.groupTint,
     };
+  }
+
+  /** The groups as the state shows them (#139). */
+  private groupsState(): GroupsState {
+    const groups = this.opened?.groups;
+    const list = (groups?.made ?? [{ by: 'body' as const }]).map((origin) => ({
+      origin: { ...origin },
+      triangles: 0,
+    }));
+    if (groups) for (const group of groups.of) list[group]!.triangles++;
+    return {
+      list,
+      hidden: [...this.hidden].sort((a, b) => a - b),
+      apart: [],
+      target: this.targetGroup(),
+    };
+  }
+
+  /** The group the group tools add to now: the target, or a new one. */
+  private targetGroup(): number {
+    const count = this.opened?.groups.made.length ?? 1;
+    return this.target === 'new' || this.target >= count ? count : this.target;
   }
 
   /** A fresh state for the consumer. */
@@ -327,7 +429,7 @@ class Painting implements PaintingView {
   }
 
   open(mini: MiniToPaint): Promise<void> {
-    const { mesh, paint, regions, mask } = mini;
+    const { mesh, paint, regions, mask, groups } = mini;
     if (!mesh.uvs || !mesh.normals) throw new RangeError(this.copy.cannotPaint);
     if (
       paint &&
@@ -345,6 +447,7 @@ class Painting implements PaintingView {
       throw new RangeError(`A mask is ${PAINT_SIZE} × ${PAINT_SIZE} texels, a byte each`);
     if (regions && regions.base.length !== mesh.indices.length / 3)
       throw new RangeError('The regions are not this mesh’s: one byte per triangle');
+    if (groups) checkGroups(groups, mesh.indices.length / 3);
     const texture = ownTexture(mini.texture);
     if (!texture) throw new RangeError(this.copy.cannotPaint);
     const generation = ++this.generation;
@@ -365,7 +468,14 @@ class Painting implements PaintingView {
     }
     this.release();
     const { mesh } = mini;
-    const geometry = createBakedGeometry(mesh);
+    // The view's own copy of the groups (#139): the consumer's are never changed.
+    const groups: PaintGroups = mini.groups
+      ? { of: mini.groups.of.slice(), made: mini.groups.made.map((origin) => ({ ...origin })) }
+      : { of: new Uint8Array(mesh.indices.length / 3), made: [{ by: 'body' }] };
+    this.hidden.clear();
+    this.target = 'new';
+    this.writeGroupUniform(null);
+    const geometry = createGroupedGeometry(mesh, groups.of);
     const uniforms = createLookUniforms(mini.look ?? DEFAULT_LOOK);
     const drop = (): void => {
       this.passes.close();
@@ -387,12 +497,20 @@ class Painting implements PaintingView {
     const material = createBakedMaterial(texture, uniforms, {
       map: this.passes.liveTexture,
       tint: { map: this.passes.maskTexture, uniform: this.tint },
+      groups: {
+        uniform: this.passes.groupUniform,
+        colours: this.groupColours,
+        tint: this.groupTintUniform,
+        stroke: this.passes.strokeTexture,
+        strokeTint: this.strokeTint,
+      },
     });
     const shown = new THREE.Mesh(geometry, material);
     const box = new THREE.Box3().setFromArray(mesh.positions);
     const size = box.getSize(new THREE.Vector3());
     this.opened = {
       mesh,
+      groups,
       bvh: new TriangleBvh(mesh),
       adjacency: triangleAdjacency(mesh),
       regions: mini.regions ?? null,
@@ -401,8 +519,13 @@ class Painting implements PaintingView {
       uniforms,
     };
     this.timeline = new PaintHistory({
-      snapshot: (at) => this.keyframes.set(at, this.passes.snapshot()),
-      restore: (at) => this.passes.restore(this.keyframes.get(at)!),
+      snapshot: (at) =>
+        this.keyframes.set(at, {
+          ...this.passes.snapshot(),
+          groups: groups.of.slice(),
+          made: groups.made.map((origin) => ({ ...origin })),
+        }),
+      restore: (at) => this.restoreKeyframe(this.keyframes.get(at)!),
       apply: (step, index) => this.replay(step, index),
       drop: (at) => {
         const keyframe = this.keyframes.get(at);
@@ -508,17 +631,155 @@ class Painting implements PaintingView {
     this.emit();
   }
 
+  groups(): PaintGroups {
+    this.commitLive();
+    const groups = this.opened?.groups;
+    if (!groups) return { of: new Uint8Array(0), made: [{ by: 'body' }] };
+    return { of: groups.of.slice(), made: groups.made.map((origin) => ({ ...origin })) };
+  }
+
+  setGroupShown(group: number, shown: boolean): void {
+    this.commitLive();
+    this.checkGroup(group);
+    if (shown) this.hidden.delete(group);
+    else this.hidden.add(group);
+    this.writeGroupUniform(null);
+    this.emit();
+  }
+
+  showAllGroups(): void {
+    this.commitLive();
+    this.hidden.clear();
+    this.writeGroupUniform(null);
+    this.emit();
+  }
+
+  setGroupTarget(group: number | 'new'): void {
+    this.commitLive();
+    if (group !== 'new') this.checkGroup(group);
+    this.target = group;
+    this.emit();
+  }
+
+  setGroupTint(on: boolean): void {
+    this.groupTint = on;
+    this.groupTintUniform.value.x = on ? GROUP_TINT_STRENGTH : 0;
+    this.emit();
+  }
+
+  fillGroup(group: number): Promise<void> {
+    this.commitLive();
+    this.checkGroup(group);
+    return this.fill({ kind: 'group', group }, 'fill');
+  }
+
+  maskGroup(group: number, masked: boolean): Promise<void> {
+    this.commitLive();
+    this.checkGroup(group);
+    return this.fill({ kind: 'group', group }, masked ? 'mask-fill' : 'unmask-fill');
+  }
+
+  /**
+   * The triangles `covered` names (a byte a triangle) or lists go into group `into` (#139): a new
+   * group `{ by: 'hand' }` when it is the next one. Nothing when none is covered. True when the
+   * map changed.
+   */
+  private moveInto(covered: Uint8Array | Uint32Array, into: number, list: boolean): boolean {
+    const groups = this.opened!.groups;
+    if (!(Number.isInteger(into) && into >= 0 && into <= groups.made.length && into < MAX_GROUPS))
+      throw new RangeError(`There is no group ${into} to add to`);
+    const triangles: number[] = [];
+    if (list) for (const t of covered) triangles.push(t);
+    else for (let t = 0; t < covered.length; t++) if (covered[t]) triangles.push(t);
+    if (triangles.length === 0) return false;
+    const created = into === groups.made.length;
+    if (created) groups.made.push({ by: 'hand' });
+    let changed = created;
+    for (const t of triangles) {
+      if (groups.of[t] === into) continue;
+      groups.of[t] = into;
+      changed = true;
+    }
+    if (changed) writeGroups(this.opened!.geometry, groups.of);
+    return changed;
+  }
+
+  /** The group stroke's tint (#139): its coverage in the target's colour while it is on the canvas, or none. */
+  private tintStroke(into: number | null): void {
+    if (into === null) {
+      this.strokeTint.value.set(0, 0, 0, 0);
+      return;
+    }
+    const { r, g, b } = new THREE.Color(GROUP_COLOURS[into % GROUP_COLOURS.length]);
+    this.strokeTint.value.set(r, g, b, GROUP_STROKE_TINT_STRENGTH);
+  }
+
+  /** A group the mini has (#139); a consumer's number that is not one is refused. */
+  private checkGroup(group: number): void {
+    const count = this.opened?.groups.made.length ?? 1;
+    if (!Number.isInteger(group) || group < 0 || group >= count)
+      throw new RangeError(`There is no group ${group}`);
+  }
+
+  /**
+   * `uGroups` from the view's groups (null), or from a step's record (#139): every group shown and
+   * at zero but the record's hidden ones.
+   */
+  private writeGroupUniform(record: StepGroups | null | undefined): void {
+    const hidden = record === null ? this.hidden : new Set(record?.hidden ?? []);
+    const values = this.passes.groupUniform.value;
+    for (let group = 0; group < MAX_GROUPS; group++)
+      values[group]!.set(0, 0, 0, hidden.has(group) ? 1 : 0);
+  }
+
+  /** What a step records of the groups (#139): the hidden ones, when any is. */
+  private stepGroups(): StepGroups | undefined {
+    if (this.hidden.size === 0) return undefined;
+    return { hidden: [...this.hidden].sort((a, b) => a - b), apart: [] };
+  }
+
+  /**
+   * After an undo that took away a group a step had made (#139): it is no longer hidden, so the
+   * state and the next step's record name only groups the mini has. Not in `restoreKeyframe`:
+   * undo restores an older keyframe and replays steps that may make the group again.
+   */
+  private forgetGoneGroups(): void {
+    const count = this.opened?.groups.made.length ?? 1;
+    let gone = false;
+    for (const group of [...this.hidden])
+      if (group >= count) {
+        this.hidden.delete(group);
+        gone = true;
+      }
+    if (gone) this.writeGroupUniform(null);
+  }
+
+  /** Back to a keyframe: its targets, and the groups as they were then (#139). */
+  private restoreKeyframe(keyframe: ViewKeyframe): void {
+    this.passes.restore(keyframe);
+    const opened = this.opened;
+    if (!opened) return;
+    opened.groups.of.set(keyframe.groups);
+    opened.groups.made = keyframe.made.map((origin) => ({ ...origin }));
+    writeGroups(opened.geometry, opened.groups.of);
+  }
+
   /** A fill (§7), of the paint or of the mask (#138): one step, its region found from its seed, applied as a replay would. */
   private async fill(seed: FillSeed, tool: FillToolId): Promise<void> {
     this.commitLive();
     if (!this.opened || !this.timeline) return;
+    const groups = this.stepGroups();
     const step: PaintFill = {
       kind: 'fill',
       tool,
       colour: this.colour,
       brush: { ...this.brush },
       seed,
+      ...(isGroupTool(tool) ? { into: this.targetGroup() } : {}),
+      ...(groups ? { groups } : {}),
     };
+    // A new group past the last there may be makes nothing (#139).
+    if (step.into === MAX_GROUPS) return;
     await this.apply(step);
   }
 
@@ -540,6 +801,7 @@ class Painting implements PaintingView {
   async undo(): Promise<void> {
     this.commitLive();
     if (this.timeline?.undo() == null) return;
+    this.forgetGoneGroups();
     this.emit();
     await this.scene.nextFrame();
   }
@@ -634,7 +896,14 @@ class Painting implements PaintingView {
   private hitAt(x: number, y: number): { triangle: number; point: Vec3 } | null {
     if (!this.opened) return null;
     const { origin, direction } = this.scene.rayAt(x, y);
-    const hit = this.opened.bvh.raycast(origin, direction);
+    // A hidden group is not there to hit (#139): the ray finds what lies behind it.
+    const { of } = this.opened.groups;
+    const hidden = this.hidden;
+    const hit = this.opened.bvh.raycast(
+      origin,
+      direction,
+      hidden.size === 0 ? undefined : (t) => !hidden.has(of[t]!),
+    );
     if (!hit) return null;
     return {
       triangle: hit.triangle,
@@ -663,6 +932,10 @@ class Painting implements PaintingView {
     this.passes.beginStroke(camera);
     if (lifted !== null) this.passes.lift(this.keyframes.get(lifted)!, lifted);
     this.scene.controls.enabled = touch;
+    const groups = this.stepGroups();
+    // The group brush (#139): its target recorded; a new group past the last there may be is refused.
+    const into = isGroupTool(tool) ? this.targetGroup() : null;
+    this.tintStroke(into);
     this.live = {
       step: {
         kind: 'stroke',
@@ -672,10 +945,12 @@ class Painting implements PaintingView {
         camera,
         dabs: [],
         ...(lifted !== null ? { lifts: lifted } : {}),
+        ...(into !== null ? { into } : {}),
+        ...(groups ? { groups } : {}),
       },
       drawn: 0,
       last: null,
-      refused: lift !== null && lifted === null,
+      refused: (lift !== null && lifted === null) || into === MAX_GROUPS,
       frames: [],
     };
     this.extendLive([first]);
@@ -738,7 +1013,14 @@ class Painting implements PaintingView {
     this.drawLive();
     this.live = null;
     this.scene.controls.enabled = true;
-    if (live.step.dabs.length === 0 || live.refused || !this.timeline) {
+    this.tintStroke(null);
+    const group = isGroupTool(live.step.tool);
+    // A group stroke (#139) is a step where it covered a triangle: those go into its target.
+    const moved =
+      group && live.step.dabs.length > 0 && !live.refused && this.timeline
+        ? this.moveInto(this.passes.readCover(), live.step.into!, false)
+        : false;
+    if (live.step.dabs.length === 0 || live.refused || !this.timeline || (group && !moved)) {
       this.passes.cancel();
       // A lift that leaves no step leaves no keyframe pinned for it.
       this.timeline?.prune();
@@ -764,20 +1046,48 @@ class Painting implements PaintingView {
       this.passes.commitMask();
       return;
     }
+    // The groups hidden when the step was made (#139), whatever is hidden now; put back after.
+    this.writeGroupUniform(step.groups);
+    try {
+      this.replayDrawn(step, index, opened);
+    } finally {
+      this.writeGroupUniform(null);
+    }
+  }
+
+  /** A stroke or a fill replayed, with `uGroups` as its record says. */
+  private replayDrawn(step: PaintStroke | PaintFill, index: number, opened: Opened): void {
     if (step.kind === 'stroke') {
       this.passes.beginStroke(step.camera);
       const beneath = step.lifts === undefined ? undefined : this.keyframes.get(step.lifts);
       if (beneath) this.passes.lift(beneath, step.lifts!);
       this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
+      // The group brush (#139): what its dabs cover at the triangles' middles, read as live.
+      if (isGroupTool(step.tool)) {
+        this.moveInto(this.passes.readCover(), step.into!, false);
+        this.passes.commit(index, step.tool);
+        return;
+      }
     } else {
-      const triangles = floodRegion(opened.mesh, step.seed, {
+      const { seed } = step;
+      const picked = seed.kind === 'picked';
+      const group = isGroupTool(step.tool);
+      const triangles = floodRegion(opened.mesh, seed, {
         tolerance: step.brush.tolerance,
         regions: opened.regions,
         adjacency: opened.adjacency,
-        cut: step.seed.kind === 'picked' ? this.passes.readCut() : null,
+        cut: picked ? this.passes.readCut() : null,
+        groupOf: opened.groups.of,
+        hidden: picked ? hiddenTriangles(opened.groups.of, step.groups) : null,
+        // The group fill (#139): all that is connected within the group it starts in.
+        ...(group && picked ? { folds: false, within: opened.groups.of[seed.triangle] } : {}),
       });
+      if (group) {
+        this.moveInto(triangles, step.into!, true);
+        return;
+      }
       this.passes.clearStroke();
-      this.passes.drawRegion(opened.mesh, triangles);
+      this.passes.drawRegion(triangles);
     }
     this.passes.composite(step.tool, parseHexColour(step.colour), step.brush);
     this.passes.commit(index, step.tool);
@@ -789,6 +1099,7 @@ class Painting implements PaintingView {
     this.live = null;
     this.strokePointer = null;
     this.scene.controls.enabled = true;
+    this.tintStroke(null);
     this.passes.cancel();
     this.timeline?.prune();
     this.emit();
@@ -874,6 +1185,26 @@ class Painting implements PaintingView {
   private fillAt(tool: FillToolId, triangle: number, point: Vec3): Promise<void> {
     return this.fill({ kind: 'picked', triangle, point }, tool);
   }
+}
+
+/** A byte a triangle, 1 where its group is among a record's hidden ones (#139); null when none is. */
+function hiddenTriangles(of: Uint8Array, record: StepGroups | undefined): Uint8Array | null {
+  if (!record || record.hidden.length === 0) return null;
+  const hidden = new Set(record.hidden);
+  const out = new Uint8Array(of.length);
+  for (let t = 0; t < of.length; t++) if (hidden.has(of[t]!)) out[t] = 1;
+  return out;
+}
+
+/** Refuses groups that are not a mesh's of `triangles` (#139). */
+function checkGroups(groups: PaintGroups, triangles: number): void {
+  if (groups.of.length !== triangles)
+    throw new RangeError('The groups are not this mesh’s: one byte per triangle');
+  const count = groups.made.length;
+  if (count < 1 || count > MAX_GROUPS)
+    throw new RangeError(`A mini has 1 to ${MAX_GROUPS} groups, not ${count}`);
+  for (const group of groups.of)
+    if (group >= count) throw new RangeError(`The groups name a group ${group} they do not have`);
 }
 
 /** sRGB bytes as `#rrggbb`. */

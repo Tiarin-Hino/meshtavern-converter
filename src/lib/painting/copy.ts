@@ -1,3 +1,5 @@
+import type { GroupOrigin } from '../pipeline/brush';
+
 /**
  * The painting view's words (issue #127, design note `docs/design/painting-engine.md` §10.2). The
  * view itself shows only `cannotPaint`, as the message of its refusal; the rest is offered so a
@@ -18,6 +20,9 @@ export const PAINT_COPY = {
     mask: 'Mask',
     unmask: 'Unmask',
     'mask-fill': 'Mask fill',
+    'unmask-fill': 'Unmask fill',
+    group: 'Group brush',
+    'group-fill': 'Group fill',
   },
   /** What each tool does, a sentence or two for a panel to show beside it (#128). */
   toolHints: {
@@ -34,6 +39,12 @@ export const PAINT_COPY = {
     unmask: 'Takes the mask away where it goes, so the tools reach the surface there again.',
     'mask-fill':
       'Masks the surface you tap, up to a fold, a crease or the mask already there. Tolerance lets it go further.',
+    'unmask-fill':
+      'Takes the mask away from the surface you tap, up to a fold, a crease or the edge of the mask.',
+    group:
+      'Marks the triangles it covers as part of the chosen group. Hide a group to paint what lies behind it.',
+    'group-fill':
+      'Marks the connected surface you tap, up to the mask, a hidden or pulled-apart group, or the edge of the group you tap in. Mask a wrist, then tap the hand.',
   },
   sliders: {
     sizeMm: 'Size',
@@ -67,6 +78,29 @@ export const PAINT_COPY = {
     base: 'Mask the base',
     figure: 'Mask the figure',
   },
+  /**
+   * The groups (#139): the panel's row, the names `describeGroup` builds from, and what hiding is.
+   * `part`, `shell` and `hand` are followed by a number.
+   */
+  groups: {
+    label: 'Groups',
+    body: 'The body',
+    part: 'Part',
+    base: 'The base',
+    shell: 'Shell',
+    hand: 'Group',
+    of: 'of',
+    hide: 'Hide',
+    show: 'Show',
+    showAll: 'Show all',
+    tint: 'Show groups',
+    newGroup: 'New group',
+    into: 'Add to',
+    fill: 'Fill the group',
+    mask: 'Mask the group',
+    unmask: 'Unmask the group',
+    hint: 'A hidden group is not drawn and takes no paint, so you can paint what lies behind it. Hiding is not a step: Show brings it back, not Undo.',
+  },
   /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
   recent: { label: 'Colours used', swatch: 'Paint with' },
   undo: 'Undo',
@@ -81,3 +115,42 @@ export type PaintCopy = {
     ? string
     : { -readonly [L in keyof (typeof PAINT_COPY)[K]]: string };
 };
+
+/**
+ * A group's name for a panel (#139, design note `docs/design/paint-groups.md` §7), from how it was
+ * made (`PaintGroups.made`): "The body", "Part 2" (the file's number in the order given, or its
+ * name in `fileNames`, by `PartResult.file`), "The base", "Shell 2 of the body" (the body itself
+ * is its shell 1; shells split from the same group are numbered in the order they were made) or
+ * "Group 5" for one made by hand (its index + 1). `copy` replaces the words, as the view's own.
+ */
+export function describeGroup(
+  made: readonly GroupOrigin[],
+  index: number,
+  fileNames: readonly (string | undefined)[] = [],
+  copy: PaintCopy['groups'] = PAINT_COPY.groups,
+): string {
+  const origin = made[index];
+  if (!origin) throw new RangeError(`There is no group ${index}`);
+  switch (origin.by) {
+    case 'body':
+      return copy.body;
+    case 'part':
+      return fileNames[origin.file] ?? `${copy.part} ${origin.file + 1}`;
+    case 'base':
+      return copy.base;
+    case 'hand':
+      return `${copy.hand} ${index + 1}`;
+    case 'shell': {
+      let number = 1;
+      for (let k = 0; k <= index; k++) {
+        const other = made[k]!;
+        if (other.by === 'shell' && other.of === origin.of) number++;
+      }
+      const of = describeGroup(made, origin.of, fileNames, copy);
+      // "the body", "the base": a name that starts with the copy's own article reads lower-case after "of".
+      const after =
+        of === copy.body || of === copy.base ? of.charAt(0).toLowerCase() + of.slice(1) : of;
+      return `${copy.shell} ${number} ${copy.of} ${after}`;
+    }
+  }
+}

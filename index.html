@@ -647,6 +647,32 @@
                   Show mask
                 </button>
               </div>
+              <div class="actions" role="group" aria-label="Groups">
+                <div id="paint-groups" class="actions" role="group" aria-label="Groups shown"></div>
+                <button id="paint-groups-all" class="btn btn-sm" type="button">Show all</button>
+                <button
+                  id="paint-groups-tint"
+                  class="btn btn-sm"
+                  type="button"
+                  aria-pressed="false"
+                >
+                  Show groups
+                </button>
+                <label class="field"
+                  ><span id="paint-group-target-label">Add to</span>
+                  <select id="paint-group-target" class="input"></select
+                ></label>
+                <button id="paint-group-fill" class="btn btn-sm" type="button">
+                  Fill the group
+                </button>
+                <button id="paint-group-mask" class="btn btn-sm" type="button">
+                  Mask the group
+                </button>
+                <button id="paint-group-unmask" class="btn btn-sm" type="button">
+                  Unmask the group
+                </button>
+              </div>
+              <p id="paint-groups-hint" class="hint"></p>
               <div class="actions" role="group" aria-label="History">
                 <button id="paint-undo" class="btn btn-sm" type="button">Undo</button>
                 <button id="paint-redo" class="btn btn-sm" type="button">Redo</button>

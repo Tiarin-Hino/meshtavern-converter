@@ -2017,3 +2017,587 @@ test('stops a fill at a band of mask around the body, and fills past it without 
   expect(cut.above.filter((seen) => seen.alpha !== 255)).toEqual([]);
   expect(cut.below.filter((seen) => seen.alpha !== 0)).toEqual([]);
 });
+// The groups (#139, design note `docs/design/paint-groups.md`): the generated figure's shells are
+// its automatic groups (body, base, head, two arms); a hidden group is drawn nowhere, takes no
+// paint, and lets the surface behind it be painted; hiding is not a step, and each step records
+// what was hidden, so its replay gives the same bytes whatever is hidden then.
+
+/** Where the right arm hangs beside the body (x 4–8, y 13–25, z −3.5–1.5): its middle. */
+const ARM_MIDDLE: [number, number, number] = [6, 19, -1];
+
+/**
+ * Opens the view on the figure with its automatic groups and turns it so that the right arm
+ * hides the body behind it: the arm's group and the camera's azimuth.
+ */
+async function openWithTheArmInFront(page: Page): Promise<{ arm: number; azimuth: number }> {
+  return page.evaluate(async (middle) => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    const { of, made } = view.groups();
+    const table = painting.table()!;
+    // The shell whose triangles lie furthest out along +x.
+    let arm = -1;
+    let furthest = -Infinity;
+    for (let group = 1; group < made.length; group++) {
+      let sum = 0;
+      let count = 0;
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] !== group) continue;
+        sum += table.positions[table.indices[t * 3]! * 3]!;
+        count++;
+      }
+      if (count > 0 && sum / count > furthest) [arm, furthest] = [group, sum / count];
+    }
+    for (const azimuth of [90, 270]) {
+      view.setCamera(azimuth, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const hit = view.texelAt(...view.screenOf(middle));
+      if (hit && of[hit.triangle] === arm) return { arm, azimuth };
+    }
+    throw new Error('No side has the arm in front');
+  }, ARM_MIDDLE);
+}
+
+test('lets the surface behind a hidden group be painted, and draws and paints nothing of the group (#139)', async ({
+  figurePage: page,
+}) => {
+  const { arm } = await openWithTheArmInFront(page);
+  const outcome = await page.evaluate(
+    async ({ arm, middle }) => {
+      const painting = window.__mt.painting;
+      const view = painting.view();
+      const table = painting.table()!;
+      const { of, made } = view.groups();
+      const frame = (): Promise<unknown> =>
+        new Promise((resolve) => requestAnimationFrame(resolve));
+      // Every texel at the middle of one of the arm's triangles.
+      const armTexels: number[] = [];
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] !== arm) continue;
+        let u = 0;
+        let v = 0;
+        for (let corner = 0; corner < 3; corner++) {
+          const vertex = table.indices[t * 3 + corner]!;
+          u += table.uvs![vertex * 2]! / 3;
+          v += table.uvs![vertex * 2 + 1]! / 3;
+        }
+        armTexels.push(Math.floor(v * 1024) * 1024 + Math.floor(u * 1024));
+      }
+      const p = view.screenOf(middle);
+      const shownBefore = await view.colourAt(...p, 'shown');
+      view.setGroupShown(arm, false);
+      await frame();
+      const hiddenBare = await view.colourAt(...p, 'shown');
+      const behind = view.texelAt(...p)!;
+      // A 16 mm stroke across the hidden arm, along the surface behind it.
+      const points: [number, number, number][] = [];
+      for (let dx = -24; dx <= 24; dx += 4) {
+        const hit = view.texelAt(p[0] + dx, p[1]);
+        if (hit) points.push(hit.point);
+      }
+      view.setTool('flat');
+      view.setColour('#ffff00');
+      view.setBrush({ sizeMm: 16, hardness: 0.8, opacity: 1 });
+      await view.stroke(points);
+      const hiddenColour = await view.colourAt(...p, 'shown');
+      const hidden = view.state.groups.hidden;
+      view.showAllGroups();
+      await frame();
+      const shownColour = await view.colourAt(...p, 'shown');
+      const again = view.texelAt(...p)!;
+      const { data } = await view.paint();
+      const [bx, by] = behind.texel;
+      return {
+        groups: made.length,
+        armTriangles: armTexels.length,
+        behindGroup: of[behind.triangle],
+        behindAlpha: data[(by * 1024 + bx) * 4 + 3],
+        armPainted: armTexels.filter((texel) => data[texel * 4 + 3] !== 0).length,
+        againGroup: of[again.triangle],
+        shownBefore,
+        hiddenBare,
+        hiddenColour,
+        shownColour,
+        hidden,
+        points: points.length,
+      };
+    },
+    { arm, middle: ARM_MIDDLE },
+  );
+  // Body, base, head and two arms.
+  expect(outcome.groups).toBeGreaterThanOrEqual(5);
+  expect(outcome.armTriangles).toBeGreaterThan(500);
+  expect(outcome.points).toBeGreaterThan(8);
+  expect(outcome.hidden).toEqual([arm]);
+  // Hidden, the arm is not there to hit: the tap finds the body behind it, which takes the paint.
+  expect(outcome.behindGroup).not.toBe(arm);
+  expect(outcome.behindAlpha).toBe(255);
+  expect(outcome.armPainted).toBe(0);
+  // On screen too: hidden, the pixel is the body behind (it turns yellow when the body is
+  // painted); drawn again, the arm is in front once more, as it was.
+  expect(outcome.againGroup).toBe(arm);
+  const rgb = (hex: string | null): number[] =>
+    [1, 3, 5].map((k) => parseInt(hex!.slice(k, k + 2), 16));
+  expect(outcome.hiddenBare).not.toBe(outcome.shownBefore);
+  const [r0, g0, b0] = rgb(outcome.hiddenBare);
+  const [r1, g1, b1] = rgb(outcome.hiddenColour);
+  expect(Math.min(r1!, g1!) - b1!).toBeGreaterThan(Math.min(r0!, g0!) - b0! + 20);
+  expect(outcome.shownColour).toBe(outcome.shownBefore);
+});
+
+test('hides and shows without a step, and replays a stroke made with a group hidden to the same bytes with it shown (#139)', async ({
+  figurePage: page,
+}) => {
+  const { arm } = await openWithTheArmInFront(page);
+  const outcome = await page.evaluate(
+    async ({ arm, middle }) => {
+      const view = window.__mt.painting.view();
+      const frame = (): Promise<unknown> =>
+        new Promise((resolve) => requestAnimationFrame(resolve));
+      const hash = async (): Promise<number> => {
+        const { data } = await view.paint();
+        let h = 0;
+        for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
+        return h;
+      };
+      const opened = await hash();
+      view.setGroupShown(arm, false);
+      view.setGroupShown(arm, true);
+      view.setGroupShown(arm, false);
+      await frame();
+      const afterHiding = {
+        steps: view.state.steps,
+        undone: view.state.undone,
+        same: (await hash()) === opened,
+      };
+      const p = view.screenOf(middle);
+      const points: [number, number, number][] = [];
+      for (let dx = -16; dx <= 16; dx += 4) {
+        const hit = view.texelAt(p[0] + dx, p[1]);
+        if (hit) points.push(hit.point);
+      }
+      view.setColour('#ff00ff');
+      view.setBrush({ sizeMm: 8 });
+      await view.stroke(points);
+      const withHidden = await hash();
+      view.showAllGroups();
+      // A stroke with every group shown, on the arm itself.
+      await view.stroke([view.texelAt(...p)!.point]);
+      const both = await hash();
+      const record = view.history().map((step) => (step.kind === 'mask' ? null : step.groups));
+      const hasGroups = view.history().map((step) => 'groups' in step);
+      await view.undo();
+      const undoneOnce = await hash();
+      await view.undo();
+      const undoneTwice = await hash();
+      await view.redo();
+      const redone = await hash();
+      await view.redo();
+      const redoneBoth = await hash();
+      // An undo after a hide leaves the group hidden.
+      view.setGroupShown(arm, false);
+      await view.undo();
+      const stillHidden = view.state.groups.hidden;
+      return {
+        afterHiding,
+        record,
+        hasGroups,
+        changed: withHidden !== opened && both !== withHidden,
+        undoneOnce: undoneOnce === withHidden,
+        undoneTwice: undoneTwice === opened,
+        redone: redone === withHidden,
+        redoneBoth: redoneBoth === both,
+        stillHidden,
+      };
+    },
+    { arm, middle: ARM_MIDDLE },
+  );
+  expect(outcome.afterHiding).toEqual({ steps: 0, undone: 0, same: true });
+  expect(outcome.record).toEqual([{ hidden: [arm], apart: [] }, undefined]);
+  expect(outcome.hasGroups).toEqual([true, false]);
+  expect(outcome.changed).toBe(true);
+  expect(outcome.undoneOnce).toBe(true);
+  expect(outcome.undoneTwice).toBe(true);
+  // Redone with the arm shown, the first stroke still reaches the body behind it: the same bytes.
+  expect(outcome.redone).toBe(true);
+  expect(outcome.redoneBoth).toBe(true);
+  expect(outcome.stillHidden).toEqual([arm]);
+});
+
+test('gives back the groups it was opened with, and refuses groups that are not the mesh’s (#139)', async ({
+  figurePage: page,
+}) => {
+  const outcome = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const automatic = painting.view().groups();
+    // Fifty triangles of the body moved into a group made by hand.
+    const of = automatic.of.slice();
+    let moved = 0;
+    for (let t = 0; t < of.length && moved < 50; t++)
+      if (of[t] === 0) {
+        of[t] = automatic.made.length;
+        moved++;
+      }
+    const made = [...automatic.made, { by: 'hand' as const }];
+    await painting.open(null, null, { of, made });
+    const view = painting.view();
+    const back = view.groups();
+    const list = view.state.groups.list.map((entry) => entry.triangles);
+    const refusals: string[] = [];
+    for (const groups of [
+      { of: new Uint8Array(3), made: [{ by: 'body' as const }] },
+      {
+        of: of.map((group) => (group === made.length - 1 ? made.length : group)),
+        made,
+      },
+      { of, made: [] },
+    ])
+      await painting.open(null, null, groups).then(
+        () => refusals.push('opened'),
+        (error: unknown) => refusals.push(error instanceof RangeError ? 'range' : String(error)),
+      );
+    return {
+      automatic: automatic.made,
+      same: back.of.length === of.length && back.of.every((group, t) => group === of[t]),
+      made: back.made,
+      list,
+      refusals,
+    };
+  });
+  expect(outcome.automatic[0]).toEqual({ by: 'body' });
+  expect(outcome.automatic).toContainEqual({ by: 'base' });
+  // The head and the two arms are shells of the body (the base may have one of its own: the
+  // body's foot buried in the disc).
+  expect(
+    outcome.automatic.filter((origin) => origin.by === 'shell' && origin.of === 0),
+  ).toHaveLength(3);
+  expect(outcome.same).toBe(true);
+  expect(outcome.made).toEqual([...outcome.automatic, { by: 'hand' }]);
+  expect(outcome.list.at(-1)).toBe(50);
+  expect(outcome.refusals).toEqual(['range', 'range', 'range']);
+});
+// The group tools (#139, §6): the group brush takes the triangles whose middle its stroke covers,
+// the group fill floods what is connected up to the mask and the edge of its group, and the
+// per-group fill and mask are steps with a `group` seed.
+
+/** The figure's head: the group whose triangles lie highest. */
+async function headGroup(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const painting = window.__mt.painting;
+    const { of, made } = painting.view().groups();
+    const table = painting.table()!;
+    let head = -1;
+    let highest = -Infinity;
+    for (let group = 1; group < made.length; group++) {
+      let sum = 0;
+      let count = 0;
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] !== group) continue;
+        sum += table.positions[table.indices[t * 3]! * 3 + 1]!;
+        count++;
+      }
+      if (count > 0 && sum / count > highest) [head, highest] = [group, sum / count];
+    }
+    return head;
+  });
+}
+
+test('makes a group of exactly the triangles whose middle a group stroke covers, one step undone and redone (#139)', async ({
+  figurePage: page,
+}) => {
+  await page.evaluate(() => window.__mt.painting.open());
+  const head = await headGroup(page);
+  const outcome = await page.evaluate(async (head) => {
+    const painting = window.__mt.painting;
+    const view = painting.view();
+    const table = painting.table()!;
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const path = [-2, -1, 0, 1, 2].map((x) => view.texelAt(...view.screenOf([x, 28, 6]))!.point);
+    const before = view.groups();
+    view.setTool('group');
+    view.setGroupTarget('new');
+    view.setBrush({ sizeMm: 3, hardness: 0.8, opacity: 1 });
+    const target = view.state.groups.target;
+    await view.stroke(path);
+    const after = view.groups();
+    const steps = view.state.steps;
+    // The same path with the flat brush: its alpha at each triangle's middle is the coverage the
+    // group stroke read there.
+    view.setTool('flat');
+    await view.stroke(path);
+    const { data } = await view.paint();
+    let covered = 0;
+    let mismatched = 0;
+    for (let t = 0; t < after.of.length; t++) {
+      let u = 0;
+      let v = 0;
+      for (let corner = 0; corner < 3; corner++) {
+        const vertex = table.indices[t * 3 + corner]!;
+        u += table.uvs![vertex * 2]! / 3;
+        v += table.uvs![vertex * 2 + 1]! / 3;
+      }
+      const texel = Math.floor(v * 1024) * 1024 + Math.floor(u * 1024);
+      const inStroke = data[texel * 4 + 3]! >= 128;
+      if (inStroke) covered++;
+      const moved = after.of[t] === target;
+      if (moved !== inStroke) mismatched++;
+      if (!moved && after.of[t] !== before.of[t]) mismatched++;
+    }
+    const movedFrom = new Set<number>();
+    for (let t = 0; t < after.of.length; t++)
+      if (after.of[t] === target) movedFrom.add(before.of[t]!);
+    // The new group hidden, then the two steps undone: the first leaves it hidden (its step is
+    // replayed), the second takes it away, and with it out of the hidden ones.
+    view.setGroupShown(target, false);
+    await view.undo();
+    const hiddenAfterOne = view.state.groups.hidden;
+    await view.undo();
+    const hiddenAfterTwo = view.state.groups.hidden;
+    const undone = view.groups();
+    await view.redo();
+    const redone = view.groups();
+    const same = (a: Uint8Array, b: Uint8Array): boolean =>
+      a.length === b.length && a.every((group, t) => group === b[t]);
+    return {
+      target,
+      groupsBefore: before.made.length,
+      made: after.made.at(-1),
+      steps,
+      covered,
+      mismatched,
+      movedFrom: [...movedFrom],
+      undone: same(undone.of, before.of) && undone.made.length === before.made.length,
+      redone: same(redone.of, after.of) && redone.made.length === after.made.length,
+      hiddenAfterOne,
+      hiddenAfterTwo,
+      head,
+    };
+  }, head);
+  expect(outcome.target).toBe(outcome.groupsBefore);
+  expect(outcome.made).toEqual({ by: 'hand' });
+  expect(outcome.steps).toBe(1);
+  expect(outcome.covered).toBeGreaterThan(20);
+  expect(outcome.mismatched).toBe(0);
+  // The stroke was on the head only.
+  expect(outcome.movedFrom).toEqual([head]);
+  expect(outcome.undone).toBe(true);
+  expect(outcome.redone).toBe(true);
+  expect(outcome.hiddenAfterOne).toEqual([outcome.target]);
+  expect(outcome.hiddenAfterTwo).toEqual([]);
+});
+
+test('makes a group of the body above a band of mask with one tap of the group fill, and moves it back with another (#139)', async ({
+  figurePage: page,
+}) => {
+  const tapTheChest = async (): Promise<void> => {
+    const chest = await page.evaluate(async () => {
+      const view = window.__mt.painting.view();
+      view.setCamera(0, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return view.screenOf([0, 17, 6]);
+    });
+    const box = (await page.locator('#paint-view canvas').boundingBox())!;
+    const before = await page.evaluate(() => window.__mt.painting.view().state.steps);
+    await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+    await page.waitForFunction(
+      (before) => window.__mt.painting.view().state.steps === before + 1,
+      before,
+    );
+  };
+  // The band of the #138 fill test: 10 mm up, all round the body, from eight sides.
+  const original = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    const table = painting.table()!;
+    const ring: [number, number, number][] = [];
+    for (let v = 0; v < table.positions.length / 3; v++) {
+      const [x, y, z] = [0, 1, 2].map((k) => table.positions[v * 3 + k]!);
+      if (Math.abs(y! - 10) < 0.3 && Math.abs(x!) < 5.6) ring.push([x!, y!, z!]);
+    }
+    ring.sort((a, b) => Math.atan2(a[2], a[0]) - Math.atan2(b[2], b[0]));
+    view.setTool('mask');
+    view.setBrush({ sizeMm: 5, hardness: 0.9, opacity: 1 });
+    for (let side = 0; side < 8; side++) {
+      view.setCamera(side * 45, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const seen = ring.filter((point) => {
+        const hit = view.texelAt(...view.screenOf(point));
+        return hit !== null && Math.hypot(...point.map((c, k) => c - hit.point[k]!)) < 0.3;
+      });
+      await view.stroke(seen);
+    }
+    view.setTool('group-fill');
+    view.setGroupTarget('new');
+    return Array.from(view.groups().of);
+  });
+  await tapTheChest();
+  const filled = await page.evaluate((original) => {
+    const painting = window.__mt.painting;
+    const view = painting.view();
+    const table = painting.table()!;
+    const { of, made } = view.groups();
+    const group = made.length - 1;
+    const y = (t: number): number =>
+      [0, 1, 2].reduce(
+        (sum, corner) => sum + table.positions[table.indices[t * 3 + corner]! * 3 + 1]! / 3,
+        0,
+      );
+    let inGroup = 0;
+    let fromElsewhere = 0;
+    let below = 0;
+    let bodyAbove = 0;
+    let bodyAboveLeft = 0;
+    for (let t = 0; t < of.length; t++) {
+      if (of[t] === group) {
+        inGroup++;
+        if (original[t] !== 0) fromElsewhere++;
+        if (y(t) < 9) below++;
+      }
+      // Above the band: the 5 mm brush laid mask up to 12.5 mm.
+      if (original[t] === 0 && y(t) > 13.5) {
+        bodyAbove++;
+        if (of[t] !== group) bodyAboveLeft++;
+      }
+    }
+    view.setGroupTarget(0);
+    return {
+      made: made.at(-1),
+      steps: view.state.steps,
+      inGroup,
+      fromElsewhere,
+      below,
+      bodyAbove,
+      bodyAboveLeft,
+    };
+  }, original);
+  await tapTheChest();
+  const back = await page.evaluate((original) => {
+    const view = window.__mt.painting.view();
+    const { of } = view.groups();
+    return {
+      steps: view.state.steps,
+      same: of.every((group, t) => group === original[t]),
+    };
+  }, original);
+  expect(filled.made).toEqual({ by: 'hand' });
+  expect(filled.steps).toBe(9);
+  expect(filled.inGroup).toBeGreaterThan(500);
+  // Only the body's triangles, none below the band, and all of the body above it.
+  expect(filled.fromElsewhere).toBe(0);
+  expect(filled.below).toBe(0);
+  expect(filled.bodyAbove).toBeGreaterThan(500);
+  expect(filled.bodyAboveLeft).toBe(0);
+  expect(back).toEqual({ steps: 10, same: true });
+});
+
+test('fills and masks a group as one step each (#139)', async ({ figurePage: page }) => {
+  await page.evaluate(() => window.__mt.painting.open());
+  const head = await headGroup(page);
+  const outcome = await page.evaluate(async (head) => {
+    const painting = window.__mt.painting;
+    const view = painting.view();
+    const table = painting.table()!;
+    const { of } = view.groups();
+    // The texel at each triangle's middle, by whether it is the head's.
+    const middles: { texel: number; head: boolean }[] = [];
+    for (let t = 0; t < of.length; t++) {
+      let u = 0;
+      let v = 0;
+      for (let corner = 0; corner < 3; corner++) {
+        const vertex = table.indices[t * 3 + corner]!;
+        u += table.uvs![vertex * 2]! / 3;
+        v += table.uvs![vertex * 2 + 1]! / 3;
+      }
+      middles.push({
+        texel: Math.floor(v * 1024) * 1024 + Math.floor(u * 1024),
+        head: of[t] === head,
+      });
+    }
+    const alphas = (data: Uint8Array) => ({
+      head: middles.filter((m) => m.head && data[m.texel * 4 + 3] !== 255).length,
+      others: middles.filter((m) => !m.head && data[m.texel * 4 + 3] !== 0).length,
+    });
+    view.setColour('#00ff00');
+    await view.fillGroup(head);
+    const filled = alphas((await view.paint()).data);
+    const afterFill = view.state.steps;
+    // Masked, the head keeps its green under a red fill of the figure; unmasked, it turns red.
+    await view.maskGroup(head, true);
+    view.setColour('#ff0000');
+    await view.fillRegion('figure');
+    const red = (data: Uint8Array) =>
+      middles.filter((m) => m.head && data[m.texel * 4] === 255 && data[m.texel * 4 + 1] === 0)
+        .length;
+    const whileMasked = red((await view.paint()).data);
+    await view.maskGroup(head, false);
+    await view.fillRegion('figure');
+    const unmasked = red((await view.paint()).data);
+    return {
+      heads: middles.filter((m) => m.head).length,
+      filled,
+      afterFill,
+      whileMasked,
+      unmasked,
+      steps: view.state.steps,
+      tools: view
+        .history()
+        .map((step) => (step.kind === 'fill' ? [step.tool, step.seed.kind] : [])),
+    };
+  }, head);
+  expect(outcome.heads).toBeGreaterThan(500);
+  expect(outcome.filled).toEqual({ head: 0, others: 0 });
+  expect(outcome.afterFill).toBe(1);
+  expect(outcome.whileMasked).toBe(0);
+  expect(outcome.unmasked).toBe(outcome.heads);
+  expect(outcome.steps).toBe(5);
+  expect(outcome.tools).toEqual([
+    ['fill', 'group'],
+    ['mask-fill', 'group'],
+    ['fill', 'figure'],
+    ['unmask-fill', 'group'],
+    ['fill', 'figure'],
+  ]);
+});
+test('lists the groups in the Paint tool, hides one from its box, and shows them in colour with a group tool (#139)', async ({
+  figurePage: page,
+}) => {
+  await page.evaluate(async () => {
+    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
+    await window.__mt.painting.open();
+  });
+  const boxes = page.locator('#paint-groups input[type="checkbox"]');
+  const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
+  await expect(boxes).toHaveCount(count);
+  await expect(page.locator('#paint-groups label').first()).toContainText('The body');
+  await expect(page.locator('#paint-groups')).toContainText('The base');
+  await expect(page.locator('#paint-groups')).toContainText('Shell 2 of the body');
+  // The target starts at a new group: nothing to fill or mask yet.
+  await expect(page.locator('#paint-group-target')).toHaveValue('new');
+  await expect(page.locator('#paint-group-fill')).toBeDisabled();
+
+  await boxes.nth(1).uncheck();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groups.hidden)).toEqual([1]);
+  await page.locator('#paint-groups-all').click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groups.hidden)).toEqual([]);
+  await expect(boxes.nth(1)).toBeChecked();
+
+  await page.locator('#paint-tools button[data-tool="group"]').click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groupTint)).toBe(true);
+  await expect(page.locator('#paint-groups-tint')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#paint-tools button[data-tool="flat"]').click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groupTint)).toBe(false);
+
+  await page.locator('#paint-group-target').selectOption('0');
+  await page.locator('#paint-group-mask').click();
+  await page.waitForFunction(() => window.__mt.painting.view().state.steps === 1);
+  expect(
+    await page.evaluate(() => {
+      const step = window.__mt.painting.view().history()[0]!;
+      return step.kind === 'fill' ? [step.tool, step.seed] : null;
+    }),
+  ).toEqual(['mask-fill', { kind: 'group', group: 0 }]);
+});

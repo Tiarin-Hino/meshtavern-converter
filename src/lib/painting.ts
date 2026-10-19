@@ -15,6 +15,7 @@ export {
   type MiniToPaint,
   type PaintPerf,
   type LiftOutcome,
+  type GroupsState,
   type PickMode,
   PICK_MODE,
   BRUSH_MIN_MM,
@@ -24,10 +25,14 @@ export {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
   MASK_CUT,
   MASK_SHOWN,
   MASK_TINT,
   MASK_TINT_STRENGTH,
+  GROUP_COLOURS,
+  GROUP_TINT_SHOWN,
+  GROUP_TINT_STRENGTH,
   PAINT_DILATION_RINGS,
   KEYFRAME_EVERY,
   UNDO_STEPS,
@@ -35,4 +40,4 @@ export {
   FRAME_BUDGET_MS,
 } from './painting/mount';
 export type { PaintSurface } from './painting/passes';
-export { PAINT_COPY, type PaintCopy } from './painting/copy';
+export { PAINT_COPY, describeGroup, type PaintCopy } from './painting/copy';

@@ -18,7 +18,8 @@ import { CAVITY_GAIN } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
 import { BLACK } from '../three/scene-colours';
-import { dabGain, ontoMask, strokeOpacity, toolPass } from './tools';
+import { cornersOf, createGroupUniform, GROUP_VERTEX_GLSL, GROUPED_ATTRIBUTES } from './geometry';
+import { dabGain, ontoGroups, ontoMask, strokeOpacity, toolPass } from './tools';
 
 /**
  * The painting engine's GPU side (issue #127, design note `docs/design/painting-engine.md` §5): the
@@ -47,6 +48,10 @@ import { dabGain, ontoMask, strokeOpacity, toolPass } from './tools';
  *   is masked. Every paint composite multiplies its alpha by `1 − mask` at the owner, so a masked
  *   texel keeps its bytes; the mask's own tools composite into `maskLive`, committed as the paint.
  * - `cut` (at a picked fill, #138): a texel a triangle, whether the mask covers its middle.
+ *
+ * Every pass that draws the mesh draws the view's de-indexed geometry (#139, `geometry.ts`), whose
+ * vertex shaders read `uGroups`: a hidden group's triangles are rasterised nowhere, so they take no
+ * paint, leave no depth, and the surface behind them is in sight (`docs/design/paint-groups.md`).
  *
  * `paint`, `live` and the keyframes are sRGB targets (SRGB8_ALPHA8): the GPU decodes on sampling,
  * encodes on writing, and the material samples `live` as it samples an sRGB `DataTexture`. Copies
@@ -79,6 +84,8 @@ export const REFERENCE_BLOCK = 16;
 export const STAMP_MODULUS = 65536;
 /** A triangle is cut from a fill where the mask at its middle is at least this (#138). _(proposal)_ */
 export const MASK_CUT = 0.5;
+/** A group stroke takes a triangle where its coverage at the triangle's middle is at least this (#139). _(proposal)_ */
+export const GROUP_COVER = 0.5;
 /** A dab's hardness is at most this, so the falloff's two edges never meet. */
 const HARDEST = 0.999;
 
@@ -88,20 +95,26 @@ precision highp int;
 precision highp sampler2D;
 `;
 
-/** The mesh in texture space: what every texel-writing pass draws. */
+/**
+ * The mesh in texture space: what every texel-writing pass draws. `vPosition` is where the
+ * surface is drawn, its group's offset added (#139); a hidden group's vertices go out of view.
+ */
 const TEXTURE_SPACE_VERTEX = /* glsl */ `${PRECISION}
+${GROUP_VERTEX_GLSL}
 in vec3 position;
 in vec3 normal;
 in vec2 uv;
 in float occlusion;
+in float group;
 out vec3 vPosition;
 out vec3 vNormal;
 out float vOcclusion;
 void main() {
-  vPosition = position;
+  vec4 mtGroup = uGroups[ int( group + 0.5 ) ];
+  vPosition = position + mtGroup.xyz;
   vNormal = normal;
   vOcclusion = occlusion;
-  gl_Position = vec4( uv * 2.0 - 1.0, 0.0, 1.0 );
+  gl_Position = mtGroup.w > 0.5 ? MT_GROUP_HIDDEN : vec4( uv * 2.0 - 1.0, 0.0, 1.0 );
 }
 `;
 
@@ -116,11 +129,15 @@ void main() {
 }
 `;
 
+/** The depth map (§5.2): the surface where it is drawn; a hidden group leaves no depth (#139). */
 const DEPTH_VERTEX = /* glsl */ `${PRECISION}
+${GROUP_VERTEX_GLSL}
 uniform mat4 uViewProjection;
 in vec3 position;
+in float group;
 void main() {
-  gl_Position = uViewProjection * vec4( position, 1.0 );
+  vec4 mtGroup = uGroups[ int( group + 0.5 ) ];
+  gl_Position = mtGroup.w > 0.5 ? MT_GROUP_HIDDEN : uViewProjection * vec4( position + mtGroup.xyz, 1.0 );
 }
 `;
 
@@ -349,6 +366,21 @@ void main() {
 }
 `;
 
+/**
+ * The group brush's cover (#139, design note `docs/design/paint-groups.md` §6.1): the cut's
+ * points, each its triangle's middle, reading the stroke layer instead of the mask.
+ */
+const COVER_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uStroke;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  ivec2 texel = clamp( ivec2( floor( vUv * ${PAINT_SIZE.toFixed(1)} ) ), ivec2( 0 ), ivec2( ${PAINT_SIZE - 1} ) );
+  float cover = texelFetch( uStroke, texel, 0 ).r >= ${GROUP_COVER.toFixed(4)} ? 1.0 : 0.0;
+  fragColor = vec4( cover, 0.0, 0.0, 1.0 );
+}
+`;
+
 /** The mask into an RGBA target, to be read back (#138): R8 is not a format every GPU reads. */
 const MASK_OUT_FRAGMENT = /* glsl */ `${PRECISION}
 uniform sampler2D uMask;
@@ -419,6 +451,7 @@ function compositeFragment(tool: ToolId): string {
     fragColor = vec4( rgb, outA );`,
     mask: '',
     unmask: '',
+    group: '',
   }[pass.composite];
   // A lift changes only the texels whose newest step is the one it takes away (#137).
   const gate =
@@ -640,15 +673,14 @@ function edgeIndex(indices: ArrayLike<number>, triangles?: ArrayLike<number>): U
 /** A geometry over `source`'s attributes with an index of its own. */
 function sharing(source: THREE.BufferGeometry, index: Uint32Array): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
-  for (const name of ['position', 'normal', 'uv', 'occlusion'])
-    geometry.setAttribute(name, source.getAttribute(name));
+  for (const name of GROUPED_ATTRIBUTES) geometry.setAttribute(name, source.getAttribute(name));
   geometry.setIndex(new THREE.BufferAttribute(index, 1));
   return geometry;
 }
 
 /** Releases a geometry made by `sharing`: its index only, the attributes are the source's. */
 function releaseShared(geometry: THREE.BufferGeometry): void {
-  for (const name of ['position', 'normal', 'uv', 'occlusion']) geometry.deleteAttribute(name);
+  for (const name of GROUPED_ATTRIBUTES) geometry.deleteAttribute(name);
   geometry.dispose();
 }
 
@@ -669,6 +701,11 @@ export function cameraOfStroke(stroke: StrokeCamera): THREE.PerspectiveCamera {
 }
 
 export class PaintPasses {
+  /**
+   * `uGroups` (#139): each group's offset and hidden flag, read by every vertex shader of the
+   * passes and by the display material the view makes with it. The view writes it.
+   */
+  readonly groupUniform = createGroupUniform();
   /** The committed paint and the paint with the stroke in progress (what the material shows). */
   readonly paint = textureTarget('srgb');
   readonly live = textureTarget('srgb');
@@ -699,6 +736,8 @@ export class PaintPasses {
     edges: THREE.LineSegments;
     depth: THREE.Mesh;
     geometry: THREE.BufferGeometry;
+    /** The de-indexed geometry's corners in order: its index for the edges and a fill's region. */
+    corners: Uint32Array;
     detail: THREE.Texture;
     /** A point a triangle at its middle's texture coordinates, and the target they draw into (#138). */
     cut: CutPoints;
@@ -706,13 +745,15 @@ export class PaintPasses {
   private readonly atlasMaterial = raw(
     TEXTURE_SPACE_VERTEX,
     ATLAS_FRAGMENT,
-    { uLevel: { value: 1 } },
+    { uLevel: { value: 1 }, uGroups: this.groupUniform },
     'max',
   );
   private readonly depthMaterial = raw(DEPTH_VERTEX, DEPTH_FRAGMENT, {
     uViewProjection: { value: new THREE.Matrix4() },
+    uGroups: this.groupUniform,
   });
   private readonly dabUniforms = {
+    uGroups: this.groupUniform,
     uDepth: { value: null as THREE.Texture | null },
     uViewProjection: { value: new THREE.Matrix4() },
     uEye: { value: new THREE.Vector3() },
@@ -727,7 +768,12 @@ export class PaintPasses {
     max: raw(TEXTURE_SPACE_VERTEX, dabFragment(false), this.dabUniforms, 'max'),
     add: onceATexel(raw(TEXTURE_SPACE_VERTEX, dabFragment(true), this.dabUniforms, 'add')),
   };
-  private readonly regionMaterial = raw(TEXTURE_SPACE_VERTEX, REGION_FRAGMENT, {}, 'max');
+  private readonly regionMaterial = raw(
+    TEXTURE_SPACE_VERTEX,
+    REGION_FRAGMENT,
+    { uGroups: this.groupUniform },
+    'max',
+  );
   /** The reference's levels, the last one texel: what the composite reads (#133). */
   private readonly reference = referenceLevels().map(({ size, block }) => ({
     target: referenceTarget(size),
@@ -770,6 +816,9 @@ export class PaintPasses {
   });
   private readonly cutMaterial = raw(CUT_VERTEX, CUT_FRAGMENT, {
     uMask: { value: this.mask.texture },
+  });
+  private readonly coverMaterial = raw(CUT_VERTEX, COVER_FRAGMENT, {
+    uStroke: { value: this.stroke.texture },
   });
   private readonly maskOutMaterial = raw(QUAD_VERTEX, MASK_OUT_FRAGMENT, {
     uMask: { value: this.mask.texture },
@@ -814,6 +863,11 @@ export class PaintPasses {
     return this.live.texture;
   }
 
+  /** The stroke layer (#139): the group brush's coverage, tinted on the mini before its commit. */
+  get strokeTexture(): THREE.Texture {
+    return this.stroke.texture;
+  }
+
   /** The mask with a mask stroke in progress (#138): what the tint is drawn from. */
   get maskTexture(): THREE.Texture {
     return this.maskLive.texture;
@@ -822,8 +876,8 @@ export class PaintPasses {
   /**
    * Prepares the passes for a mini (§5.1): the atlas maps, the owner map read back from them, the
    * paint (bare when null) in `paint` and `live`, the mask (none when null, #138) in `mask` and
-   * `maskLive`. `geometry` is the display's (`createBakedGeometry`), shared; `detail` the view's
-   * own copy of the detail texture.
+   * `maskLive`. `geometry` is the display's (`createGroupedGeometry`, #139: de-indexed, with the
+   * group attribute), shared; `detail` the view's own copy of the detail texture.
    */
   async open(
     geometry: THREE.BufferGeometry,
@@ -833,7 +887,8 @@ export class PaintPasses {
     mask: PaintMask | null = null,
   ): Promise<void> {
     this.close();
-    const edges = sharing(geometry, edgeIndex(mesh.indices));
+    const corners = cornersOf(mesh.indices.length / 3);
+    const edges = sharing(geometry, edgeIndex(corners));
     const triangles = new THREE.Mesh(geometry, this.atlasMaterial);
     const lines = new THREE.LineSegments(edges, this.atlasMaterial);
     const depth = new THREE.Mesh(geometry, this.depthMaterial);
@@ -844,7 +899,7 @@ export class PaintPasses {
     this.depthScene.add(depth);
     const cut = cutPoints(mesh, this.cutMaterial);
     this.cutScene.add(cut.points);
-    const mini = { triangles, edges: lines, depth, geometry: edges, detail, cut };
+    const mini = { triangles, edges: lines, depth, geometry: edges, corners, detail, cut };
     this.mini = mini;
     this.compositeUniforms.uDetail.value = detail;
     this.referenceMaterial.uniforms.uDetail!.value = detail;
@@ -996,13 +1051,13 @@ export class PaintPasses {
   }
 
   /** A fill's region (§7.1) into the stroke layer at full coverage: its triangles and their edges. */
-  drawRegion(mesh: IndexedMesh, triangles: Uint32Array): void {
+  drawRegion(triangles: Uint32Array): void {
     const mini = this.mini;
     if (!mini || triangles.length === 0) return;
     const index = new Uint32Array(triangles.length * 3);
-    triangles.forEach((t, k) => index.set(mesh.indices.subarray(t * 3, t * 3 + 3), k * 3));
+    triangles.forEach((t, k) => index.set(mini.corners.subarray(t * 3, t * 3 + 3), k * 3));
     const faces = sharing(mini.triangles.geometry, index);
-    const edges = sharing(mini.triangles.geometry, edgeIndex(mesh.indices, triangles));
+    const edges = sharing(mini.triangles.geometry, edgeIndex(mini.corners, triangles));
     const scene = new THREE.Scene();
     const meshes = [
       new THREE.Mesh(faces, this.regionMaterial),
@@ -1018,6 +1073,8 @@ export class PaintPasses {
   /** The stroke onto the paint into `live`, through the tool's mask, every gutter texel from its owner (§5.4). */
   composite(tool: ToolId, colour: readonly [number, number, number], brush: BrushSettings): void {
     const pass = toolPass(tool);
+    // The group tools (#139) change no texel: `live` stays the paint.
+    if (ontoGroups(pass)) return;
     // The mask's own tools (#138): onto `maskLive`.
     if (ontoMask(pass)) {
       this.maskUniforms.uOpacity.value = Math.max(0, Math.min(1, brush.opacity));
@@ -1053,9 +1110,25 @@ export class PaintPasses {
    * now, a GPU sync: only at a picked fill, live or replayed.
    */
   readCut(): Uint8Array {
+    return this.readPoints(this.cutMaterial);
+  }
+
+  /**
+   * The group brush's cover (#139, design note `docs/design/paint-groups.md` §6.1): a byte a
+   * triangle, 1 where the stroke layer at its middle is at least GROUP_COVER. Read back now, a GPU
+   * sync: at a group stroke's commit, live or replayed.
+   */
+  readCover(): Uint8Array {
+    return this.readPoints(this.coverMaterial);
+  }
+
+  /** The cut's points drawn with `material` and read back: a byte a triangle. */
+  private readPoints(material: THREE.RawShaderMaterial): Uint8Array {
     const cut = this.mini?.cut;
     if (!cut) return new Uint8Array(0);
+    cut.points.material = material;
     this.draw(cut.target, this.cutScene, true);
+    cut.points.material = this.cutMaterial;
     const { width, height } = cut.target;
     const bytes = new Uint8Array(width * height * 4);
     this.renderer.readRenderTargetPixels(cut.target, 0, 0, width, height, bytes);
@@ -1082,6 +1155,11 @@ export class PaintPasses {
     // A step onto the mask (#138) changes no paint: no stamp, the mask committed.
     if (ontoMask(toolPass(tool))) {
       this.commitMask();
+      return;
+    }
+    // A step onto the groups (#139) changes neither: the view moves the triangles it covered.
+    if (ontoGroups(toolPass(tool))) {
+      this.cancel();
       return;
     }
     const lift = toolPass(tool).composite === 'lift';
@@ -1262,6 +1340,9 @@ export class PaintPasses {
     // The mask's whole changes and its cut (#138), into `maskLive` and the cut's target: dropped.
     this.changeMask('invert');
     this.draw(mini.cut.target, this.cutScene, true);
+    mini.cut.points.material = this.coverMaterial;
+    this.draw(mini.cut.target, this.cutScene, true);
+    mini.cut.points.material = this.cutMaterial;
     this.cancel();
     // The stamp pass with `live` equal to the paint changes no stamp; the probe reads nothing back.
     this.stampMaterial.uniforms.uLift!.value = false;
@@ -1323,6 +1404,7 @@ export class PaintPasses {
       this.maskMaterials.unmask,
       this.maskChangeMaterial,
       this.cutMaterial,
+      this.coverMaterial,
       this.maskOutMaterial,
       ...this.compositeMaterials.values(),
     ])

@@ -28,9 +28,11 @@ export interface ToolPass {
   /**
    * Onto the paint: the colour over it, alpha taken away, or the paint beneath a step brought back
    * where that step is on top (#137, `docs/design/lift-eraser.md`). Or onto the mask instead (#138,
-   * `docs/design/paint-mask.md`): mask laid (`mask`) or taken away (`unmask`).
+   * `docs/design/paint-mask.md`): mask laid (`mask`) or taken away (`unmask`). Or nothing (`group`,
+   * #139, `docs/design/paint-groups.md`): the group tools change which group a triangle is in,
+   * read from the stroke layer at the commit, and neither the paint nor the mask.
    */
-  composite: 'over' | 'erase' | 'lift' | 'mask' | 'unmask';
+  composite: 'over' | 'erase' | 'lift' | 'mask' | 'unmask' | 'group';
   /**
    * The body of `float mtMask( float cavity, float occlusion, vec3 normal, float reference )`:
    * cavity −1 crease … +1 edge (the detail texture's, as the material decodes it), occlusion 0
@@ -58,6 +60,9 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
   mask: { blend: 'max', composite: 'mask', mask: 'return 1.0;' },
   unmask: { blend: 'max', composite: 'unmask', mask: 'return 1.0;' },
   'mask-fill': { blend: 'max', composite: 'mask', mask: 'return 1.0;' },
+  'unmask-fill': { blend: 'max', composite: 'unmask', mask: 'return 1.0;' },
+  group: { blend: 'max', composite: 'group', mask: 'return 1.0;' },
+  'group-fill': { blend: 'max', composite: 'group', mask: 'return 1.0;' },
   wash: {
     blend: 'max',
     composite: 'over',
@@ -90,6 +95,9 @@ export const TOOL_PASSES: Record<ToolId, ToolPass> = {
 /** True for a pass onto the mask, not the paint (#138). */
 export const ontoMask = (pass: ToolPass): boolean =>
   pass.composite === 'mask' || pass.composite === 'unmask';
+
+/** True for a pass that changes the groups (#139): nothing is composited. */
+export const ontoGroups = (pass: ToolPass): boolean => pass.composite === 'group';
 
 /** A tool's pass; a name that is no tool (a string from a consumer's JavaScript) is refused. */
 export function toolPass(tool: ToolId): ToolPass {

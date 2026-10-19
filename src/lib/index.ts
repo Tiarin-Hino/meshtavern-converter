@@ -142,9 +142,12 @@ export {
   PAINT_SIZE,
   TOOL_IDS,
   MASK_TOOL_IDS,
+  GROUP_TOOL_IDS,
   FILL_TOOL_IDS,
   isMaskTool,
+  isGroupTool,
   isFillTool,
+  MAX_GROUPS,
   DEFAULT_BRUSH,
   DAB_SPACING,
   RECENT_COLOURS_MAX,
@@ -153,6 +156,7 @@ export {
   toolMask,
   type ToolId,
   type MaskToolId,
+  type GroupToolId,
   type FillToolId,
   type BrushSettings,
   type PaintStep,
@@ -163,6 +167,9 @@ export {
   type StrokeCamera,
   type FillSeed,
   type PaintRegions,
+  type PaintGroups,
+  type GroupOrigin,
+  type StepGroups,
 } from './pipeline/brush';
 // The hobby brushes' masks (#128): what toolMask reads, beside the look's constants; the dry
 // brush's reference (#133) is measured from flat.
@@ -183,6 +190,8 @@ export {
 } from './pipeline/look';
 export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
 export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
+// The automatic groups (#139): the base, the files and the shells, a byte a table-level triangle.
+export { SHELL_MIN_TRIANGLES, groupsOf, type GroupSources } from './pipeline/groups';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';

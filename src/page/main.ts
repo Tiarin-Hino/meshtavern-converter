@@ -49,7 +49,9 @@ import {
   type Albedo,
   type PaintMask,
   PAINT_SIZE,
+  groupsOf,
   regionsOf,
+  type PaintGroups,
 } from '../lib';
 import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
@@ -213,7 +215,12 @@ declare global {
        * view for the tests.
        */
       painting: Omit<PaintHooks, 'open'> & {
-        open: (paint?: TestPaint | null, mask?: PaintMask | null) => Promise<void>;
+        /** `groups` (#139): the groups to open with; left out, the page's automatic ones (`groupsOf`). */
+        open: (
+          paint?: TestPaint | null,
+          mask?: PaintMask | null,
+          groups?: PaintGroups | null,
+        ) => Promise<void>;
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
       };
@@ -1386,15 +1393,24 @@ function miniForPainting(): MiniForPainting | null {
     baked.texture instanceof Uint8Array
       ? createDetailTexture(baked.texture, baked.resolution)
       : null;
+  const pair = state.stats.pair;
+  const regions = regionsOf(baked.mesh, {
+    source: levels[0],
+    figureTriangles: pair?.figureTriangles,
+    sizing: state.stats.sizing,
+    kind: state.kind ?? undefined,
+  });
   return {
     mesh: baked.mesh,
     texture: made ?? (baked.texture as Texture),
     look: state.look,
-    regions: regionsOf(baked.mesh, {
+    regions,
+    // The automatic groups (#139): the base, the files and the shells.
+    groups: groupsOf(baked.mesh, {
+      regions,
       source: levels[0],
-      figureTriangles: state.stats.pair?.figureTriangles,
-      sizing: state.stats.sizing,
-      kind: state.kind ?? undefined,
+      parts: pair?.parts,
+      figureTriangles: pair?.figureTriangles,
     }),
     release: () => made?.dispose(),
   };
@@ -1875,8 +1891,8 @@ window.__mt = {
   state,
   painting: {
     ...paintTool,
-    open: (paint, mask) =>
-      paintTool.open(paint && baked ? testPaintAlbedo(baked.mesh, paint) : null, mask),
+    open: (paint, mask, groups) =>
+      paintTool.open(paint && baked ? testPaintAlbedo(baked.mesh, paint) : null, mask, groups),
     testPaint: (paint) => {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);

@@ -25,8 +25,9 @@ export const PAINT_SIZE = 1024;
 /**
  * The tools, in the order a panel offers them. `wash` … `airbrush` are the hobby brushes of #128;
  * `lift` takes a step away again where it is the top layer, showing the paint beneath it (#137);
- * `mask`, `unmask` and `mask-fill` change the mask that protects the surface from every other
- * tool (#138, design note `docs/design/paint-mask.md`).
+ * `mask`, `unmask`, `mask-fill` and `unmask-fill` change the mask that protects the surface from
+ * every other tool (#138, design note `docs/design/paint-mask.md`; `unmask-fill` since #139);
+ * `group` and `group-fill` change the groups (#139, design note `docs/design/paint-groups.md`).
  */
 export const TOOL_IDS = [
   'flat',
@@ -40,19 +41,31 @@ export const TOOL_IDS = [
   'mask',
   'unmask',
   'mask-fill',
+  'unmask-fill',
+  'group',
+  'group-fill',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
-/** The tools that change the mask, not the paint (#138): a brush that lays mask, an eraser that takes it away, a fill. */
-export const MASK_TOOL_IDS = ['mask', 'unmask', 'mask-fill'] as const;
+/**
+ * The tools that change the mask, not the paint (#138): a brush that lays mask, an eraser that
+ * takes it away, a fill, and since #139 a fill that takes it away.
+ */
+export const MASK_TOOL_IDS = ['mask', 'unmask', 'mask-fill', 'unmask-fill'] as const;
 export type MaskToolId = (typeof MASK_TOOL_IDS)[number];
-/** The tools a tap fills with (#138): the paint's fill and the mask's. */
-export const FILL_TOOL_IDS = ['fill', 'mask-fill'] as const;
+/** The tools that change the groups, not the paint or the mask (#139): a brush and a fill. */
+export const GROUP_TOOL_IDS = ['group', 'group-fill'] as const;
+export type GroupToolId = (typeof GROUP_TOOL_IDS)[number];
+/** The tools a tap fills with (#138; the unmask and group fills since #139). */
+export const FILL_TOOL_IDS = ['fill', 'mask-fill', 'unmask-fill', 'group-fill'] as const;
 export type FillToolId = (typeof FILL_TOOL_IDS)[number];
 
 /** True for a tool that changes the mask (#138). */
 export const isMaskTool = (tool: ToolId): tool is MaskToolId =>
   (MASK_TOOL_IDS as readonly ToolId[]).includes(tool);
+/** True for a tool that changes the groups (#139). */
+export const isGroupTool = (tool: ToolId): tool is GroupToolId =>
+  (GROUP_TOOL_IDS as readonly ToolId[]).includes(tool);
 /** True for a tool a tap fills with (#138). */
 export const isFillTool = (tool: ToolId): tool is FillToolId =>
   (FILL_TOOL_IDS as readonly ToolId[]).includes(tool);
@@ -97,9 +110,48 @@ export interface StrokeCamera {
   viewport: [number, number];
 }
 
+/** Groups a mini may have, group 0 included (#139). _(proposal)_ */
+export const MAX_GROUPS = 64;
+
+/**
+ * How a group came to be (#139): for a panel's words (`describeGroup`) and for a consumer that
+ * keeps names of its own. `body` is group 0 (the body's file, or the whole mini); `part` another
+ * file of the figure (its index in the figure's parts, `PartResult.file`); `base` the base (the
+ * fill's ready region, or the base file); `shell` a separate shell split from group `of`; `hand`
+ * made in the view with the group tools.
+ */
+export type GroupOrigin =
+  | { by: 'body' }
+  | { by: 'part'; file: number }
+  | { by: 'base' }
+  | { by: 'shell'; of: number }
+  | { by: 'hand' };
+
+/**
+ * The groups as data (#139, design note `docs/design/paint-groups.md` §3): a byte a triangle of the
+ * table level, the group it is in; group 0 always exists. A partition: every triangle is in
+ * exactly one group. Kept by the consumer beside the paint and the mask, so painting continues
+ * later with the same groups. Indices are stable while a mini is open: a group all of whose
+ * triangles were moved away stays in `made`, empty.
+ */
+export interface PaintGroups {
+  of: Uint8Array;
+  made: GroupOrigin[];
+}
+
+/**
+ * Which groups were hidden and pulled apart when a step was made (#139): what its replay sets, so
+ * it gives the same bytes whatever is hidden when it replays. Offsets are in mm (pulling apart is
+ * #139's follow-up; no group is apart until then).
+ */
+export interface StepGroups {
+  hidden: number[];
+  apart: { group: number; offset: Vec3 }[];
+}
+
 export interface PaintStroke {
   kind: 'stroke';
-  /** A paint tool, or the mask's brush and eraser (`mask`, `unmask`, #138). */
+  /** A paint tool, the mask's brush and eraser (`mask`, `unmask`, #138), or the group brush (`group`, #139). */
   tool: Exclude<ToolId, FillToolId>;
   /** sRGB hex, as the look's base; never used by a mask stroke. */
   colour: string;
@@ -112,20 +164,34 @@ export interface PaintStroke {
    * in the history, oldest first, as `history()` gives it. On no other stroke.
    */
   lifts?: number;
+  /**
+   * A `group` stroke's target (#139): the group its covered triangles go into; the number of
+   * groups at the time makes a new one. On no other stroke.
+   */
+  into?: number;
+  /** The groups hidden and pulled apart at the stroke (#139); left out when none was. */
+  groups?: StepGroups;
 }
 
-/** Where a fill starts: a triangle under the finger, or a ready region (§7.2). */
+/** Where a fill starts: a triangle under the finger, a ready region (§7.2), or a group (#139). */
 export type FillSeed =
-  { kind: 'picked'; triangle: number; point: Vec3 } | { kind: 'base' } | { kind: 'figure' };
+  | { kind: 'picked'; triangle: number; point: Vec3 }
+  | { kind: 'base' }
+  | { kind: 'figure' }
+  | { kind: 'group'; group: number };
 
 export interface PaintFill {
   kind: 'fill';
-  /** The paint's fill, or the mask's (`mask-fill`, #138). */
+  /** The paint's fill, the mask's (`mask-fill`, #138; `unmask-fill`, #139), or the group fill (#139). */
   tool: FillToolId;
   colour: string;
   /** `opacity` and `tolerance` are read; the region is found again from the seed on replay. */
   brush: BrushSettings;
   seed: FillSeed;
+  /** A `group-fill`'s target (#139), as a group stroke's `into`. On no other fill. */
+  into?: number;
+  /** The groups hidden and pulled apart at the fill (#139), which bound it; left out when none was. */
+  groups?: StepGroups;
 }
 
 /**
@@ -165,7 +231,7 @@ export const RECENT_COLOURS_MAX = 12;
  * to pick a colour from earlier again. Built from the steps alone, so a consumer that kept them
  * shows the same list after reopening a mini. Eraser and lift strokes are left out: their colour
  * is never shown (PM decision on #136, 2026-10-13; the lift since #137), and so are the mask's
- * steps (#138). Colours are compared and given in lower case, so
+ * steps (#138) and the groups' (#139). Colours are compared and given in lower case, so
  * `#B03030` and `#b03030` are one swatch.
  */
 export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_MAX): string[] {
@@ -177,7 +243,8 @@ export function recentColours(steps: readonly PaintStep[], max = RECENT_COLOURS_
       step.kind === 'mask' ||
       step.tool === 'eraser' ||
       step.tool === 'lift' ||
-      isMaskTool(step.tool)
+      isMaskTool(step.tool) ||
+      isGroupTool(step.tool)
     )
       continue;
     const colour = step.colour.toLowerCase();
@@ -352,8 +419,8 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * `src/lib/painting/tools.ts`, which `tools.test.ts` keeps in step. `cavity` is the detail
  * texture's, decoded as the material does (−1 crease … +1 edge), `occlusion` the vertex
  * occlusion (0 buried … 1 open), `normal` the detail texture's object-space normal (not
- * necessarily of unit length). The flat brush, the eraser, the lift, the fill and the mask's
- * tools (#138) cover every texel they reach; the hobby brushes of #128 read the surface, with their constants beside the look's:
+ * necessarily of unit length). The flat brush, the eraser, the lift, the fill, the mask's
+ * tools (#138) and the groups' (#139) cover every texel they reach; the hobby brushes of #128 read the surface, with their constants beside the look's:
  *
  * - `wash`: pools where the cavity is negative and the occlusion low, tints a flat open surface
  *   faintly (`WASH_FLAT`) and evenly, and is shed by a raised edge (`WASH_LIFT`).
@@ -384,6 +451,9 @@ export function toolMask(
     case 'mask':
     case 'unmask':
     case 'mask-fill':
+    case 'unmask-fill':
+    case 'group':
+    case 'group-fill':
       return 1;
     case 'wash': {
       const pool = saturate(Math.max(-cavity, 0) + WASH_OCCLUSION * (1 - occlusion));
