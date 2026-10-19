@@ -2349,8 +2349,13 @@ test('makes a group of exactly the triangles whose middle a group stroke covers,
     const movedFrom = new Set<number>();
     for (let t = 0; t < after.of.length; t++)
       if (after.of[t] === target) movedFrom.add(before.of[t]!);
+    // The new group hidden, then the two steps undone: the first leaves it hidden (its step is
+    // replayed), the second takes it away, and with it out of the hidden ones.
+    view.setGroupShown(target, false);
     await view.undo();
+    const hiddenAfterOne = view.state.groups.hidden;
     await view.undo();
+    const hiddenAfterTwo = view.state.groups.hidden;
     const undone = view.groups();
     await view.redo();
     const redone = view.groups();
@@ -2366,6 +2371,8 @@ test('makes a group of exactly the triangles whose middle a group stroke covers,
       movedFrom: [...movedFrom],
       undone: same(undone.of, before.of) && undone.made.length === before.made.length,
       redone: same(redone.of, after.of) && redone.made.length === after.made.length,
+      hiddenAfterOne,
+      hiddenAfterTwo,
       head,
     };
   }, head);
@@ -2378,6 +2385,8 @@ test('makes a group of exactly the triangles whose middle a group stroke covers,
   expect(outcome.movedFrom).toEqual([head]);
   expect(outcome.undone).toBe(true);
   expect(outcome.redone).toBe(true);
+  expect(outcome.hiddenAfterOne).toEqual([outcome.target]);
+  expect(outcome.hiddenAfterTwo).toEqual([]);
 });
 
 test('makes a group of the body above a band of mask with one tap of the group fill, and moves it back with another (#139)', async ({

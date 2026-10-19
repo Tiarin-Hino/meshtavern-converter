@@ -201,8 +201,6 @@ export function createPaintTool(
   let recentFor = '';
   /** The groups the row was last built for (#139): rebuilt when they change. */
   let groupsFor = '';
-  /** The tool chosen last: choosing a group tool shows the groups' colours (#139). */
-  let toolBefore: string | null = null;
 
   const setPicking = (on: boolean): void => {
     picking = on;
@@ -262,16 +260,6 @@ export function createPaintTool(
    */
   const showGroups = (state: PaintingState): void => {
     if (!panel) return;
-    // Choosing a group tool shows the groups in their colours; leaving it hides them.
-    if (state.tool !== toolBefore && view) {
-      const was = toolBefore !== null && isGroupTool(toolBefore as never);
-      const is = isGroupTool(state.tool);
-      toolBefore = state.tool;
-      if (was !== is && state.groupTint !== is) {
-        view.setGroupTint(is);
-        return;
-      }
-    }
     panel.groupsTint.setAttribute('aria-pressed', String(state.groupTint));
     const { list, hidden, target } = state.groups;
     const key = state.open ? JSON.stringify([list, hidden, target]) : '';
@@ -399,7 +387,11 @@ export function createPaintTool(
       button.textContent = PAINT_COPY.tools[tool];
       button.addEventListener('click', () => {
         try {
-          current().setTool(tool);
+          const view = current();
+          const before = view.state.tool;
+          view.setTool(tool);
+          // Choosing a group tool shows the groups in their colours; leaving one hides them (#139).
+          if (isGroupTool(before) !== isGroupTool(tool)) view.setGroupTint(isGroupTool(tool));
         } catch (error) {
           panel.perf.textContent = error instanceof Error ? error.message : String(error);
         }

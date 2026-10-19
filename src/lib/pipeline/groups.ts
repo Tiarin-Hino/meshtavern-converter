@@ -28,8 +28,6 @@ export interface GroupSources {
   figureTriangles?: number;
   /** At most this many groups, group 0 included: MAX_GROUPS. For tests. */
   maxGroups?: number;
-  /** Built once per mini (`triangleAdjacency`); made here when left out. */
-  adjacency?: TriangleAdjacency;
 }
 
 /**
@@ -80,7 +78,7 @@ export function groupsOf(table: IndexedMesh, about: GroupSources = {}): PaintGro
   if (source && (parts || (baseFile && !regions)) && searched > 0)
     assignFiles(table, source, searched, figureTriangles, parts, partGroup, baseGroup, of);
 
-  splitShells(of, made, maxGroups, about.adjacency ?? triangleAdjacency(table));
+  splitShells(of, made, maxGroups, triangleAdjacency(table));
   return { of, made };
 }
 

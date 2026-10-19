@@ -738,6 +738,22 @@ class Painting implements PaintingView {
     return { hidden: [...this.hidden].sort((a, b) => a - b), apart: [] };
   }
 
+  /**
+   * After an undo that took away a group a step had made (#139): it is no longer hidden, so the
+   * state and the next step's record name only groups the mini has. Not in `restoreKeyframe`:
+   * undo restores an older keyframe and replays steps that may make the group again.
+   */
+  private forgetGoneGroups(): void {
+    const count = this.opened?.groups.made.length ?? 1;
+    let gone = false;
+    for (const group of [...this.hidden])
+      if (group >= count) {
+        this.hidden.delete(group);
+        gone = true;
+      }
+    if (gone) this.writeGroupUniform(null);
+  }
+
   /** Back to a keyframe: its targets, and the groups as they were then (#139). */
   private restoreKeyframe(keyframe: ViewKeyframe): void {
     this.passes.restore(keyframe);
@@ -785,6 +801,7 @@ class Painting implements PaintingView {
   async undo(): Promise<void> {
     this.commitLive();
     if (this.timeline?.undo() == null) return;
+    this.forgetGoneGroups();
     this.emit();
     await this.scene.nextFrame();
   }
