@@ -72,6 +72,7 @@ describe('the library entries', () => {
       'footprintMm',
       'fromAxisAngle',
       'glbEncoderReady',
+      'groupsApart',
       'groupsOf',
       'isFillTool',
       'isGroupTool',

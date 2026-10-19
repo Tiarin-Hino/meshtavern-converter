@@ -1,5 +1,6 @@
-import type { PartResult } from './assemble';
+import { apartTranslations, type Box, type PartResult } from './assemble';
 import { MIN_NORMAL_AGREEMENT } from './bake';
+import type { Vec3 } from './base';
 import { MAX_GROUPS, type GroupOrigin, type PaintGroups, type PaintRegions } from './brush';
 import { TriangleBvh, type SurfaceHit } from './bvh';
 import { triangleAdjacency, type TriangleAdjacency } from './fill';
@@ -80,6 +81,68 @@ export function groupsOf(table: IndexedMesh, about: GroupSources = {}): PaintGro
 
   splitShells(of, made, maxGroups, triangleAdjacency(table));
   return { of, made };
+}
+
+/** A group pulled apart: its offset from where the mini's own coordinates put it, in mm (#180). */
+export interface GroupApart {
+  group: number;
+  offset: Vec3;
+}
+
+/**
+ * The groups pulled apart to paint each on its own (issue #180, design note
+ * `docs/design/paint-groups.md` §9): the apart rule of the parts question (`apartTranslations`,
+ * #93) over the groups' boxes instead of the files'. Group 0, the body, stays; every other group
+ * that comes within the gap of the body's box moves along the line from the body's middle to its
+ * own by `APART_SHARE` of the body's largest side (at least `APART_MIN_GAP_MM`), further while it
+ * lands on a group moved before it. The groups moved, in their order, with their offsets in the
+ * mesh's coordinates; a group the rule leaves in place (clear of the body already, or without a
+ * triangle) is not listed. `only` names the groups to move, in that order, the others left where
+ * they are: for pulling one group apart on its own. Group 0 in `only` is ignored.
+ */
+export function groupsApart(
+  table: IndexedMesh,
+  groups: PaintGroups,
+  only?: readonly number[],
+): GroupApart[] {
+  const triangles = table.indices.length / 3;
+  if (groups.of.length !== triangles)
+    throw new RangeError('The groups are not this mesh’s: one byte per triangle');
+  const count = groups.made.length;
+  const boxes: (Box | null)[] = Array.from({ length: count }, () => null);
+  const { positions, indices } = table;
+  for (let t = 0; t < triangles; t++) {
+    const group = groups.of[t]!;
+    const box = (boxes[group] ??= {
+      min: [Infinity, Infinity, Infinity],
+      max: [-Infinity, -Infinity, -Infinity],
+    });
+    for (let corner = 0; corner < 3; corner++) {
+      const v = indices[t * 3 + corner]! * 3;
+      for (let k = 0; k < 3; k++) {
+        const value = positions[v + k]!;
+        if (value < box.min[k]!) box.min[k] = value;
+        if (value > box.max[k]!) box.max[k] = value;
+      }
+    }
+  }
+  const body = boxes[0];
+  if (!body) return [];
+  const moved = (only ?? boxes.map((_, group) => group)).filter(
+    (group, k, list) =>
+      Number.isInteger(group) &&
+      group > 0 &&
+      group < count &&
+      boxes[group] &&
+      list.indexOf(group) === k,
+  );
+  const translations = apartTranslations([body, ...moved.map((group) => boxes[group]!)]);
+  const out: GroupApart[] = [];
+  moved.forEach((group, k) => {
+    const offset = translations[k + 1]!;
+    if (offset.some((value) => value !== 0)) out.push({ group, offset });
+  });
+  return out;
 }
 
 /** Rule 2: every triangle still in group 0 to the group of the file under its middle. */
