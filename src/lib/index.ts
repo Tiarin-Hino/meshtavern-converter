@@ -43,9 +43,12 @@ export type {
   UpReason,
   UpRole,
 } from './pipeline/ask';
-// A figure in several files, and the pairs of patches where its parts meet (issue #93).
+// A figure in several files, and the pairs of patches where its parts meet (issue #93); the apart
+// rule's constants, which the painter's groupsApart shares (#180).
 export {
   MAX_PARTS,
+  APART_SHARE,
+  APART_MIN_GAP_MM,
   type PairSummary,
   type PartResult,
   type PartsOptions,

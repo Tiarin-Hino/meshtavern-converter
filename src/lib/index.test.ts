@@ -17,6 +17,8 @@ describe('the library entries', () => {
       'AIR_DIR_SOFTNESS',
       'AIR_FLOW_GAIN',
       'AIR_HARDNESS',
+      'APART_MIN_GAP_MM',
+      'APART_SHARE',
       'BAKED_LEVEL',
       'BAKE_STEPS',
       'CREATURE_SIZES',
