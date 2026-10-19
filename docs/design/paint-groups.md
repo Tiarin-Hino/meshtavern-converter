@@ -294,3 +294,16 @@ Ask on the PR, label the issue `needs-human` when the answer is the PM's, and co
 - **Hiding as part of a saved view** (which groups a person had hidden when the paint was saved): view state; a consumer that wants it keeps `state.groups.hidden` itself.
 - **Groups on the table**: the table draws the table level with the paint; whether it ever hides a group is the table's product decision. The groups' data is in the record for when it does.
 - **A smarter automatic split of a fused sculpt** (by cavity, by the mask alone): the group fill with the mask is the PM's chosen way; nothing here guesses parts of one shell.
+
+## 15. As built (Opus 5.5, 2026-10-19, PR #179)
+
+Where the build differs from the note above, and why:
+
+- **Group order.** The automatic groups are numbered body, the other files in `parts` order, the base, then the shells, with or without regions, so a mini's indices do not depend on whether the consumer had regions. With regions, rule 2 matches the remaining triangles against the figure's files only (the base is the regions'). Without regions the middle rule gives a figure's puddle standing in a base's recess to the figure's file, where `regionsOf`'s three-corner rule counts it as the base (the recess base pair: 93 % of the regions' base is the base group, the rest is the puddle's top).
+- **`describeGroup(made, index, fileNames?, copy?)`**, not `(origin, index, fileName?)`: "Shell 2 of the body" needs the other shells of the same group to number one.
+- **`fillRegion`'s `folds: false`** turns off the fold and crease bounds for the group fill (§6.2 says they do not apply to it); `within` is the seed's group as the view reads it at the step's replay.
+- **A group stroke that covers no triangle leaves no step** and makes no group, as an empty stroke leaves none; a group fill that floods nothing is a step that changes nothing and makes no group.
+- **Undo of a step that made a group takes the group away again**: keyframes hold `made` as well as the map, so undo and redo give back the same indices. A group emptied by later steps still stays (§3).
+- **`GROUP_STROKE_TINT_STRENGTH`** _(proposal: 0.5)_: how much of the target's colour a group stroke's coverage shows before its commit (§7 named no strength).
+- **The `?dev` tool** shows the group brush's size and hardness only (its opacity changes nothing it reads); Fill, Mask and Unmask the group act on the target and are off while the target is New group.
+- **`THREE.Vector4()` is `(0, 0, 0, 1)`**: the group stroke's tint and `uGroups` start from `(0, 0, 0, 0)`; with the default the tint mixed black over every covered texel and every group started hidden (journal).

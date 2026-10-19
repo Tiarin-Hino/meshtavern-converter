@@ -1,0 +1,51 @@
+---
+title: Groups of the mini's surface, hidden to paint what lies behind them
+date: 2026-10-19
+phase: 2
+issues: [139, 180]
+prs: [179]
+topics: [painting, ui, textures, testing, performance]
+---
+
+## What we did
+
+The painter has groups now: sets of the mini's surface that can be hidden, so the chest behind a shield or the inside of a cloak can be reached and painted. A mini starts with its groups made for it: a group for every other file of a figure in parts, one for the base, and one for every separate shell (a sword, a head, an arm modelled apart). More are made by hand: a group brush that takes what it covers, and a group fill that floods the connected surface up to the mask, so masking a wrist and tapping the hand makes the hand a group. A hidden group is not drawn and takes no paint from any tool, and the surface behind it can be painted. Hiding is not a step: Undo never brings a group back. A group can be filled, masked and unmasked in one tap, and the groups are kept with the mini, as the mask is. In the team's Paint tool a Groups row lists the groups with a box each, and choosing a group tool shows them in colours.
+
+The work started with Fable 5.1's design pass on 2026-10-19 (`docs/design/paint-groups.md`, hand-over PR #179) and was built on Opus 5.5 on the same PR. Pulling groups apart, the other half of the PM's ask, is designed in the note's §9 and filed as #180.
+
+## Why
+
+The PM asked for it after testing the hobby brushes (#128): split the mini into its parts while painting, or at least hide parts, to reach surfaces behind them. On the issue (2026-10-13, corrected the same day) the PM made groups the core, not the original parts: automatic groups by file and by shell, groups by hand with a brush and with a fill bounded by the mask, hiding as the main function, groups kept with the mini, and pulling groups apart in this issue or a direct follow-up.
+
+## How
+
+- **A partition, a byte a triangle.** `PaintGroups` is `of`, the group of every table-level triangle, and `made`, how each group came to be (`body`, `part`, `base`, `shell`, `hand`). Hide, mask, fill and the follow-up's pull apart all ask "the triangles of group k", which one byte answers; every triangle is in exactly one group, so making a group takes its triangles from whichever group had them. Group 0 is the body. At most `MAX_GROUPS` (64).
+- **The automatic groups in the pipeline.** `groupsOf` (Node-tested, no three.js) runs three rules: the base from the fill's ready regions (or the base file), the other files of a figure by the file under the closest point to each triangle's middle that faces its way (one query a triangle, no ties to break), then every group's separate shells by the fill's own adjacency, those of at least `SHELL_MIN_TRIANGLES` (100) a group, the smallest staying when there would be more than 64.
+- **The view's own de-indexed geometry.** The view draws the table level with three vertices a triangle and a `group` attribute, so a group's edges are the geometry's edges and a group edit writes three bytes a triangle, never moving a vertex. Splitting only the shared vertices along group edges would have been a third of the size but needed rebuilding on every edit; one mesh per group would have multiplied the draws of every pass.
+- **Hidden in the vertex shader.** Every vertex shader of the engine (the display material, through a new `groups` option of `createBakedMaterial`; the texture-space passes; the stroke's depth map) reads one uniform array, `uGroups`, a vec4 a group: its offset (for #180) and a hidden flag. A hidden group's vertices go to one point outside the view, so its triangles are rasterised nowhere. That one change gives every promise at once: not drawn, no depth (so the surface behind it is in sight of the stroke's camera), and no coverage in the stroke layer, so no tool, fill or mask tool changes a texel of it. No composite changed.
+- **Hiding is view state, recorded on the steps.** Hiding is not a step, but a stroke made with the arm hidden reaches the body behind the arm, which the same stroke with the arm shown does not. So each stroke and fill records the groups hidden when it was made (`groups.hidden`, left out when none was, so every record made without hiding is byte for byte as before), and its replay sets `uGroups` from that record and puts the view's own state back after. A tap and a stroke cast past hidden triangles (`TriangleBvh.raycast`'s new `accept`).
+- **The group tools as steps.** The group brush is a stroke whose composite does nothing; at its commit the view reads back, one texel a triangle, whether the stroke layer at each triangle's middle reaches `GROUP_COVER` (0.5), with the mask's cut points (#138) and a second material, and moves those triangles into the target group (a new group when it is the next one). The group fill is a flood with `folds: false` (no fold or crease bound), bounded by the mask's cut, the hidden groups and the edge of the group it starts in (`within`). `fillGroup` and `maskGroup` are ordinary fill, `mask-fill` and the new `unmask-fill` steps with a `group` seed. Keyframes hold the map and `made`, so undo takes a group made by a step away again and redo gives the same indices.
+
+## Problems and how we solved them
+
+- **Painted areas showed black.** The first run of the hidden-arm test read the body behind the hidden arm as dark grey (`#1a1a1a`) after a yellow stroke, and the screenshot showed every painted area black with the colour only at its soft rim. **Cause:** `new THREE.Vector4()` is `(0, 0, 0, 1)`. The group stroke's tint uniform (colour in xyz, strength in w) started at full strength in black, and the material mixed it over every texel the stroke layer covered, which is every painted texel of the last stroke. `uGroups` had the same default, so every group would have started hidden had the view not written it at `open`. **Fix:** both start at `(0, 0, 0, 0)`. Only a pixel read caught it: the bytes of the paint were right.
+- **The base group without regions missed 7 % of the regions' base.** On the recess base pair, `groupsOf` without regions gave the base group 93 % of the triangles `regionsOf` calls the base. **Cause:** the figure's puddle stands in the base's recess, 0.8 mm above its floor; `regionsOf`'s rule (all three corners within `REGION_REACH_MM` of the base file) takes the puddle's top as the base, while the closest file to each middle is the figure's. The middle rule is the right one; with regions given, the base group is the regions' by rule 1, so a consumer that has regions gets equal "base" fills and base groups. The test now checks that only the puddle's top differs.
+- **Tests that guessed geometry wrong.** The group fill's test counted the body above 12 mm as "above the band"; the 5 mm mask brush at 10 mm lays mask up to 12.5 mm, so 317 cut triangles stayed out. The base region has a shell of its own (the body's foot buried in the disc, more than 100 triangles), so the figure has three shells of the body, not three in all. Both were the tests' arithmetic, not the engine's.
+- **The bash heredocs.** Several edit scripts written as heredocs failed in the Git Bash tool with an unmatched quote; edit lists went into files written by the editor instead. Python on Windows also wrote CRLF until `newline='\n'`. The worktree's `node_modules` was an empty folder, so the icon and credit tests, which read files from `node_modules`, failed until `npm ci` (38 s).
+
+## Dead ends
+
+None in the engine. The first form of the hidden-arm pixel check (the pixel must be blue) failed because pure blue on the body's shaded side reads nearly black; the test now paints yellow and compares the hidden pixel before and after.
+
+## Numbers
+
+- **Frame counter, development PC (RTX 3060, Chrome through ANGLE/D3D11, 1,920 × 1,080, `scripts/measure-painting.mjs`, 3 strokes of 120 samples across the canvas per run):** on large-01 (59,954 triangles, 2,048 px detail, 2 groups: body and base) every brush at 16 mm, the flat brush with the base hidden and the group brush included, had a median of 0.2–0.3 ms and a worst of 0.5–1.0 ms of CPU per frame, no slow frame, frames every 6.1 ms (the display's rate); #138 measured 0.1–0.2 ms median and 0.4–1.7 ms worst on the same mini. On the generated figure (35,012 triangles, 6 groups, its largest shell hidden) the same within 0.1 ms (worst 1.6 ms, the mask brush's first frame). The group brush's commit, with its read-back, adds about 12 ms once at the stroke's end (a 120-frame stroke with its commit: 744–746 ms against 731–734 ms for the others). The frame-rate criterion of #127 holds.
+- **Memory there:** the GPU process grew by 248 MB with the view open on large-01 after all the runs (193 MB for #138's runs). This build adds the de-indexed geometry (6.7 MB at 60,000 triangles instead of 2–3 MB) and six more strokes (the hidden-group and group-brush runs, one more scheduled keyframe at 7 MB); the rest of the difference is not attributed (the browser's own pools; a run of #138's build in the same session would separate them). The reference laptop's figures are still to measure (note §13).
+- **`groupsOf` on the corpus (development PC, Node, table levels baked at 256 px):** 34–148 ms a mini. Minis with a base file: 2 groups each (flying-01, large-02, mounted-02, quadruped-01, swarm-01: their figures are one fused shell); humanoids with a base in the file: MINI-001 8 groups (body, base, 6 shells of 154–642 triangles), M-001a 6; terrain-01 1. No mini came near the shell counts §13 asks to stop at.
+- **Winged figure as three files with its base (Node):** 8 groups (body, the wing, the tip, the base and four shells of the body file); of the figure's triangles, under 1 % went to another file than the nearest, each within 0.25 mm of it (where two files meet).
+
+## Still open
+
+- Pulling groups apart: #180, with note §9 as its brief.
+- The proposals of the note and the build (`MAX_GROUPS`, `SHELL_MIN_TRIANGLES`, `GROUP_COVER`, `GROUP_COLOURS`, `GROUP_TINT_STRENGTH`, `GROUP_STROKE_TINT_STRENGTH`, the group fill without fold bounds, the mask not protecting from the group tools, the words) are the PM's on PR #179.
+- The reference laptop's frame figures with the de-indexed geometry.
