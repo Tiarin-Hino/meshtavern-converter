@@ -7,6 +7,7 @@ import {
   type BrushSettings,
   type IndexedMesh,
   type Look,
+  type PaintGroups,
   type PaintMask,
   type PaintRegions,
   type ToolId,
@@ -37,14 +38,23 @@ export interface MiniForPainting {
   texture: Texture;
   look: Look;
   regions: PaintRegions | null;
+  /** The automatic groups (#139): `groupsOf` over what the page kept of the conversion. */
+  groups: PaintGroups;
   /** Called when the view is closed: what the page made for it (an uncompressed texture) is released. */
   release?: () => void;
 }
 
 /** The tool's hooks: the view's methods, forwarded, and the tool's own open and close. */
 export interface PaintHooks {
-  /** Opens the view on the converted mini, with a paint and a mask (#138) to continue from, or bare. */
-  open: (paint?: Albedo | null, mask?: PaintMask | null) => Promise<void>;
+  /**
+   * Opens the view on the converted mini, with a paint and a mask (#138) to continue from, or bare,
+   * and its automatic groups unless others are given (#139).
+   */
+  open: (
+    paint?: Albedo | null,
+    mask?: PaintMask | null,
+    groups?: PaintGroups | null,
+  ) => Promise<void>;
   close: () => void;
   /** The view while it is open; its methods are what the tests call. */
   view: () => PaintingView;
@@ -256,6 +266,7 @@ export function createPaintTool(
   const open = async (
     paint: Albedo | null = null,
     mask: PaintMask | null = null,
+    groups: PaintGroups | null = null,
   ): Promise<void> => {
     const found = mini();
     if (!found) throw new Error('No baked mini to paint');
@@ -270,6 +281,7 @@ export function createPaintTool(
       paint,
       mask,
       regions: found.regions,
+      groups: groups ?? found.groups,
     });
   };
 
