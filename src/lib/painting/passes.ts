@@ -18,7 +18,7 @@ import { CAVITY_GAIN } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
 import { BLACK } from '../three/scene-colours';
-import { dabGain, ontoMask, strokeOpacity, toolPass } from './tools';
+import { dabGain, ontoGroups, ontoMask, strokeOpacity, toolPass } from './tools';
 
 /**
  * The painting engine's GPU side (issue #127, design note `docs/design/painting-engine.md` §5): the
@@ -419,6 +419,7 @@ function compositeFragment(tool: ToolId): string {
     fragColor = vec4( rgb, outA );`,
     mask: '',
     unmask: '',
+    group: '',
   }[pass.composite];
   // A lift changes only the texels whose newest step is the one it takes away (#137).
   const gate =
@@ -1018,6 +1019,8 @@ export class PaintPasses {
   /** The stroke onto the paint into `live`, through the tool's mask, every gutter texel from its owner (§5.4). */
   composite(tool: ToolId, colour: readonly [number, number, number], brush: BrushSettings): void {
     const pass = toolPass(tool);
+    // The group tools (#139) change no texel: `live` stays the paint.
+    if (ontoGroups(pass)) return;
     // The mask's own tools (#138): onto `maskLive`.
     if (ontoMask(pass)) {
       this.maskUniforms.uOpacity.value = Math.max(0, Math.min(1, brush.opacity));

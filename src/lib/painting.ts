@@ -35,4 +35,4 @@ export {
   FRAME_BUDGET_MS,
 } from './painting/mount';
 export type { PaintSurface } from './painting/passes';
-export { PAINT_COPY, type PaintCopy } from './painting/copy';
+export { PAINT_COPY, describeGroup, type PaintCopy } from './painting/copy';

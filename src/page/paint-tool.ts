@@ -72,6 +72,9 @@ const SLIDERS: Record<
   mask: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
   unmask: { show: ['sizeMm', 'hardness', 'opacity'], opacity: 'opacity' },
   'mask-fill': { show: ['opacity', 'tolerance'], opacity: 'opacity' },
+  'unmask-fill': { show: ['opacity', 'tolerance'], opacity: 'opacity' },
+  group: { show: ['sizeMm', 'hardness'], opacity: 'opacity' },
+  'group-fill': { show: [], opacity: 'opacity' },
 };
 
 type Vec3 = [number, number, number];

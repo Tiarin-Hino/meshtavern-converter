@@ -88,6 +88,9 @@ describe('the tools', () => {
     expect(toolPass('eraser').composite).toBe('erase');
     expect(toolPass('lift').composite).toBe('lift');
     expect(toolPass('flat').blend).toBe('max');
+    expect(toolPass('unmask-fill').composite).toBe('unmask');
+    expect(toolPass('group').composite).toBe('group');
+    expect(toolPass('group-fill').composite).toBe('group');
     expect(() => toolPass('glaze' as never)).toThrow(RangeError);
   });
 
