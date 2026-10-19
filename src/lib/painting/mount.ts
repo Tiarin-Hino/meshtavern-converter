@@ -5,6 +5,7 @@ import {
   DEFAULT_BRUSH,
   DEFAULT_PAINT_COLOUR,
   isFillTool,
+  isGroupTool,
   MAX_GROUPS,
   MOUSE_PRESSURE,
   PAINT_SIZE,
@@ -45,6 +46,7 @@ import {
 import { ownCopy } from '../three/compressed-texture';
 import {
   GROUP_COLOURS,
+  GROUP_STROKE_TINT_STRENGTH,
   GROUP_TINT_STRENGTH,
   MASK_TINT,
   MASK_TINT_STRENGTH,
@@ -57,6 +59,7 @@ import {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
   MASK_CUT,
   PAINT_DILATION_RINGS,
   PaintPasses,
@@ -75,6 +78,7 @@ export {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
   MASK_CUT,
   PAINT_DILATION_RINGS,
   KEYFRAME_EVERY,
@@ -222,6 +226,10 @@ export interface PaintingView {
   setGroupTarget(group: number | 'new'): void;
   /** Draws every group but 0 in its colour, or not (#139). Not a step. */
   setGroupTint(on: boolean): void;
+  /** A paint fill of a group's triangles (#139): one `fill` step with a `group` seed. */
+  fillGroup(group: number): Promise<void>;
+  /** A group's triangles masked or unmasked (#139): one `mask-fill` or `unmask-fill` step with a `group` seed. */
+  maskGroup(group: number, masked: boolean): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
   /** The paint as pixels: PAINT_SIZE square, sRGB, straight alpha, row 0 at v = 0. Resolves after the GPU read. */
@@ -659,6 +667,53 @@ class Painting implements PaintingView {
     this.emit();
   }
 
+  fillGroup(group: number): Promise<void> {
+    this.commitLive();
+    this.checkGroup(group);
+    return this.fill({ kind: 'group', group }, 'fill');
+  }
+
+  maskGroup(group: number, masked: boolean): Promise<void> {
+    this.commitLive();
+    this.checkGroup(group);
+    return this.fill({ kind: 'group', group }, masked ? 'mask-fill' : 'unmask-fill');
+  }
+
+  /**
+   * The triangles `covered` names (a byte a triangle) or lists go into group `into` (#139): a new
+   * group `{ by: 'hand' }` when it is the next one. Nothing when none is covered. True when the
+   * map changed.
+   */
+  private moveInto(covered: Uint8Array | Uint32Array, into: number, list: boolean): boolean {
+    const groups = this.opened!.groups;
+    if (!(Number.isInteger(into) && into >= 0 && into <= groups.made.length && into < MAX_GROUPS))
+      throw new RangeError(`There is no group ${into} to add to`);
+    const triangles: number[] = [];
+    if (list) for (const t of covered) triangles.push(t);
+    else for (let t = 0; t < covered.length; t++) if (covered[t]) triangles.push(t);
+    if (triangles.length === 0) return false;
+    const created = into === groups.made.length;
+    if (created) groups.made.push({ by: 'hand' });
+    let changed = created;
+    for (const t of triangles) {
+      if (groups.of[t] === into) continue;
+      groups.of[t] = into;
+      changed = true;
+    }
+    if (changed) writeGroups(this.opened!.geometry, groups.of);
+    return changed;
+  }
+
+  /** The group stroke's tint (#139): its coverage in the target's colour while it is on the canvas, or none. */
+  private tintStroke(into: number | null): void {
+    if (into === null) {
+      this.strokeTint.value.set(0, 0, 0, 0);
+      return;
+    }
+    const { r, g, b } = new THREE.Color(GROUP_COLOURS[into % GROUP_COLOURS.length]);
+    this.strokeTint.value.set(r, g, b, GROUP_STROKE_TINT_STRENGTH);
+  }
+
   /** A group the mini has (#139); a consumer's number that is not one is refused. */
   private checkGroup(group: number): void {
     const count = this.opened?.groups.made.length ?? 1;
@@ -704,8 +759,11 @@ class Painting implements PaintingView {
       colour: this.colour,
       brush: { ...this.brush },
       seed,
+      ...(isGroupTool(tool) ? { into: this.targetGroup() } : {}),
       ...(groups ? { groups } : {}),
     };
+    // A new group past the last there may be makes nothing (#139).
+    if (step.into === MAX_GROUPS) return;
     await this.apply(step);
   }
 
@@ -858,6 +916,9 @@ class Painting implements PaintingView {
     if (lifted !== null) this.passes.lift(this.keyframes.get(lifted)!, lifted);
     this.scene.controls.enabled = touch;
     const groups = this.stepGroups();
+    // The group brush (#139): its target recorded; a new group past the last there may be is refused.
+    const into = isGroupTool(tool) ? this.targetGroup() : null;
+    this.tintStroke(into);
     this.live = {
       step: {
         kind: 'stroke',
@@ -867,11 +928,12 @@ class Painting implements PaintingView {
         camera,
         dabs: [],
         ...(lifted !== null ? { lifts: lifted } : {}),
+        ...(into !== null ? { into } : {}),
         ...(groups ? { groups } : {}),
       },
       drawn: 0,
       last: null,
-      refused: lift !== null && lifted === null,
+      refused: (lift !== null && lifted === null) || into === MAX_GROUPS,
       frames: [],
     };
     this.extendLive([first]);
@@ -934,7 +996,14 @@ class Painting implements PaintingView {
     this.drawLive();
     this.live = null;
     this.scene.controls.enabled = true;
-    if (live.step.dabs.length === 0 || live.refused || !this.timeline) {
+    this.tintStroke(null);
+    const group = isGroupTool(live.step.tool);
+    // A group stroke (#139) is a step where it covered a triangle: those go into its target.
+    const moved =
+      group && live.step.dabs.length > 0 && !live.refused && this.timeline
+        ? this.moveInto(this.passes.readCover(), live.step.into!, false)
+        : false;
+    if (live.step.dabs.length === 0 || live.refused || !this.timeline || (group && !moved)) {
       this.passes.cancel();
       // A lift that leaves no step leaves no keyframe pinned for it.
       this.timeline?.prune();
@@ -976,16 +1045,30 @@ class Painting implements PaintingView {
       const beneath = step.lifts === undefined ? undefined : this.keyframes.get(step.lifts);
       if (beneath) this.passes.lift(beneath, step.lifts!);
       this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
+      // The group brush (#139): what its dabs cover at the triangles' middles, read as live.
+      if (isGroupTool(step.tool)) {
+        this.moveInto(this.passes.readCover(), step.into!, false);
+        this.passes.commit(index, step.tool);
+        return;
+      }
     } else {
-      const picked = step.seed.kind === 'picked';
-      const triangles = floodRegion(opened.mesh, step.seed, {
+      const { seed } = step;
+      const picked = seed.kind === 'picked';
+      const group = isGroupTool(step.tool);
+      const triangles = floodRegion(opened.mesh, seed, {
         tolerance: step.brush.tolerance,
         regions: opened.regions,
         adjacency: opened.adjacency,
         cut: picked ? this.passes.readCut() : null,
         groupOf: opened.groups.of,
         hidden: picked ? hiddenTriangles(opened.groups.of, step.groups) : null,
+        // The group fill (#139): all that is connected within the group it starts in.
+        ...(group && picked ? { folds: false, within: opened.groups.of[seed.triangle] } : {}),
       });
+      if (group) {
+        this.moveInto(triangles, step.into!, true);
+        return;
+      }
       this.passes.clearStroke();
       this.passes.drawRegion(triangles);
     }
@@ -999,6 +1082,7 @@ class Painting implements PaintingView {
     this.live = null;
     this.strokePointer = null;
     this.scene.controls.enabled = true;
+    this.tintStroke(null);
     this.passes.cancel();
     this.timeline?.prune();
     this.emit();

@@ -2278,3 +2278,278 @@ test('gives back the groups it was opened with, and refuses groups that are not 
   expect(outcome.list.at(-1)).toBe(50);
   expect(outcome.refusals).toEqual(['range', 'range', 'range']);
 });
+// The group tools (#139, §6): the group brush takes the triangles whose middle its stroke covers,
+// the group fill floods what is connected up to the mask and the edge of its group, and the
+// per-group fill and mask are steps with a `group` seed.
+
+/** The figure's head: the group whose triangles lie highest. */
+async function headGroup(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const painting = window.__mt.painting;
+    const { of, made } = painting.view().groups();
+    const table = painting.table()!;
+    let head = -1;
+    let highest = -Infinity;
+    for (let group = 1; group < made.length; group++) {
+      let sum = 0;
+      let count = 0;
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] !== group) continue;
+        sum += table.positions[table.indices[t * 3]! * 3 + 1]!;
+        count++;
+      }
+      if (count > 0 && sum / count > highest) [head, highest] = [group, sum / count];
+    }
+    return head;
+  });
+}
+
+test('makes a group of exactly the triangles whose middle a group stroke covers, one step undone and redone (#139)', async ({
+  figurePage: page,
+}) => {
+  await page.evaluate(() => window.__mt.painting.open());
+  const head = await headGroup(page);
+  const outcome = await page.evaluate(async (head) => {
+    const painting = window.__mt.painting;
+    const view = painting.view();
+    const table = painting.table()!;
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const path = [-2, -1, 0, 1, 2].map((x) => view.texelAt(...view.screenOf([x, 28, 6]))!.point);
+    const before = view.groups();
+    view.setTool('group');
+    view.setGroupTarget('new');
+    view.setBrush({ sizeMm: 3, hardness: 0.8, opacity: 1 });
+    const target = view.state.groups.target;
+    await view.stroke(path);
+    const after = view.groups();
+    const steps = view.state.steps;
+    // The same path with the flat brush: its alpha at each triangle's middle is the coverage the
+    // group stroke read there.
+    view.setTool('flat');
+    await view.stroke(path);
+    const { data } = await view.paint();
+    let covered = 0;
+    let mismatched = 0;
+    for (let t = 0; t < after.of.length; t++) {
+      let u = 0;
+      let v = 0;
+      for (let corner = 0; corner < 3; corner++) {
+        const vertex = table.indices[t * 3 + corner]!;
+        u += table.uvs![vertex * 2]! / 3;
+        v += table.uvs![vertex * 2 + 1]! / 3;
+      }
+      const texel = Math.floor(v * 1024) * 1024 + Math.floor(u * 1024);
+      const inStroke = data[texel * 4 + 3]! >= 128;
+      if (inStroke) covered++;
+      const moved = after.of[t] === target;
+      if (moved !== inStroke) mismatched++;
+      if (!moved && after.of[t] !== before.of[t]) mismatched++;
+    }
+    const movedFrom = new Set<number>();
+    for (let t = 0; t < after.of.length; t++)
+      if (after.of[t] === target) movedFrom.add(before.of[t]!);
+    await view.undo();
+    await view.undo();
+    const undone = view.groups();
+    await view.redo();
+    const redone = view.groups();
+    const same = (a: Uint8Array, b: Uint8Array): boolean =>
+      a.length === b.length && a.every((group, t) => group === b[t]);
+    return {
+      target,
+      groupsBefore: before.made.length,
+      made: after.made.at(-1),
+      steps,
+      covered,
+      mismatched,
+      movedFrom: [...movedFrom],
+      undone: same(undone.of, before.of) && undone.made.length === before.made.length,
+      redone: same(redone.of, after.of) && redone.made.length === after.made.length,
+      head,
+    };
+  }, head);
+  expect(outcome.target).toBe(outcome.groupsBefore);
+  expect(outcome.made).toEqual({ by: 'hand' });
+  expect(outcome.steps).toBe(1);
+  expect(outcome.covered).toBeGreaterThan(20);
+  expect(outcome.mismatched).toBe(0);
+  // The stroke was on the head only.
+  expect(outcome.movedFrom).toEqual([head]);
+  expect(outcome.undone).toBe(true);
+  expect(outcome.redone).toBe(true);
+});
+
+test('makes a group of the body above a band of mask with one tap of the group fill, and moves it back with another (#139)', async ({
+  figurePage: page,
+}) => {
+  const tapTheChest = async (): Promise<void> => {
+    const chest = await page.evaluate(async () => {
+      const view = window.__mt.painting.view();
+      view.setCamera(0, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return view.screenOf([0, 17, 6]);
+    });
+    const box = (await page.locator('#paint-view canvas').boundingBox())!;
+    const before = await page.evaluate(() => window.__mt.painting.view().state.steps);
+    await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+    await page.waitForFunction(
+      (before) => window.__mt.painting.view().state.steps === before + 1,
+      before,
+    );
+  };
+  // The band of the #138 fill test: 10 mm up, all round the body, from eight sides.
+  const original = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    const table = painting.table()!;
+    const ring: [number, number, number][] = [];
+    for (let v = 0; v < table.positions.length / 3; v++) {
+      const [x, y, z] = [0, 1, 2].map((k) => table.positions[v * 3 + k]!);
+      if (Math.abs(y! - 10) < 0.3 && Math.abs(x!) < 5.6) ring.push([x!, y!, z!]);
+    }
+    ring.sort((a, b) => Math.atan2(a[2], a[0]) - Math.atan2(b[2], b[0]));
+    view.setTool('mask');
+    view.setBrush({ sizeMm: 5, hardness: 0.9, opacity: 1 });
+    for (let side = 0; side < 8; side++) {
+      view.setCamera(side * 45, 5, 1.6);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const seen = ring.filter((point) => {
+        const hit = view.texelAt(...view.screenOf(point));
+        return hit !== null && Math.hypot(...point.map((c, k) => c - hit.point[k]!)) < 0.3;
+      });
+      await view.stroke(seen);
+    }
+    view.setTool('group-fill');
+    view.setGroupTarget('new');
+    return Array.from(view.groups().of);
+  });
+  await tapTheChest();
+  const filled = await page.evaluate((original) => {
+    const painting = window.__mt.painting;
+    const view = painting.view();
+    const table = painting.table()!;
+    const { of, made } = view.groups();
+    const group = made.length - 1;
+    const y = (t: number): number =>
+      [0, 1, 2].reduce(
+        (sum, corner) => sum + table.positions[table.indices[t * 3 + corner]! * 3 + 1]! / 3,
+        0,
+      );
+    let inGroup = 0;
+    let fromElsewhere = 0;
+    let below = 0;
+    let bodyAbove = 0;
+    let bodyAboveLeft = 0;
+    for (let t = 0; t < of.length; t++) {
+      if (of[t] === group) {
+        inGroup++;
+        if (original[t] !== 0) fromElsewhere++;
+        if (y(t) < 9) below++;
+      }
+      // Above the band: the 5 mm brush laid mask up to 12.5 mm.
+      if (original[t] === 0 && y(t) > 13.5) {
+        bodyAbove++;
+        if (of[t] !== group) bodyAboveLeft++;
+      }
+    }
+    view.setGroupTarget(0);
+    return {
+      made: made.at(-1),
+      steps: view.state.steps,
+      inGroup,
+      fromElsewhere,
+      below,
+      bodyAbove,
+      bodyAboveLeft,
+    };
+  }, original);
+  await tapTheChest();
+  const back = await page.evaluate((original) => {
+    const view = window.__mt.painting.view();
+    const { of } = view.groups();
+    return {
+      steps: view.state.steps,
+      same: of.every((group, t) => group === original[t]),
+    };
+  }, original);
+  expect(filled.made).toEqual({ by: 'hand' });
+  expect(filled.steps).toBe(9);
+  expect(filled.inGroup).toBeGreaterThan(500);
+  // Only the body's triangles, none below the band, and all of the body above it.
+  expect(filled.fromElsewhere).toBe(0);
+  expect(filled.below).toBe(0);
+  expect(filled.bodyAbove).toBeGreaterThan(500);
+  expect(filled.bodyAboveLeft).toBe(0);
+  expect(back).toEqual({ steps: 10, same: true });
+});
+
+test('fills and masks a group as one step each (#139)', async ({ figurePage: page }) => {
+  await page.evaluate(() => window.__mt.painting.open());
+  const head = await headGroup(page);
+  const outcome = await page.evaluate(async (head) => {
+    const painting = window.__mt.painting;
+    const view = painting.view();
+    const table = painting.table()!;
+    const { of } = view.groups();
+    // The texel at each triangle's middle, by whether it is the head's.
+    const middles: { texel: number; head: boolean }[] = [];
+    for (let t = 0; t < of.length; t++) {
+      let u = 0;
+      let v = 0;
+      for (let corner = 0; corner < 3; corner++) {
+        const vertex = table.indices[t * 3 + corner]!;
+        u += table.uvs![vertex * 2]! / 3;
+        v += table.uvs![vertex * 2 + 1]! / 3;
+      }
+      middles.push({
+        texel: Math.floor(v * 1024) * 1024 + Math.floor(u * 1024),
+        head: of[t] === head,
+      });
+    }
+    const alphas = (data: Uint8Array) => ({
+      head: middles.filter((m) => m.head && data[m.texel * 4 + 3] !== 255).length,
+      others: middles.filter((m) => !m.head && data[m.texel * 4 + 3] !== 0).length,
+    });
+    view.setColour('#00ff00');
+    await view.fillGroup(head);
+    const filled = alphas((await view.paint()).data);
+    const afterFill = view.state.steps;
+    // Masked, the head keeps its green under a red fill of the figure; unmasked, it turns red.
+    await view.maskGroup(head, true);
+    view.setColour('#ff0000');
+    await view.fillRegion('figure');
+    const red = (data: Uint8Array) =>
+      middles.filter((m) => m.head && data[m.texel * 4] === 255 && data[m.texel * 4 + 1] === 0)
+        .length;
+    const whileMasked = red((await view.paint()).data);
+    await view.maskGroup(head, false);
+    await view.fillRegion('figure');
+    const unmasked = red((await view.paint()).data);
+    return {
+      heads: middles.filter((m) => m.head).length,
+      filled,
+      afterFill,
+      whileMasked,
+      unmasked,
+      steps: view.state.steps,
+      tools: view
+        .history()
+        .map((step) => (step.kind === 'fill' ? [step.tool, step.seed.kind] : [])),
+    };
+  }, head);
+  expect(outcome.heads).toBeGreaterThan(500);
+  expect(outcome.filled).toEqual({ head: 0, others: 0 });
+  expect(outcome.afterFill).toBe(1);
+  expect(outcome.whileMasked).toBe(0);
+  expect(outcome.unmasked).toBe(outcome.heads);
+  expect(outcome.steps).toBe(5);
+  expect(outcome.tools).toEqual([
+    ['fill', 'group'],
+    ['mask-fill', 'group'],
+    ['fill', 'figure'],
+    ['unmask-fill', 'group'],
+    ['fill', 'figure'],
+  ]);
+});

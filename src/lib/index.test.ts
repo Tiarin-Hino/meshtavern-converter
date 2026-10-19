@@ -180,6 +180,7 @@ describe('the library entries', () => {
       'FACING_MIN_COS',
       'FRAME_BUDGET_MS',
       'GROUP_COLOURS',
+      'GROUP_COVER',
       'GROUP_TINT_SHOWN',
       'GROUP_TINT_STRENGTH',
       'KEYFRAME_EVERY',

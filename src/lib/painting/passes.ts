@@ -84,6 +84,8 @@ export const REFERENCE_BLOCK = 16;
 export const STAMP_MODULUS = 65536;
 /** A triangle is cut from a fill where the mask at its middle is at least this (#138). _(proposal)_ */
 export const MASK_CUT = 0.5;
+/** A group stroke takes a triangle where its coverage at the triangle's middle is at least this (#139). _(proposal)_ */
+export const GROUP_COVER = 0.5;
 /** A dab's hardness is at most this, so the falloff's two edges never meet. */
 const HARDEST = 0.999;
 
@@ -361,6 +363,21 @@ void main() {
   ivec2 texel = clamp( ivec2( floor( vUv * ${PAINT_SIZE.toFixed(1)} ) ), ivec2( 0 ), ivec2( ${PAINT_SIZE - 1} ) );
   float cut = texelFetch( uMask, texel, 0 ).r >= ${MASK_CUT.toFixed(4)} ? 1.0 : 0.0;
   fragColor = vec4( cut, 0.0, 0.0, 1.0 );
+}
+`;
+
+/**
+ * The group brush's cover (#139, design note `docs/design/paint-groups.md` §6.1): the cut's
+ * points, each its triangle's middle, reading the stroke layer instead of the mask.
+ */
+const COVER_FRAGMENT = /* glsl */ `${PRECISION}
+uniform sampler2D uStroke;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  ivec2 texel = clamp( ivec2( floor( vUv * ${PAINT_SIZE.toFixed(1)} ) ), ivec2( 0 ), ivec2( ${PAINT_SIZE - 1} ) );
+  float cover = texelFetch( uStroke, texel, 0 ).r >= ${GROUP_COVER.toFixed(4)} ? 1.0 : 0.0;
+  fragColor = vec4( cover, 0.0, 0.0, 1.0 );
 }
 `;
 
@@ -800,6 +817,9 @@ export class PaintPasses {
   private readonly cutMaterial = raw(CUT_VERTEX, CUT_FRAGMENT, {
     uMask: { value: this.mask.texture },
   });
+  private readonly coverMaterial = raw(CUT_VERTEX, COVER_FRAGMENT, {
+    uStroke: { value: this.stroke.texture },
+  });
   private readonly maskOutMaterial = raw(QUAD_VERTEX, MASK_OUT_FRAGMENT, {
     uMask: { value: this.mask.texture },
   });
@@ -1090,9 +1110,25 @@ export class PaintPasses {
    * now, a GPU sync: only at a picked fill, live or replayed.
    */
   readCut(): Uint8Array {
+    return this.readPoints(this.cutMaterial);
+  }
+
+  /**
+   * The group brush's cover (#139, design note `docs/design/paint-groups.md` §6.1): a byte a
+   * triangle, 1 where the stroke layer at its middle is at least GROUP_COVER. Read back now, a GPU
+   * sync: at a group stroke's commit, live or replayed.
+   */
+  readCover(): Uint8Array {
+    return this.readPoints(this.coverMaterial);
+  }
+
+  /** The cut's points drawn with `material` and read back: a byte a triangle. */
+  private readPoints(material: THREE.RawShaderMaterial): Uint8Array {
     const cut = this.mini?.cut;
     if (!cut) return new Uint8Array(0);
+    cut.points.material = material;
     this.draw(cut.target, this.cutScene, true);
+    cut.points.material = this.cutMaterial;
     const { width, height } = cut.target;
     const bytes = new Uint8Array(width * height * 4);
     this.renderer.readRenderTargetPixels(cut.target, 0, 0, width, height, bytes);
@@ -1119,6 +1155,11 @@ export class PaintPasses {
     // A step onto the mask (#138) changes no paint: no stamp, the mask committed.
     if (ontoMask(toolPass(tool))) {
       this.commitMask();
+      return;
+    }
+    // A step onto the groups (#139) changes neither: the view moves the triangles it covered.
+    if (ontoGroups(toolPass(tool))) {
+      this.cancel();
       return;
     }
     const lift = toolPass(tool).composite === 'lift';
@@ -1299,6 +1340,9 @@ export class PaintPasses {
     // The mask's whole changes and its cut (#138), into `maskLive` and the cut's target: dropped.
     this.changeMask('invert');
     this.draw(mini.cut.target, this.cutScene, true);
+    mini.cut.points.material = this.coverMaterial;
+    this.draw(mini.cut.target, this.cutScene, true);
+    mini.cut.points.material = this.cutMaterial;
     this.cancel();
     // The stamp pass with `live` equal to the paint changes no stamp; the probe reads nothing back.
     this.stampMaterial.uniforms.uLift!.value = false;
@@ -1360,6 +1404,7 @@ export class PaintPasses {
       this.maskMaterials.unmask,
       this.maskChangeMaterial,
       this.cutMaterial,
+      this.coverMaterial,
       this.maskOutMaterial,
       ...this.compositeMaterials.values(),
     ])
