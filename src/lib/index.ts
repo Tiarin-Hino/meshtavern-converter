@@ -190,6 +190,8 @@ export {
 } from './pipeline/look';
 export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
 export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
+// The automatic groups (#139): the base, the files and the shells, a byte a table-level triangle.
+export { SHELL_MIN_TRIANGLES, groupsOf, type GroupSources } from './pipeline/groups';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';
