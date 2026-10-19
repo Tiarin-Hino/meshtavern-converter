@@ -29,6 +29,7 @@ The PM's decision on #139 (2026-10-13, corrected): pull groups apart while paint
 
 - **A hidden group could still be hit after the first cast was cached.** The casts a hit takes (one per offset) are built once and kept; hiding a group changed what they should skip but not the cached cast with no filter. **Cause:** the cache was dropped on an offset change only. **Fix:** hide, show, a group edit and a keyframe restore drop it too. Caught reading the diff, before any test ran.
 - **The scene already had a `frame`.** The loop's method; the new one is `reframe`.
+- **The #139 Paint tool test counted eleven boxes where it expected six.** CI's first run. **Cause:** the new "Apart" box beside every group but the body matched its `input[type="checkbox"]` locator. **Fix:** it counts the shown boxes, `input[data-group]`. The same run had two timeouts outside this change (the smoke test's look presets at 30 s, the phone's meet test at 240 s), the load failures #139's PR already reported.
 - **Shell heredocs in the Git Bash tool** failed on quotes again, as #139's entry warned; the edits went through the editor and small Python scripts instead.
 
 ## Dead ends
@@ -39,7 +40,7 @@ None. The note's two alternatives (a fifth number a dab for the dab's group, so 
 
 - **`groupsApart` on the generated figure (five groups), Node:** well under a millisecond; it is one pass over the triangles for the boxes and the rule over five boxes.
 - **The frame counter with every group apart** (`scripts/measure-painting.mjs`, a new run: the flat brush at 16 mm after `pullAllApart()`; a hit now casts once per offset at every sample): waits for the full run on the development PC. The criterion is #127's.
-- **The pixel tests** (`e2e/painting.spec.ts`, three new tests: a stroke down the pulled-apart arm paints the arm's texels and none of the body's where the same dabs with the groups together paint the shoulder, undo and redo to the same bytes with the groups together, and no dab across the gap; a band of mask at the wrist and one group-fill tap make the arm above the wrist a group, the hand staying with the arm; the Paint tool's buttons and boxes) run in CI on this PR, not on the PC.
+- **The pixel tests** (`e2e/painting.spec.ts`, three new tests: a stroke down the pulled-apart arm paints the arm's texels and none of the body's where the same dabs with the groups together paint the shoulder, undo and redo to the same bytes with the groups together, and no dab across the gap; a band of mask at the wrist and one group-fill tap make the arm above the wrist a group, the hand staying with the arm; the Paint tool's buttons and boxes) passed in CI's first run of the PR (software rendering); not yet run on the PC.
 
 ## Still open
 
