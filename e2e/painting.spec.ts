@@ -2569,7 +2569,8 @@ test('lists the groups in the Paint tool, hides one from its box, and shows them
     (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     await window.__mt.painting.open();
   });
-  const boxes = page.locator('#paint-groups input[type="checkbox"]');
+  // The shown box of each group (the box beside it pulls the group apart, #180).
+  const boxes = page.locator('#paint-groups input[data-group]');
   const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
   await expect(boxes).toHaveCount(count);
   await expect(page.locator('#paint-groups label').first()).toContainText('The body');
