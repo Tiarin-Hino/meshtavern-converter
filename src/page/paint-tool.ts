@@ -1,5 +1,6 @@
 import type { Texture } from 'three';
 import {
+  isGroupTool,
   PAINT_SIZE,
   recentColours,
   TOOL_IDS,
@@ -15,6 +16,7 @@ import {
 import {
   BRUSH_MAX_MM,
   BRUSH_MIN_MM,
+  describeGroup,
   mountPainting,
   PAINT_COPY,
   type PaintingState,
@@ -28,7 +30,8 @@ import {
  * of the tools, sliders, colour, regions, Undo, Redo, Save and Close. The test harness for the
  * engine's pixel tests and the PM's tool for judging the brushes (the hobby brushes of #128 with
  * their own sliders and the airbrush's direction, the pipette of #135: Pick, then a tap on
- * the mini takes its colour, and the colours used of #136, a swatch each); not the product page's (it is
+ * the mini takes its colour, the colours used of #136, a swatch each, and the groups of #139: a
+ * box a group to hide it, the target the group tools add to, a group's fill and mask); not the product page's (it is
  * `data-dev`, removed without ?dev). It uses the entry as any consumer would.
  */
 
@@ -118,6 +121,15 @@ interface Panel {
   maskClear: HTMLButtonElement;
   maskInvert: HTMLButtonElement;
   maskShow: HTMLButtonElement;
+  groups: HTMLElement;
+  groupsAll: HTMLButtonElement;
+  groupsTint: HTMLButtonElement;
+  groupTarget: HTMLSelectElement;
+  groupTargetLabel: HTMLElement;
+  groupFill: HTMLButtonElement;
+  groupMask: HTMLButtonElement;
+  groupUnmask: HTMLButtonElement;
+  groupsHint: HTMLElement;
   undo: HTMLButtonElement;
   redo: HTMLButtonElement;
   navigate: HTMLButtonElement;
@@ -152,6 +164,15 @@ function findPanel(root: Document): Panel | null {
     maskClear: get('paint-mask-clear')!,
     maskInvert: get('paint-mask-invert')!,
     maskShow: get('paint-mask-show')!,
+    groups: get('paint-groups')!,
+    groupsAll: get('paint-groups-all')!,
+    groupsTint: get('paint-groups-tint')!,
+    groupTarget: get('paint-group-target')!,
+    groupTargetLabel: get('paint-group-target-label')!,
+    groupFill: get('paint-group-fill')!,
+    groupMask: get('paint-group-mask')!,
+    groupUnmask: get('paint-group-unmask')!,
+    groupsHint: get('paint-groups-hint')!,
     undo: get('paint-undo')!,
     redo: get('paint-redo')!,
     navigate: get('paint-navigate')!,
@@ -178,6 +199,10 @@ export function createPaintTool(
   const panel = findPanel(document);
   /** The history the swatches were last built for: applied and undone steps, rebuilt when it moves. */
   let recentFor = '';
+  /** The groups the row was last built for (#139): rebuilt when they change. */
+  let groupsFor = '';
+  /** The tool chosen last: choosing a group tool shows the groups' colours (#139). */
+  let toolBefore: string | null = null;
 
   const setPicking = (on: boolean): void => {
     picking = on;
@@ -214,6 +239,7 @@ export function createPaintTool(
     panel.maskBase.disabled = !state.regions.includes('base');
     panel.maskFigure.disabled = !state.regions.includes('figure');
     panel.maskShow.setAttribute('aria-pressed', String(state.maskShown));
+    showGroups(state);
     panel.undo.disabled = state.steps === 0;
     panel.redo.disabled = state.undone === 0;
     panel.navigate.setAttribute('aria-pressed', String(state.navigating));
@@ -228,6 +254,52 @@ export function createPaintTool(
       : frames > 0
         ? `Last stroke: ${frames} frames, median ${medianMs.toFixed(1)} ms, worst ${worstMs.toFixed(1)} ms, ${slow} slow`
         : '';
+  };
+
+  /**
+   * The groups (#139): a box a group, checked while it is shown, named by `describeGroup` with its
+   * triangles; the target select, every group and New group. Rebuilt when the groups change.
+   */
+  const showGroups = (state: PaintingState): void => {
+    if (!panel) return;
+    // Choosing a group tool shows the groups in their colours; leaving it hides them.
+    if (state.tool !== toolBefore && view) {
+      const was = toolBefore !== null && isGroupTool(toolBefore as never);
+      const is = isGroupTool(state.tool);
+      toolBefore = state.tool;
+      if (was !== is && state.groupTint !== is) {
+        view.setGroupTint(is);
+        return;
+      }
+    }
+    panel.groupsTint.setAttribute('aria-pressed', String(state.groupTint));
+    const { list, hidden, target } = state.groups;
+    const key = state.open ? JSON.stringify([list, hidden, target]) : '';
+    const none = target >= list.length;
+    panel.groupFill.disabled = none;
+    panel.groupMask.disabled = none;
+    panel.groupUnmask.disabled = none;
+    if (key === groupsFor) return;
+    groupsFor = key;
+    const made = list.map((entry) => entry.origin);
+    const names = made.map((_, index) => describeGroup(made, index));
+    panel.groups.replaceChildren(
+      ...(state.open ? list : []).map(({ triangles }, index) => {
+        const label = document.createElement('label');
+        label.className = 'check';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = !hidden.includes(index);
+        box.dataset.group = String(index);
+        box.addEventListener('change', () => current().setGroupShown(index, box.checked));
+        label.append(box, ` ${names[index]} (${triangles.toLocaleString()})`);
+        return label;
+      }),
+    );
+    const options = (state.open ? names : []).map((name, index) => new Option(name, String(index)));
+    options.push(new Option(PAINT_COPY.groups.newGroup, 'new'));
+    panel.groupTarget.replaceChildren(...options);
+    panel.groupTarget.value = none ? 'new' : String(target);
   };
 
   /** The colours used as swatches, newest first; a click paints with that colour again. */
@@ -360,6 +432,28 @@ export function createPaintTool(
     panel.maskShow.addEventListener('click', () =>
       current().setMaskShown(!current().state.maskShown),
     );
+    const groupsCopy = PAINT_COPY.groups;
+    panel.groups.setAttribute('aria-label', groupsCopy.label);
+    panel.groupsAll.textContent = groupsCopy.showAll;
+    panel.groupsTint.textContent = groupsCopy.tint;
+    panel.groupTargetLabel.textContent = groupsCopy.into;
+    panel.groupFill.textContent = groupsCopy.fill;
+    panel.groupMask.textContent = groupsCopy.mask;
+    panel.groupUnmask.textContent = groupsCopy.unmask;
+    panel.groupsHint.textContent = groupsCopy.hint;
+    panel.groupsAll.addEventListener('click', () => current().showAllGroups());
+    panel.groupsTint.addEventListener('click', () =>
+      current().setGroupTint(!current().state.groupTint),
+    );
+    panel.groupTarget.addEventListener('change', () =>
+      current().setGroupTarget(
+        panel.groupTarget.value === 'new' ? 'new' : Number(panel.groupTarget.value),
+      ),
+    );
+    const target = (): number => current().state.groups.target;
+    panel.groupFill.addEventListener('click', () => void current().fillGroup(target()));
+    panel.groupMask.addEventListener('click', () => void current().maskGroup(target(), true));
+    panel.groupUnmask.addEventListener('click', () => void current().maskGroup(target(), false));
     panel.undo.addEventListener('click', () => void current().undo());
     panel.redo.addEventListener('click', () => void current().redo());
     panel.navigate.addEventListener('click', () =>

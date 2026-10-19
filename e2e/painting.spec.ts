@@ -2553,3 +2553,42 @@ test('fills and masks a group as one step each (#139)', async ({ figurePage: pag
     ['fill', 'figure'],
   ]);
 });
+test('lists the groups in the Paint tool, hides one from its box, and shows them in colour with a group tool (#139)', async ({
+  figurePage: page,
+}) => {
+  await page.evaluate(async () => {
+    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
+    await window.__mt.painting.open();
+  });
+  const boxes = page.locator('#paint-groups input[type="checkbox"]');
+  const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
+  await expect(boxes).toHaveCount(count);
+  await expect(page.locator('#paint-groups label').first()).toContainText('The body');
+  await expect(page.locator('#paint-groups')).toContainText('The base');
+  await expect(page.locator('#paint-groups')).toContainText('Shell 2 of the body');
+  // The target starts at a new group: nothing to fill or mask yet.
+  await expect(page.locator('#paint-group-target')).toHaveValue('new');
+  await expect(page.locator('#paint-group-fill')).toBeDisabled();
+
+  await boxes.nth(1).uncheck();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groups.hidden)).toEqual([1]);
+  await page.locator('#paint-groups-all').click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groups.hidden)).toEqual([]);
+  await expect(boxes.nth(1)).toBeChecked();
+
+  await page.locator('#paint-tools button[data-tool="group"]').click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groupTint)).toBe(true);
+  await expect(page.locator('#paint-groups-tint')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#paint-tools button[data-tool="flat"]').click();
+  expect(await page.evaluate(() => window.__mt.painting.view().state.groupTint)).toBe(false);
+
+  await page.locator('#paint-group-target').selectOption('0');
+  await page.locator('#paint-group-mask').click();
+  await page.waitForFunction(() => window.__mt.painting.view().state.steps === 1);
+  expect(
+    await page.evaluate(() => {
+      const step = window.__mt.painting.view().history()[0]!;
+      return step.kind === 'fill' ? [step.tool, step.seed] : null;
+    }),
+  ).toEqual(['mask-fill', { kind: 'group', group: 0 }]);
+});
