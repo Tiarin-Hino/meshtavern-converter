@@ -224,9 +224,15 @@ export class TriangleBvh {
   /**
    * The nearest triangle a ray hits, from either side (#93: a tap is a ray from the camera).
    * `t` is the distance along `direction` in its own length; only hits with `t >= 0` count.
-   * Ties go to the lower triangle index. Null when the ray misses.
+   * Ties go to the lower triangle index. Null when the ray misses. `accept` leaves out the
+   * triangles it says no to, as if they were not there (#139: a hidden group), so the ray finds
+   * what lies behind them.
    */
-  raycast(origin: Vec3, direction: Vec3): { triangle: number; t: number } | null {
+  raycast(
+    origin: Vec3,
+    direction: Vec3,
+    accept?: (triangle: number) => boolean,
+  ): { triangle: number; t: number } | null {
     if (this.nodes === 0) return null;
     const [ox, oy, oz] = origin;
     const [dx, dy, dz] = direction;
@@ -249,6 +255,7 @@ export class TriangleBvh {
         const end = this.first[node]! + this.count[node]!;
         for (let i = this.first[node]!; i < end; i++) {
           const triangle = this.order[i]!;
+          if (accept && !accept(triangle)) continue;
           tests++;
           const t = this.rayTriangle(triangle, ox, oy, oz, dx, dy, dz);
           if (t < bestT || (t === bestT && triangle < best)) {

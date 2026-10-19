@@ -152,6 +152,94 @@ describe('fillRegion', () => {
     );
   });
 
+  // A strip of eight squares along x, folded up by 90° after the fourth: the groups' bounds (#139).
+  const foldedStrip = (): IndexedMesh => {
+    const positions: number[] = [];
+    for (let k = 0; k <= 4; k++) positions.push(k, 0, 0, k, 0, 1);
+    for (let k = 1; k <= 4; k++) positions.push(4, k, 0, 4, k, 1);
+    const indices: number[] = [];
+    for (let k = 0; k < 8; k++) {
+      const [a, b, c, d] = [k * 2, k * 2 + 1, k * 2 + 2, k * 2 + 3];
+      indices.push(a, b, d, a, d, c);
+    }
+    return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
+  };
+  const strip16 = (marked: number[]): Uint8Array => {
+    const bytes = new Uint8Array(16);
+    for (const t of marked) bytes[t] = 1;
+    return bytes;
+  };
+  const range = (from: number, to: number): number[] =>
+    Array.from({ length: to - from }, (_, k) => from + k);
+
+  it('never enters a hidden triangle, and fills nothing from one (#139)', () => {
+    const strip = foldedStrip();
+    const seed: FillSeed = { kind: 'picked', triangle: 0, point: [0.2, 0, 0.5] };
+    // The fold stops the flood at tolerance 0; without the folds' bounds it runs on.
+    expect([...fillRegion(strip, seed, { tolerance: 0 })]).toEqual(range(0, 8));
+    expect([...fillRegion(strip, seed, { tolerance: 0, folds: false })]).toEqual(range(0, 16));
+    const hidden = strip16([4, 5]);
+    expect([...fillRegion(strip, seed, { tolerance: 1, folds: false, hidden })]).toEqual([
+      0, 1, 2, 3,
+    ]);
+    expect([...fillRegion(strip, { ...seed, triangle: 4 }, { tolerance: 0, hidden })]).toEqual([]);
+    expect(() => fillRegion(strip, seed, { tolerance: 0, hidden: new Uint8Array(3) })).toThrow(
+      RangeError,
+    );
+  });
+
+  it('never crosses from one offset class to another (#139: groups pulled apart)', () => {
+    const strip = foldedStrip();
+    const apart = new Uint8Array(16);
+    for (let t = 6; t < 16; t++) apart[t] = t < 10 ? 1 : 2;
+    const seed: FillSeed = { kind: 'picked', triangle: 0, point: [0.2, 0, 0.5] };
+    const fill = (triangle: number): number[] => [
+      ...fillRegion(strip, { ...seed, triangle }, { tolerance: 1, folds: false, apart }),
+    ];
+    expect(fill(0)).toEqual(range(0, 6));
+    expect(fill(7)).toEqual(range(6, 10));
+    expect(fill(12)).toEqual(range(10, 16));
+  });
+
+  it('stays within the seed’s group over every fold, and takes a group whole (#139)', () => {
+    const strip = foldedStrip();
+    // Group 1 across the fold (squares 3–6), group 2 the end, group 0 the rest.
+    const groupOf = new Uint8Array(16);
+    for (let t = 6; t < 14; t++) groupOf[t] = 1;
+    for (let t = 14; t < 16; t++) groupOf[t] = 2;
+    const within = (triangle: number): number[] => [
+      ...fillRegion(
+        strip,
+        { kind: 'picked', triangle, point: [0, 0, 0] },
+        { tolerance: 0, folds: false, groupOf, within: groupOf[triangle] },
+      ),
+    ];
+    expect(within(7)).toEqual(range(6, 14));
+    expect(within(0)).toEqual(range(0, 6));
+    expect(within(15)).toEqual([14, 15]);
+    // A seed outside the group it must stay in fills nothing.
+    expect([
+      ...fillRegion(
+        strip,
+        { kind: 'picked', triangle: 0, point: [0, 0, 0] },
+        { tolerance: 0, groupOf, within: 1 },
+      ),
+    ]).toEqual([]);
+    expect([...fillRegion(strip, { kind: 'group', group: 1 }, { tolerance: 0, groupOf })]).toEqual(
+      range(6, 14),
+    );
+    expect(() => fillRegion(strip, { kind: 'group', group: 1 }, { tolerance: 0 })).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      fillRegion(
+        strip,
+        { kind: 'picked', triangle: 0, point: [0, 0, 0] },
+        { tolerance: 0, within: 0 },
+      ),
+    ).toThrow(RangeError);
+  });
+
   it('cuts the figure’s hand off at a masked band across its arm (#138)', () => {
     // The chest's fill at tolerance 1, then again with a band of triangles cut across the body
     // 12–13 mm up: what lies above the band on the far side is no longer reached.
