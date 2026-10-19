@@ -11,6 +11,15 @@ const GRID_SQUARES = 40;
 /** The drawing buffer's pixels per CSS pixel, at most: the depth map follows it (§11.1). */
 const MAX_PIXEL_RATIO = 2;
 
+/** An axis-aligned box in the mini's coordinates, mm. */
+export interface SceneBox {
+  min: Vec3;
+  max: Vec3;
+}
+
+/** The camera's distance for a box of `size` at zoom 1, as `placeCameraOnSphere` sets it. */
+const FRAME_DISTANCE = 2.3;
+
 /**
  * The painting view's scene (issue #127, design note `docs/design/painting-engine.md` §10.3): the
  * question scene's frame without the question. A canvas of its own in the host, a renderer, a
@@ -26,7 +35,11 @@ export class PaintScene {
   private readonly scene = new THREE.Scene();
   private readonly grid: THREE.GridHelper;
   private readonly resizer: ResizeObserver;
+  /** The box the camera frames (the groups as drawn, #180) and its size. */
   private readonly size = new THREE.Vector3(1, 1, 1);
+  private framed: SceneBox = { min: [0, 0, 0], max: [1, 1, 1] };
+  /** The mini's own box: where the camera's sphere sits while nothing is apart. */
+  private own: SceneBox = { min: [0, 0, 0], max: [1, 1, 1] };
   private readonly raycaster = new THREE.Raycaster();
   private mini: THREE.Mesh | null = null;
   private running = false;
@@ -65,15 +78,36 @@ export class PaintScene {
     this.resize();
   }
 
-  /** Shows the mini and starts the loop; the camera frames it. */
-  show(mesh: THREE.Mesh, size: Vec3): void {
+  /** Shows the mini, whose box is `box`, and starts the loop; the camera frames it. */
+  show(mesh: THREE.Mesh, box: SceneBox): void {
     this.clear();
     this.mini = mesh;
     mesh.frustumCulled = false;
     this.scene.add(mesh);
-    this.size.set(...size);
+    this.own = box;
+    this.frameBox(box);
     this.setCamera(34, 22, 1);
     this.start();
+  }
+
+  /**
+   * Frames `box`, the groups as they are drawn (#180): the camera keeps its azimuth, elevation
+   * and zoom and moves to where the box is in frame. With the mini's own box, the camera is where
+   * `show` put it for that view.
+   */
+  reframe(box: SceneBox): void {
+    const azimuth = THREE.MathUtils.radToDeg(this.controls.getAzimuthalAngle());
+    const elevation = 90 - THREE.MathUtils.radToDeg(this.controls.getPolarAngle());
+    const radius = Math.max(this.size.x, this.size.y, this.size.z, 1);
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    const zoom = (radius * FRAME_DISTANCE) / Math.max(distance, 1e-6);
+    this.frameBox(box);
+    this.setCamera(azimuth, elevation, zoom);
+  }
+
+  private frameBox(box: SceneBox): void {
+    this.framed = box;
+    this.size.set(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]);
   }
 
   /** Takes the mini off and stops the loop. */
@@ -222,15 +256,28 @@ export class PaintScene {
   }
 
   /**
-   * Puts the camera on its sphere (`placeCameraOnSphere`). An orbit's momentum is spent first:
-   * with damping on, the controls keep turning after a drag, and while no mini is shown the loop
-   * does not run to let it die away, so it would turn the camera away from where it was put.
+   * Puts the camera on its sphere (`placeCameraOnSphere`) around the framed box. An orbit's
+   * momentum is spent first: with damping on, the controls keep turning after a drag, and while
+   * no mini is shown the loop does not run to let it die away, so it would turn the camera away
+   * from where it was put. The sphere sits where the mini stands; with groups apart (#180) it
+   * moves by the change from the mini's own box to the framed one, so that nothing apart leaves
+   * the camera exactly where it was.
    */
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void {
     this.controls.enableDamping = false;
     this.controls.update();
     this.controls.enableDamping = true;
     placeCameraOnSphere(this.camera, this.controls, this.size, azimuthDeg, elevationDeg, zoom);
+    const { own, framed } = this;
+    const shift = new THREE.Vector3(
+      (framed.min[0] + framed.max[0] - own.min[0] - own.max[0]) / 2,
+      framed.min[1] - own.min[1],
+      (framed.min[2] + framed.max[2] - own.min[2] - own.max[2]) / 2,
+    );
+    if (shift.lengthSq() > 0) {
+      this.camera.position.add(shift);
+      this.controls.target.add(shift);
+    }
     this.controls.update();
   }
 

@@ -33,6 +33,7 @@ import {
   triangleAdjacency,
   type TriangleAdjacency,
 } from '../pipeline/fill';
+import { groupsApart } from '../pipeline/groups';
 import { DEFAULT_LOOK, parseHexColour, type Look } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
@@ -69,7 +70,7 @@ import {
   type PaintSurface,
 } from './passes';
 import { KEYFRAME_EVERY, PaintHistory, UNDO_STEPS } from './history';
-import { PaintScene } from './scene';
+import { PaintScene, type SceneBox } from './scene';
 import { toolPass } from './tools';
 
 export {
@@ -187,7 +188,10 @@ export interface GroupsState {
   list: { origin: GroupOrigin; triangles: number }[];
   /** The groups not drawn, ascending. */
   hidden: number[];
-  /** The groups pulled apart and their offsets in mm: none until pulling apart is built (#139's follow-up). */
+  /**
+   * The groups pulled apart (#180) and their offsets in mm, by group: each is drawn, painted and
+   * hit where its offset puts it; the mini's own coordinates do not move.
+   */
   apart: { group: number; offset: Vec3 }[];
   /** The group the group tools add to; `list.length` for a new one. */
   target: number;
@@ -226,6 +230,19 @@ export interface PaintingView {
   setGroupTarget(group: number | 'new'): void;
   /** Draws every group but 0 in its colour, or not (#139). Not a step. */
   setGroupTint(on: boolean): void;
+  /**
+   * Pulls group `group` apart (#180, design note `docs/design/paint-groups.md` §9): drawn, painted
+   * and hit moved by `offset` (mm, the mini's axes), so what it covered can be reached and its own
+   * surface painted without touching a neighbour's; null (or a zero offset) puts it back. Not a
+   * step: undo never puts a group back. A dab on a group apart paints that group alone; a stroke
+   * records the offsets at its start and replays with them, so its bytes are the same with the
+   * groups together.
+   */
+  pullApart(group: number, offset: Vec3 | null): void;
+  /** Pulls every group apart by the rule of the parts question (`groupsApart`): group 0 stays. Not a step. */
+  pullAllApart(): void;
+  /** Puts every group back (#180). Not a step. */
+  putTogether(): void;
   /** A paint fill of a group's triangles (#139): one `fill` step with a `group` seed. */
   fillGroup(group: number): Promise<void>;
   /** A group's triangles masked or unmasked (#139): one `mask-fill` or `unmask-fill` step with a `group` seed. */
@@ -236,7 +253,7 @@ export interface PaintingView {
   paint(): Promise<Albedo>;
   /** The steps applied so far, oldest first, as data the consumer may keep (§4). Undone steps are not in it. */
   history(): PaintStep[];
-  /** For tests and scripts: a stroke given as points on the surface. */
+  /** For tests and scripts: a stroke given as points on the surface, in the coordinates the mini is drawn in (#180). */
   stroke(points: Vec3[], pressure?: number[]): Promise<void>;
   /** For tests and scripts: a stroke given as a path on the canvas (CSS px), a point a frame, as a pointer would. */
   strokeAt(path: [number, number][]): Promise<void>;
@@ -247,9 +264,12 @@ export interface PaintingView {
    * texel under the point, whatever its alpha, and null where the mini is bare there.
    */
   colourAt(x: number, y: number, mode?: PickMode): Promise<string | null>;
-  /** The texel under a canvas point, or null off the mini: what a pixel test asserts on. */
+  /**
+   * The texel under a canvas point, or null off the mini: what a pixel test asserts on. `point` is
+   * in the mini's own coordinates, whatever group is pulled apart (#180).
+   */
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null;
-  /** Where a point of the mini is on the canvas, CSS px: what a test strokes along. */
+  /** Where a point is on the canvas, CSS px, in the coordinates the mini is drawn in: what a test strokes along. */
   screenOf(point: Vec3): [number, number];
   /** For tests: what the tools' masks read at every texel (cavity, occlusion, normal), as the composite reads it (#128). */
   surface(): Promise<PaintSurface>;
@@ -304,6 +324,13 @@ const tintOf = (shown: boolean): THREE.Vector4 => {
   return new THREE.Vector4(r, g, b, shown ? MASK_TINT_STRENGTH : 0);
 };
 
+/**
+ * A pointer sample on the surface: the hit's point in the coordinates the mini is drawn in (a
+ * group's offset included, #180), the pressure, and the group hit (−1 for a point given by a
+ * test). Null where the pointer missed the mini.
+ */
+type Sample = { point: Vec3; pressure: number; group: number } | null;
+
 /** The stroke on the canvas, not yet committed. */
 interface LiveStroke {
   step: PaintStroke;
@@ -311,6 +338,8 @@ interface LiveStroke {
   drawn: number;
   /** The last dab laid, for spacing the next samples; null after a miss. */
   last: number[] | null;
+  /** The offset class of the last hit (#180): a hit in another class lifts the brush, as a miss does. */
+  lastClass: string | null;
   /** A lift stroke that found nothing to take away (#137): it draws nothing and leaves no step. */
   refused: boolean;
   /** Frame times from the first dab on (§11.3). */
@@ -335,6 +364,10 @@ class Painting implements PaintingView {
   private maskShown = MASK_SHOWN;
   /** The groups not drawn (#139): view state, not steps. */
   private readonly hidden = new Set<number>();
+  /** The groups pulled apart and their offsets (#180): view state, not steps. */
+  private readonly apart = new Map<number, Vec3>();
+  /** The casts a hit takes (#180), one per distinct offset; made again when the groups or the offsets change. */
+  private casts: Cast[] | null = null;
   /** The group tools' target (#139). */
   private target: number | 'new' = 'new';
   private groupTint = GROUP_TINT_SHOWN;
@@ -411,9 +444,16 @@ class Painting implements PaintingView {
     return {
       list,
       hidden: [...this.hidden].sort((a, b) => a - b),
-      apart: [],
+      apart: this.apartList(),
       target: this.targetGroup(),
     };
+  }
+
+  /** The groups apart with their offsets, by group (#180): the state's and a step's record. */
+  private apartList(): { group: number; offset: Vec3 }[] {
+    return [...this.apart]
+      .sort((a, b) => a[0] - b[0])
+      .map(([group, offset]) => ({ group, offset: [offset[0], offset[1], offset[2]] }));
   }
 
   /** The group the group tools add to now: the target, or a new one. */
@@ -473,6 +513,8 @@ class Painting implements PaintingView {
       ? { of: mini.groups.of.slice(), made: mini.groups.made.map((origin) => ({ ...origin })) }
       : { of: new Uint8Array(mesh.indices.length / 3), made: [{ by: 'body' }] };
     this.hidden.clear();
+    this.apart.clear();
+    this.casts = null;
     this.target = 'new';
     this.writeGroupUniform(null);
     const geometry = createGroupedGeometry(mesh, groups.of);
@@ -507,7 +549,6 @@ class Painting implements PaintingView {
     });
     const shown = new THREE.Mesh(geometry, material);
     const box = new THREE.Box3().setFromArray(mesh.positions);
-    const size = box.getSize(new THREE.Vector3());
     this.opened = {
       mesh,
       groups,
@@ -535,7 +576,10 @@ class Painting implements PaintingView {
     });
     this.perf = NO_PERF;
     this.lift = null;
-    this.scene.show(shown, [size.x, size.y, size.z]);
+    this.scene.show(shown, {
+      min: [box.min.x, box.min.y, box.min.z],
+      max: [box.max.x, box.max.y, box.max.z],
+    });
     this.passes.warm(this.scene.strokeCamera(), TOOL_IDS);
     await this.scene.nextFrame();
     this.emit();
@@ -643,6 +687,7 @@ class Painting implements PaintingView {
     this.checkGroup(group);
     if (shown) this.hidden.delete(group);
     else this.hidden.add(group);
+    this.casts = null;
     this.writeGroupUniform(null);
     this.emit();
   }
@@ -650,6 +695,7 @@ class Painting implements PaintingView {
   showAllGroups(): void {
     this.commitLive();
     this.hidden.clear();
+    this.casts = null;
     this.writeGroupUniform(null);
     this.emit();
   }
@@ -665,6 +711,73 @@ class Painting implements PaintingView {
     this.groupTint = on;
     this.groupTintUniform.value.x = on ? GROUP_TINT_STRENGTH : 0;
     this.emit();
+  }
+
+  pullApart(group: number, offset: Vec3 | null): void {
+    this.commitLive();
+    this.checkGroup(group);
+    if (offset !== null && (offset.length !== 3 || !offset.every(Number.isFinite)))
+      throw new RangeError('An offset is three finite numbers, mm along the mini’s axes');
+    if (offset === null || offset.every((value) => value === 0)) this.apart.delete(group);
+    else this.apart.set(group, [offset[0], offset[1], offset[2]]);
+    this.movedGroups();
+  }
+
+  pullAllApart(): void {
+    this.commitLive();
+    const opened = this.opened;
+    if (!opened) return;
+    this.apart.clear();
+    for (const { group, offset } of groupsApart(opened.mesh, opened.groups))
+      this.apart.set(group, offset);
+    this.movedGroups();
+  }
+
+  putTogether(): void {
+    this.commitLive();
+    this.apart.clear();
+    this.movedGroups();
+  }
+
+  /** After the offsets changed (#180): the uniform, the casts, the camera's frame and the state. */
+  private movedGroups(): void {
+    this.casts = null;
+    this.writeGroupUniform(null);
+    if (this.opened) this.scene.reframe(this.drawnBox());
+    this.emit();
+  }
+
+  /**
+   * The box of the groups as they are drawn (#180): the mini's own box while nothing is apart,
+   * else over every triangle's corners moved by its group's offset.
+   */
+  private drawnBox(): SceneBox {
+    const { mesh, groups } = this.opened!;
+    const { positions, indices } = mesh;
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    if (this.apart.size === 0) {
+      for (let i = 0; i < positions.length; i += 3)
+        for (let k = 0; k < 3; k++) {
+          const value = positions[i + k]!;
+          if (value < min[k]!) min[k] = value;
+          if (value > max[k]!) max[k] = value;
+        }
+      return { min, max };
+    }
+    const none: Vec3 = [0, 0, 0];
+    for (let t = 0; t < groups.of.length; t++) {
+      const offset = this.apart.get(groups.of[t]!) ?? none;
+      for (let corner = 0; corner < 3; corner++) {
+        const v = indices[t * 3 + corner]! * 3;
+        for (let k = 0; k < 3; k++) {
+          const value = positions[v + k]! + offset[k]!;
+          if (value < min[k]!) min[k] = value;
+          if (value > max[k]!) max[k] = value;
+        }
+      }
+    }
+    return { min, max };
   }
 
   fillGroup(group: number): Promise<void> {
@@ -700,7 +813,10 @@ class Painting implements PaintingView {
       groups.of[t] = into;
       changed = true;
     }
-    if (changed) writeGroups(this.opened!.geometry, groups.of);
+    if (changed) {
+      writeGroups(this.opened!.geometry, groups.of);
+      this.casts = null;
+    }
     return changed;
   }
 
@@ -722,26 +838,38 @@ class Painting implements PaintingView {
   }
 
   /**
-   * `uGroups` from the view's groups (null), or from a step's record (#139): every group shown and
-   * at zero but the record's hidden ones.
+   * `uGroups` from the view's groups (null), or from a step's record (#139, #180): every group
+   * shown and at zero but the record's hidden ones and the record's offsets.
    */
   private writeGroupUniform(record: StepGroups | null | undefined): void {
     const hidden = record === null ? this.hidden : new Set(record?.hidden ?? []);
+    const apart =
+      record === null
+        ? this.apart
+        : new Map((record?.apart ?? []).map(({ group, offset }) => [group, offset]));
     const values = this.passes.groupUniform.value;
-    for (let group = 0; group < MAX_GROUPS; group++)
-      values[group]!.set(0, 0, 0, hidden.has(group) ? 1 : 0);
+    for (let group = 0; group < MAX_GROUPS; group++) {
+      const offset = apart.get(group);
+      values[group]!.set(
+        offset?.[0] ?? 0,
+        offset?.[1] ?? 0,
+        offset?.[2] ?? 0,
+        hidden.has(group) ? 1 : 0,
+      );
+    }
   }
 
-  /** What a step records of the groups (#139): the hidden ones, when any is. */
+  /** What a step records of the groups (#139, #180): the hidden ones and the offsets, when any is. */
   private stepGroups(): StepGroups | undefined {
-    if (this.hidden.size === 0) return undefined;
-    return { hidden: [...this.hidden].sort((a, b) => a - b), apart: [] };
+    if (this.hidden.size === 0 && this.apart.size === 0) return undefined;
+    return { hidden: [...this.hidden].sort((a, b) => a - b), apart: this.apartList() };
   }
 
   /**
-   * After an undo that took away a group a step had made (#139): it is no longer hidden, so the
-   * state and the next step's record name only groups the mini has. Not in `restoreKeyframe`:
-   * undo restores an older keyframe and replays steps that may make the group again.
+   * After an undo that took away a group a step had made (#139): it is no longer hidden or apart,
+   * so the state and the next step's record name only groups the mini has. Not in
+   * `restoreKeyframe`: undo restores an older keyframe and replays steps that may make the group
+   * again.
    */
   private forgetGoneGroups(): void {
     const count = this.opened?.groups.made.length ?? 1;
@@ -751,7 +879,12 @@ class Painting implements PaintingView {
         this.hidden.delete(group);
         gone = true;
       }
-    if (gone) this.writeGroupUniform(null);
+    for (const group of [...this.apart.keys()])
+      if (group >= count) {
+        this.apart.delete(group);
+        gone = true;
+      }
+    if (gone) this.movedGroups();
   }
 
   /** Back to a keyframe: its targets, and the groups as they were then (#139). */
@@ -762,6 +895,7 @@ class Painting implements PaintingView {
     opened.groups.of.set(keyframe.groups);
     opened.groups.made = keyframe.made.map((origin) => ({ ...origin }));
     writeGroups(opened.geometry, opened.groups.of);
+    this.casts = null;
   }
 
   /** A fill (§7), of the paint or of the mask (#138): one step, its region found from its seed, applied as a replay would. */
@@ -825,7 +959,11 @@ class Painting implements PaintingView {
 
   async stroke(points: Vec3[], pressure?: number[]): Promise<void> {
     this.commitLive();
-    const hits = points.map((point, k) => ({ point, pressure: pressure?.[k] ?? MOUSE_PRESSURE }));
+    const hits: Sample[] = points.map((point, k) => ({
+      point,
+      pressure: pressure?.[k] ?? MOUSE_PRESSURE,
+      group: -1,
+    }));
     if (hits.length === 0) return;
     this.beginLive(hits[0]!);
     this.extendLive(hits.slice(1));
@@ -837,7 +975,7 @@ class Painting implements PaintingView {
     this.commitLive();
     for (const [x, y] of path) {
       const hit = this.hitAt(x, y);
-      const sample: DabHit = hit ? { point: hit.point, pressure: MOUSE_PRESSURE } : null;
+      const sample: Sample = hit ? { ...hit, pressure: MOUSE_PRESSURE } : null;
       if (!this.live) {
         if (sample) this.beginLive(sample);
       } else this.extendLive([sample]);
@@ -862,8 +1000,22 @@ class Painting implements PaintingView {
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null {
     const hit = this.hitAt(x, y);
     if (!hit || !this.opened) return null;
-    const texel = texelOf(this.opened.mesh, hit.triangle, hit.point);
-    return { texel, point: hit.point, triangle: hit.triangle };
+    const point = this.ownPoint(hit.point, hit.group);
+    const texel = texelOf(this.opened.mesh, hit.triangle, point);
+    return { texel, point, triangle: hit.triangle };
+  }
+
+  /** A point as drawn back in the mini's own coordinates (#180): its group's offset taken off. */
+  private ownPoint(point: Vec3, group: number): Vec3 {
+    const offset = this.apart.get(group);
+    if (!offset) return point;
+    return [point[0] - offset[0], point[1] - offset[1], point[2] - offset[2]];
+  }
+
+  /** The offset class of a group (#180): its offset's numbers, or the empty string at zero. */
+  private classOf(group: number): string {
+    const offset = this.apart.get(group);
+    return offset ? offset.join(',') : '';
   }
 
   screenOf(point: Vec3): [number, number] {
@@ -892,27 +1044,63 @@ class Painting implements PaintingView {
     mounted.delete(this.host);
   }
 
-  /** The surface under a canvas point: the triangle and the point on it, in the mini's coordinates. */
-  private hitAt(x: number, y: number): { triangle: number; point: Vec3 } | null {
+  /**
+   * The surface under a canvas point: the triangle, its group, and the point on it in the
+   * coordinates the mini is drawn in. One cast per distinct offset (#180), the ray moved by the
+   * opposite offset and the cast kept to that offset's groups; the nearest hit wins. A hidden
+   * group is not there to hit (#139): the ray finds what lies behind it.
+   */
+  private hitAt(x: number, y: number): { triangle: number; point: Vec3; group: number } | null {
     if (!this.opened) return null;
     const { origin, direction } = this.scene.rayAt(x, y);
-    // A hidden group is not there to hit (#139): the ray finds what lies behind it.
     const { of } = this.opened.groups;
-    const hidden = this.hidden;
-    const hit = this.opened.bvh.raycast(
-      origin,
-      direction,
-      hidden.size === 0 ? undefined : (t) => !hidden.has(of[t]!),
-    );
-    if (!hit) return null;
+    let best: { triangle: number; t: number } | null = null;
+    for (const { offset, accept } of this.castsOf()) {
+      const from: Vec3 = offset
+        ? [origin[0] - offset[0], origin[1] - offset[1], origin[2] - offset[2]]
+        : origin;
+      const hit = this.opened.bvh.raycast(from, direction, accept);
+      if (hit && (!best || hit.t < best.t)) best = hit;
+    }
+    if (!best) return null;
+    const { triangle, t } = best;
     return {
-      triangle: hit.triangle,
+      triangle,
+      group: of[triangle]!,
       point: [
-        origin[0] + direction[0] * hit.t,
-        origin[1] + direction[1] * hit.t,
-        origin[2] + direction[2] * hit.t,
+        origin[0] + direction[0] * t,
+        origin[1] + direction[1] * t,
+        origin[2] + direction[2] * t,
       ],
     };
+  }
+
+  /**
+   * The casts a hit takes (#180): with nothing apart, one over every shown group; else one for the
+   * groups at zero and one per distinct offset, each kept to its groups.
+   */
+  private castsOf(): Cast[] {
+    if (this.casts) return this.casts;
+    const { of } = this.opened!.groups;
+    const hidden = this.hidden;
+    const shown = (t: number): boolean => !hidden.has(of[t]!);
+    if (this.apart.size === 0) {
+      this.casts = [{ offset: null, accept: hidden.size === 0 ? undefined : shown }];
+      return this.casts;
+    }
+    const classes = new Map<string, { offset: Vec3 | null; groups: Set<number> }>();
+    classes.set('', { offset: null, groups: new Set() });
+    for (let group = 0; group < this.opened!.groups.made.length; group++) {
+      const key = this.classOf(group);
+      let entry = classes.get(key);
+      if (!entry) classes.set(key, (entry = { offset: this.apart.get(group)!, groups: new Set() }));
+      entry.groups.add(group);
+    }
+    this.casts = [...classes.values()].map(({ offset, groups }) => ({
+      offset,
+      accept: (t: number) => groups.has(of[t]!) && shown(t),
+    }));
+    return this.casts;
   }
 
   /**
@@ -921,12 +1109,13 @@ class Painting implements PaintingView {
    * finger can take over the pinch the moment it cancels the stroke (one finger alone does not
    * orbit).
    */
-  private beginLive(first: NonNullable<DabHit>, touch = false): void {
+  private beginLive(first: NonNullable<Sample>, touch = false): void {
     if (!this.opened) return;
     const tool = this.tool;
     if (isFillTool(tool)) throw new RangeError('A fill tool fills; it does not stroke');
-    // A lift finds its step before anything is drawn: making its keyframe may replay steps.
-    const lift = tool === 'lift' ? this.findLift(first.point) : null;
+    // A lift finds its step before anything is drawn: making its keyframe may replay steps. It
+    // looks under the start in the mini's own coordinates, where the paint is (#180).
+    const lift = tool === 'lift' ? this.findLift(this.ownPoint(first.point, first.group)) : null;
     const lifted = lift && 'lifted' in lift ? lift.lifted : null;
     const camera = this.scene.strokeCamera();
     this.passes.beginStroke(camera);
@@ -950,6 +1139,7 @@ class Painting implements PaintingView {
       },
       drawn: 0,
       last: null,
+      lastClass: null,
       refused: (lift !== null && lifted === null) || into === MAX_GROUPS,
       frames: [],
     };
@@ -976,8 +1166,12 @@ class Painting implements PaintingView {
     return this.lift;
   }
 
-  /** More pointer samples: dabs spaced along them; a miss lifts the brush. */
-  private extendLive(hits: readonly DabHit[]): void {
+  /**
+   * More pointer samples: dabs spaced along them; a miss lifts the brush, and so does a hit on a
+   * group drawn at another offset than the last hit's (#180): no dabs are laid across the gap
+   * between groups pulled apart. With nothing apart every hit is in one class.
+   */
+  private extendLive(hits: readonly Sample[]): void {
     const live = this.live;
     if (!live) return;
     const spacing = DAB_SPACING * live.step.brush.sizeMm;
@@ -986,9 +1180,14 @@ class Painting implements PaintingView {
     for (const hit of hits) {
       if (!hit) {
         live.last = null;
+        live.lastClass = null;
         continue;
       }
-      const dabs = spaceDabs([hit], spacing, live.last, even);
+      const cls = hit.group < 0 ? (live.lastClass ?? '') : this.classOf(hit.group);
+      if (live.lastClass !== null && cls !== live.lastClass) live.last = null;
+      live.lastClass = cls;
+      const dab: DabHit = { point: hit.point, pressure: hit.pressure };
+      const dabs = spaceDabs([dab], spacing, live.last, even);
       for (const value of dabs) live.step.dabs.push(value);
       live.last = live.step.dabs.slice(-4);
     }
@@ -1079,6 +1278,8 @@ class Painting implements PaintingView {
         cut: picked ? this.passes.readCut() : null,
         groupOf: opened.groups.of,
         hidden: picked ? hiddenTriangles(opened.groups.of, step.groups) : null,
+        // The groups apart when the fill was made (#180): a flood never crosses between offsets.
+        apart: picked ? apartClasses(opened.groups.of, step.groups) : null,
         // The group fill (#139): all that is connected within the group it starts in.
         ...(group && picked ? { folds: false, within: opened.groups.of[seed.triangle] } : {}),
       });
@@ -1117,9 +1318,9 @@ class Painting implements PaintingView {
       const rect = canvas.getBoundingClientRect();
       return [event.clientX - rect.left, event.clientY - rect.top];
     };
-    const sample = (event: PointerEvent): DabHit => {
+    const sample = (event: PointerEvent): Sample => {
       const hit = this.hitAt(...at(event));
-      return hit ? { point: hit.point, pressure: pressureOf(event) } : null;
+      return hit ? { ...hit, pressure: pressureOf(event) } : null;
     };
     // Before the controls' own listener, so a cancelled stroke gives the pinch back at once.
     canvas.addEventListener(
@@ -1141,10 +1342,7 @@ class Painting implements PaintingView {
         this.strokePointer = event.pointerId;
         // The stroke goes on, and ends, though the pointer leaves the canvas.
         canvas.setPointerCapture?.(event.pointerId);
-        this.beginLive(
-          { point: hit.point, pressure: pressureOf(event) },
-          event.pointerType === 'touch',
-        );
+        this.beginLive({ ...hit, pressure: pressureOf(event) }, event.pointerType === 'touch');
       },
       { capture: true },
     );
@@ -1185,6 +1383,31 @@ class Painting implements PaintingView {
   private fillAt(tool: FillToolId, triangle: number, point: Vec3): Promise<void> {
     return this.fill({ kind: 'picked', triangle, point }, tool);
   }
+}
+
+/** One cast of a hit (#180): the offset the ray is moved against (null at zero) and the triangles it may hit. */
+interface Cast {
+  offset: Vec3 | null;
+  accept: ((triangle: number) => boolean) | undefined;
+}
+
+/**
+ * A byte a triangle, the class of its group's offset in a record (#180): 0 for a group at zero, k
+ * for the k-th distinct offset, in the record's order; null when nothing was apart.
+ */
+function apartClasses(of: Uint8Array, record: StepGroups | undefined): Uint8Array | null {
+  if (!record || record.apart.length === 0) return null;
+  const classOf = new Map<number, number>();
+  const classes = new Map<string, number>();
+  for (const { group, offset } of record.apart) {
+    const key = offset.join(',');
+    let cls = classes.get(key);
+    if (cls === undefined) classes.set(key, (cls = classes.size + 1));
+    classOf.set(group, cls);
+  }
+  const out = new Uint8Array(of.length);
+  for (let t = 0; t < of.length; t++) out[t] = classOf.get(of[t]!) ?? 0;
+  return out;
 }
 
 /** A byte a triangle, 1 where its group is among a record's hidden ones (#139); null when none is. */

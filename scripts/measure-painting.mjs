@@ -5,9 +5,10 @@
 // at 2 mm since #133, whose stroke measures its reference under the first dab; the lift since #137,
 // over the strokes of the others; the mask's brush and eraser since #138, first, so the brushes
 // after them paint over the mask's soft edges; since #139 the flat brush with the largest group
-// but the body hidden, and the group brush, which reads back its cover at each commit), the intervals
-// between frames, and the GPU process's memory with the view open against without. One fresh
-// browser per mini.
+// but the body hidden, and the group brush, which reads back its cover at each commit; since #180
+// the flat brush with every group pulled apart, which casts once per offset at each sample), the
+// intervals between frames, and the GPU process's memory with the view open against without. One
+// fresh browser per mini.
 // Usage, after `npm run build`:
 //   node scripts/measure-painting.mjs                     the generated figure and large-01 with its base
 //   node scripts/measure-painting.mjs corpus/x/a.stl …    other minis (a base file beside one is added)
@@ -44,6 +45,8 @@ const RUNS = [
   // stroke a new group.
   { tool: 'flat', sizeMm: 16, hide: true },
   { tool: 'group', sizeMm: 16 },
+  // Every group pulled apart (#180): the hit casts once per offset, the camera frames the groups as drawn.
+  { tool: 'flat', sizeMm: 16, apart: true },
   // Last, over what the others painted: each takes away the newest step under its start (#137).
   { tool: 'lift', sizeMm: 16 },
 ];
@@ -163,14 +166,16 @@ try {
         return { groups: list.length, hideable: largest };
       });
       console.log(`groups: ${groups}, hidden in the runs that hide one: group ${hideable}`);
-      for (const { tool, sizeMm, direction = null, hide = false } of RUNS) {
+      for (const { tool, sizeMm, direction = null, hide = false, apart = false } of RUNS) {
         const rows = [];
         for (let stroke = 0; stroke < STROKES; stroke++) {
           const result = await page.evaluate(
-            async ({ tool, sizeMm, direction, samples, stroke, hidden }) => {
+            async ({ tool, sizeMm, direction, samples, stroke, hidden, apart }) => {
               const view = window.__mt.painting.view();
               view.showAllGroups();
+              view.putTogether();
               if (hidden >= 0) view.setGroupShown(hidden, false);
+              if (apart) view.pullAllApart();
               view.setGroupTarget('new');
               view.setTool(tool);
               view.setBrush({ sizeMm, hardness: 0.8, opacity: 1, direction });
@@ -197,7 +202,9 @@ try {
               await view.strokeAt(path);
               const strokeMs = performance.now() - strokeStart;
               running = false;
+              const groupsApart = view.state.groups.apart.length;
               view.showAllGroups();
+              view.putTogether();
               const dabs = view.history().at(-1)?.dabs?.length ?? 0;
               return {
                 perf: view.state.perf,
@@ -205,13 +212,22 @@ try {
                 dabs: dabs / 4,
                 lift: tool === 'lift' ? view.state.lift : null,
                 strokeMs,
+                groupsApart,
               };
             },
-            { tool, sizeMm, direction, samples: SAMPLES, stroke, hidden: hide ? hideable : -1 },
+            {
+              tool,
+              sizeMm,
+              direction,
+              samples: SAMPLES,
+              stroke,
+              hidden: hide ? hideable : -1,
+              apart,
+            },
           );
           rows.push(result);
         }
-        const label = `${tool} ${sizeMm} mm${hide ? `, group ${hideable} hidden` : ''}`;
+        const label = `${tool} ${sizeMm} mm${hide ? `, group ${hideable} hidden` : ''}${apart ? `, ${rows[0].groupsApart} groups apart` : ''}`;
         for (const [k, { perf, intervals, dabs, lift, strokeMs }] of rows.entries())
           console.log(
             `${label}, stroke ${k + 1}${lift ? ` (${JSON.stringify(lift)})` : ''}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms · stroke with its commit ${strokeMs.toFixed(0)} ms`,

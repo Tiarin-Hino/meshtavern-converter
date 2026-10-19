@@ -1,5 +1,6 @@
 import type { Texture } from 'three';
 import {
+  groupsApart,
   isGroupTool,
   PAINT_SIZE,
   recentColours,
@@ -30,9 +31,10 @@ import {
  * of the tools, sliders, colour, regions, Undo, Redo, Save and Close. The test harness for the
  * engine's pixel tests and the PM's tool for judging the brushes (the hobby brushes of #128 with
  * their own sliders and the airbrush's direction, the pipette of #135: Pick, then a tap on
- * the mini takes its colour, the colours used of #136, a swatch each, and the groups of #139: a
- * box a group to hide it, the target the group tools add to, a group's fill and mask); not the product page's (it is
- * `data-dev`, removed without ?dev). It uses the entry as any consumer would.
+ * the mini takes its colour, the colours used of #136, a swatch each, the groups of #139: a box a
+ * group to hide it, the target the group tools add to, a group's fill and mask, and pulling them
+ * apart, #180: Pull apart, Put together and a box a group that pulls it apart on its own); not the
+ * product page's (it is `data-dev`, removed without ?dev). It uses the entry as any consumer would.
  */
 
 /** What the page has of the converted mini for painting. */
@@ -129,7 +131,10 @@ interface Panel {
   groupFill: HTMLButtonElement;
   groupMask: HTMLButtonElement;
   groupUnmask: HTMLButtonElement;
+  groupsApart: HTMLButtonElement;
+  groupsTogether: HTMLButtonElement;
   groupsHint: HTMLElement;
+  groupsApartHint: HTMLElement;
   undo: HTMLButtonElement;
   redo: HTMLButtonElement;
   navigate: HTMLButtonElement;
@@ -172,7 +177,10 @@ function findPanel(root: Document): Panel | null {
     groupFill: get('paint-group-fill')!,
     groupMask: get('paint-group-mask')!,
     groupUnmask: get('paint-group-unmask')!,
+    groupsApart: get('paint-groups-apart')!,
+    groupsTogether: get('paint-groups-together')!,
     groupsHint: get('paint-groups-hint')!,
+    groupsApartHint: get('paint-groups-apart-hint')!,
     undo: get('paint-undo')!,
     redo: get('paint-redo')!,
     navigate: get('paint-navigate')!,
@@ -256,23 +264,26 @@ export function createPaintTool(
 
   /**
    * The groups (#139): a box a group, checked while it is shown, named by `describeGroup` with its
-   * triangles; the target select, every group and New group. Rebuilt when the groups change.
+   * triangles, and a second box, checked while it is pulled apart (#180: on its own, by the rule
+   * of `groupsApart`; a group the rule leaves in place stays); the target select, every group and
+   * New group. Rebuilt when the groups change.
    */
   const showGroups = (state: PaintingState): void => {
     if (!panel) return;
     panel.groupsTint.setAttribute('aria-pressed', String(state.groupTint));
-    const { list, hidden, target } = state.groups;
-    const key = state.open ? JSON.stringify([list, hidden, target]) : '';
+    const { list, hidden, apart, target } = state.groups;
+    const key = state.open ? JSON.stringify([list, hidden, apart, target]) : '';
     const none = target >= list.length;
     panel.groupFill.disabled = none;
     panel.groupMask.disabled = none;
     panel.groupUnmask.disabled = none;
+    panel.groupsTogether.disabled = apart.length === 0;
     if (key === groupsFor) return;
     groupsFor = key;
     const made = list.map((entry) => entry.origin);
     const names = made.map((_, index) => describeGroup(made, index));
     panel.groups.replaceChildren(
-      ...(state.open ? list : []).map(({ triangles }, index) => {
+      ...(state.open ? list : []).flatMap(({ triangles }, index) => {
         const label = document.createElement('label');
         label.className = 'check';
         const box = document.createElement('input');
@@ -281,7 +292,24 @@ export function createPaintTool(
         box.dataset.group = String(index);
         box.addEventListener('change', () => current().setGroupShown(index, box.checked));
         label.append(box, ` ${names[index]} (${triangles.toLocaleString()})`);
-        return label;
+        if (index === 0) return [label];
+        // Pulled apart on its own (#180): the rule's offset for this group alone.
+        const apartLabel = document.createElement('label');
+        apartLabel.className = 'check';
+        const apartBox = document.createElement('input');
+        apartBox.type = 'checkbox';
+        apartBox.checked = apart.some((entry) => entry.group === index);
+        apartBox.dataset.apart = String(index);
+        apartBox.setAttribute('aria-label', `${PAINT_COPY.groups.pullApart}: ${names[index]}`);
+        apartBox.addEventListener('change', () => {
+          const view = current();
+          const offset = apartBox.checked
+            ? (groupsApart(opened!.mesh, view.groups(), [index])[0]?.offset ?? null)
+            : null;
+          view.pullApart(index, offset);
+        });
+        apartLabel.append(apartBox, ` ${PAINT_COPY.groups.apart}`);
+        return [label, apartLabel];
       }),
     );
     const options = (state.open ? names : []).map((name, index) => new Option(name, String(index)));
@@ -432,7 +460,12 @@ export function createPaintTool(
     panel.groupFill.textContent = groupsCopy.fill;
     panel.groupMask.textContent = groupsCopy.mask;
     panel.groupUnmask.textContent = groupsCopy.unmask;
+    panel.groupsApart.textContent = groupsCopy.pullApart;
+    panel.groupsTogether.textContent = groupsCopy.putTogether;
     panel.groupsHint.textContent = groupsCopy.hint;
+    panel.groupsApartHint.textContent = groupsCopy.apartHint;
+    panel.groupsApart.addEventListener('click', () => current().pullAllApart());
+    panel.groupsTogether.addEventListener('click', () => current().putTogether());
     panel.groupsAll.addEventListener('click', () => current().showAllGroups());
     panel.groupsTint.addEventListener('click', () =>
       current().setGroupTint(!current().state.groupTint),
