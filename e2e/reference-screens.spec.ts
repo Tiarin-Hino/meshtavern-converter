@@ -126,6 +126,8 @@ for (const frame of FRAMES) {
       });
       // The page clipped to the panel, not a picture of the element: that one waits for the
       // element to be still over animation frames, which freezeFrames holds.
+      // The pointer off the panel: left where the last click was, it can hover a group's row.
+      await page.mouse.move(0, 0);
       // The box once it stays where it is: the sheet may still be moving up on a phone.
       const panel = page.locator('#paint-controls');
       let clip = (await panel.boundingBox())!;
