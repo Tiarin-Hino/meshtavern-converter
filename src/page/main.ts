@@ -57,7 +57,12 @@ import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
-import { createPaintTool, type MiniForPainting, type PaintHooks } from './paint-tool';
+import {
+  createPaintTool,
+  type MiniForPainting,
+  type PaintHooks,
+  type PaintReplay,
+} from './paint-tool';
 import type { PaintingState } from '../lib/painting';
 import { parsePageOptions } from './options';
 import {
@@ -220,6 +225,7 @@ declare global {
           paint?: TestPaint | null,
           mask?: PaintMask | null,
           groups?: PaintGroups | null,
+          replay?: PaintReplay | null,
         ) => Promise<void>;
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
@@ -1891,8 +1897,13 @@ window.__mt = {
   state,
   painting: {
     ...paintTool,
-    open: (paint, mask, groups) =>
-      paintTool.open(paint && baked ? testPaintAlbedo(baked.mesh, paint) : null, mask, groups),
+    open: (paint, mask, groups, replay) =>
+      paintTool.open(
+        paint && baked ? testPaintAlbedo(baked.mesh, paint) : null,
+        mask,
+        groups,
+        replay,
+      ),
     testPaint: (paint) => {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);

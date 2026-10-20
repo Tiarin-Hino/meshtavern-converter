@@ -788,7 +788,9 @@ test('undoes and redoes strokes to the same bytes, back to the paint as opened',
   expect(outcome.end).toEqual([2, 0]);
 });
 
-test('keeps at least UNDO_STEPS strokes to undo', async ({ figurePage: page }) => {
+test('undoes every stroke, past UNDO_STEPS back to the paint as opened (#165)', async ({
+  figurePage: page,
+}) => {
   const outcome = await page.evaluate(async () => {
     const painting = window.__mt.painting;
     await painting.open();
@@ -797,7 +799,8 @@ test('keeps at least UNDO_STEPS strokes to undo', async ({ figurePage: page }) =
     await new Promise((resolve) => requestAnimationFrame(resolve));
     const point = view.texelAt(...view.screenOf([0, 14, 6]))!.point;
     view.setBrush({ sizeMm: 1 });
-    // 55 strokes and 10 more: past the oldest keyframe's drop (design note §8).
+    // 55 strokes and 10 more: past the window's keyframes (design note §8), so the last undos
+    // replay from the paint as opened (#165).
     for (let k = 0; k < 65; k++) {
       view.setColour(`#${(k * 3).toString(16).padStart(2, '0')}0000`);
       await view.stroke([point]);
@@ -809,11 +812,12 @@ test('keeps at least UNDO_STEPS strokes to undo', async ({ figurePage: page }) =
       if (view.state.steps === before) break;
       undone++;
     }
-    return { undone, history: view.history().length };
+    const bare = (await view.paint()).data.every((value) => value === 0);
+    return { undone, history: view.history().length, bare };
   });
-  expect(outcome.undone).toBeGreaterThanOrEqual(50);
-  expect(outcome.undone).toBeLessThan(65);
-  expect(outcome.history).toBe(65 - outcome.undone);
+  expect(outcome.undone).toBe(65);
+  expect(outcome.history).toBe(0);
+  expect(outcome.bare).toBe(true);
 });
 
 /** The paint's alpha under canvas points of `points` (on the mini, from the camera given), and the points hit. */
