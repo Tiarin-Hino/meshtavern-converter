@@ -3,7 +3,7 @@ title: The converting pictures hold their step, and the look-presets test gets i
 date: 2026-10-20
 phase: 2
 issues: [183]
-prs: []
+prs: [184]
 topics: [testing, e2e, reference-screens]
 ---
 
