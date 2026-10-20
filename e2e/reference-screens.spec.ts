@@ -117,14 +117,34 @@ for (const frame of FRAMES) {
       if (frame.phone) await page.locator('#sheet-handle').click();
       await page.evaluate(() => {
         window.__mt.painting.view().setTool('airbrush');
-        document.querySelector('#paint-controls')!.scrollIntoView({ block: 'start' });
+        // The panel's own scrolling body only: scrollIntoView would move the window too, and the
+        // picture is clipped against the window.
+        const controls = document.querySelector<HTMLElement>('#paint-controls')!;
+        const body = document.querySelector<HTMLElement>('#panel-body')!;
+        body.scrollTop += controls.getBoundingClientRect().top - body.getBoundingClientRect().top;
+        window.scrollTo(0, 0);
       });
+      // The page clipped to the panel, not a picture of the element: that one waits for the
+      // element to be still over animation frames, which freezeFrames holds.
+      // The box once it stays where it is: the sheet may still be moving up on a phone.
+      const panel = page.locator('#paint-controls');
+      let clip = (await panel.boundingBox())!;
+      await expect
+        .poll(async () => {
+          const before = JSON.stringify(clip);
+          await page.waitForTimeout(250);
+          clip = (await panel.boundingBox())!;
+          return JSON.stringify(clip) === before;
+        })
+        .toBe(true);
       await freezeFrames(page);
       for (const theme of THEMES) {
         await page.emulateMedia({ colorScheme: theme });
-        await expect
-          .soft(page.locator('#paint-controls'))
-          .toHaveScreenshot(`${frame.name}-painting-${theme}.png`);
+        await expect.soft(page).toHaveScreenshot(`${frame.name}-painting-${theme}.png`, {
+          clip,
+          // A frame 3400 px tall takes seconds a picture in software rendering.
+          timeout: 30_000,
+        });
       }
       await thawFrames(page);
     });
