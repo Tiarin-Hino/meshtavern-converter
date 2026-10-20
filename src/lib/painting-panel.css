@@ -84,9 +84,13 @@
   border-radius: var(--radius-control);
 }
 
+/*
+ * The theme's text face with even figures, not --font-code: the theme ships no monospace, so that
+ * one is each machine's own and the panel would read differently on each (#166).
+ */
 .mt-painting-panel [data-look-hex] {
-  font-family: var(--font-code);
   font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 /* The airbrush's three directions take the panel's width, alike. */

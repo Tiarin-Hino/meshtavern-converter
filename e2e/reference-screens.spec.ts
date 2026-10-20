@@ -108,9 +108,11 @@ for (const frame of FRAMES) {
       hasTouch: frame.phone,
       reducedMotion: 'reduce',
     });
+    // The page's own set-up counts too: a context made while the five states draw beside it in
+    // software rendering took longer than the default 30 s once.
+    test.describe.configure({ timeout: 240_000 });
 
     test('the painter’s panel in both themes', async ({ page }) => {
-      test.setTimeout(240_000);
       await open(page, '/?dev&ask=off&bake=256');
       await page.addStyleTag({ path: 'e2e/reference-screens.css' });
       await painting(page);
@@ -126,8 +128,10 @@ for (const frame of FRAMES) {
       });
       // The page clipped to the panel, not a picture of the element: that one waits for the
       // element to be still over animation frames, which freezeFrames holds.
-      // The pointer off the panel: left where the last click was, it can hover a group's row.
+      // No hover on the picture: the pointer is left where the last click was, over a group's row
+      // once the panel scrolls, and moving it away did not clear the row's hover on CI.
       await page.mouse.move(0, 0);
+      await page.addStyleTag({ content: '#paint-controls { pointer-events: none; }' });
       // The box once it stays where it is: the sheet may still be moving up on a phone.
       const panel = page.locator('#paint-controls');
       let clip = (await panel.boundingBox())!;
