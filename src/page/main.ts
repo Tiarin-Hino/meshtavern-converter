@@ -1,8 +1,10 @@
 import './style.css';
 // The question view's stylesheet (#119): a consumer imports it once, as the page does.
 import '../lib/questions.css';
-// The painting view's stylesheet (#127), for the team's Paint tool under ?dev.
+// The painting view's and the painter's panel's stylesheets (#127, #166), for the team's Paint
+// tool under ?dev.
 import '../lib/painting.css';
+import '../lib/painting-panel.css';
 import {
   encodeGlb,
   glbEncoderReady,

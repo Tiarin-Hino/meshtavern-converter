@@ -57,7 +57,7 @@ export const PAINT_COPY = {
     direction: 'From',
   },
   regions: { base: 'The base', figure: 'The figure' },
-  /** The pipette (#135): its button, the two modes, and what it does. */
+  /** The pipette (#135): its button, the two modes, what it does (the panel's tooltip) and a tap that found nothing. */
   pick: {
     button: 'Pick a colour',
     shown: 'As shown',
@@ -78,6 +78,7 @@ export const PAINT_COPY = {
     'This painting was saved by an older version of the brushes; it replays as it was painted.',
   /** The mask's whole changes and its tint (#138): for a panel's buttons. */
   mask: {
+    label: 'Mask',
     clear: 'Clear mask',
     invert: 'Invert mask',
     show: 'Show mask',
@@ -85,8 +86,10 @@ export const PAINT_COPY = {
     figure: 'Mask the figure',
   },
   /**
-   * The groups (#139): the panel's row, the names `describeGroup` builds from, and what hiding is.
-   * `part`, `shell` and `hand` are followed by a number.
+   * The groups (#139): the panel's section, the names `describeGroup` builds from, and what hiding
+   * is. `part`, `shell` and `hand` are followed by a number. (#166 retired `show`, `into` and
+   * `apart`: the panel's rows have one Hide toggle, the pressed row as the target, and an Apart
+   * toggle named by `pullApart`.)
    */
   groups: {
     label: 'Groups',
@@ -97,27 +100,47 @@ export const PAINT_COPY = {
     hand: 'Group',
     of: 'of',
     hide: 'Hide',
-    show: 'Show',
     showAll: 'Show all',
     tint: 'Show groups',
     newGroup: 'New group',
-    into: 'Add to',
     fill: 'Fill the group',
     mask: 'Mask the group',
     unmask: 'Unmask the group',
     pullApart: 'Pull apart',
     putTogether: 'Put together',
-    apart: 'Apart',
     hint: 'A hidden group is not drawn and takes no paint, so you can paint what lies behind it. Hiding is not a step: Show brings it back, not Undo.',
     apartHint:
       'A group pulled apart is drawn and painted beside the body, so you can reach every side of it; a stroke on it paints it alone. Pulling apart is not a step either: Put together brings the groups back, not Undo.',
   },
-  /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
-  recent: { label: 'Colours used', swatch: 'Paint with' },
+  /** The colours used (#136): each swatch's name before its colour (the swatches' group is `panel.colours`, #166). */
+  recent: { swatch: 'Paint with' },
   undo: 'Undo',
   redo: 'Redo',
   navigate: 'Turn the mini',
   hint: 'Paint with one finger or the left button; two fingers or the right button turn the mini.',
+  /** The painter's panel (#166, `docs/design/painting-panel.md` §6): its sections' titles and units. */
+  panel: {
+    tool: 'Tool',
+    colour: 'Colour',
+    colours: 'Colours',
+    regions: 'Regions',
+    regionsHint: 'Fills the region with the colour in one tap.',
+    history: 'History',
+    mm: 'mm',
+    percent: '%',
+  },
+  /** The airbrush's directions in the panel (#166). */
+  directions: { none: 'Everywhere', above: 'Above', front: 'The front' },
+  /** The panel's Look section (#166), the page's Look on the same components. */
+  look: {
+    label: 'Look',
+    presets: 'Starting points',
+    enabled: 'Primed and washed',
+    base: 'Base coat',
+    occlusion: 'Shadows',
+    wash: 'Wash',
+    edges: 'Edges',
+  },
 } as const;
 
 /** The words a consumer may replace: `copy` in `mountPainting`'s options, field by field. */

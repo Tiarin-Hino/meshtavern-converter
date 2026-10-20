@@ -1,6 +1,17 @@
 import { expect, test, type FileChooser, type Locator, type Page } from '@playwright/test';
 import { COPY } from '../src/page/page-state';
-import { asking, converting, cancel, done, error, open, pairsStop, question } from './states';
+import { SIZE_STEP_MM } from '../src/lib/painting-panel';
+import {
+  asking,
+  converting,
+  cancel,
+  done,
+  error,
+  open,
+  painting,
+  pairsStop,
+  question,
+} from './states';
 
 /**
  * The keyboard pass (#146, spec docs/specs/look-and-feel.md L4, design note
@@ -248,6 +259,63 @@ test('the question with keys alone: an axis, then Confirm', async ({ page }) => 
   await tabTo(page, page.locator('#ask-confirm'));
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__mt.state.page === 'done');
+});
+
+test('the painting panel: Tab reaches every control, and the tools, a slider, a swatch, a chip and a group’s Hide work by keys (#166)', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await open(page, '/?dev&ask=off&bake=256');
+  await painting(page);
+  // A stroke for a swatch, and a group pulled apart, so every kind of control is on screen.
+  await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const hit = view.texelAt(...view.screenOf([0, 14, 6]));
+    if (hit) await view.stroke([hit.point]);
+    view.setTool('airbrush');
+    view.pullApart(2);
+    view.setColour('#2050a0');
+  });
+  await expectSwept(page, 'painting panel');
+
+  const panel = page.locator('#paint-controls');
+  const state = () => page.evaluate(() => window.__mt.painting.view().state);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+  // A tool with Space.
+  await tabTo(page, panel.locator('[data-tool="wash"]'), 200);
+  await page.keyboard.press('Space');
+  expect((await state()).tool).toBe('wash');
+
+  // The size slider with the arrows: one SIZE_STEP_MM.
+  const size = panel.locator('[data-slider="sizeMm"] input');
+  await tabTo(page, size);
+  const before = (await state()).brush.sizeMm;
+  await page.keyboard.press('ArrowRight');
+  expect((await state()).brush.sizeMm).toBeCloseTo(before + SIZE_STEP_MM);
+
+  // A swatch with Space: the stroke's colour again.
+  await tabTo(page, panel.locator('[data-swatch]').first());
+  await page.keyboard.press('Space');
+  expect((await state()).colour).toBe('#b03030');
+
+  // A look preset with Space.
+  await tabTo(page, panel.locator('[data-preset="bone"]'));
+  await page.keyboard.press('Space');
+  expect((await state()).look.base).toBe('#d8cdb0');
+
+  // A group's Hide with Space hides it, Enter shows it again.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  const hide = panel.locator('[data-groups] [data-shown="1"]');
+  await tabTo(page, hide, 200);
+  await page.keyboard.press('Space');
+  expect((await state()).groups.hidden).toEqual([1]);
+  // The rows were built again, and the focus is on the same row's Hide.
+  await expect(hide).toBeFocused();
+  await page.keyboard.press('Enter');
+  expect((await state()).groups.hidden).toEqual([]);
 });
 
 test.describe('a phone', () => {

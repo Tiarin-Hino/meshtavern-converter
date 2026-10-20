@@ -8,6 +8,7 @@ import {
   freezeFrames,
   holdStatus,
   open,
+  painting,
   releaseStatus,
   thawFrames,
 } from './states';
@@ -88,6 +89,76 @@ for (const frame of FRAMES) {
         () => window.__mt.state.page === 'done' && !window.__mt.state.busy,
       );
       await both(page, frame.name, 'done');
+    });
+  });
+}
+
+/**
+ * The painter's panel (#166, design note docs/design/painting-panel.md §12): the ?dev Paint tool on
+ * the generated figure with the panel mounted, compared as the panel alone (`#paint-controls`)
+ * in both themes. A test of its own beside the five states, so their time budget holds. The page
+ * converts and opens the painting at the frame's size; then the scenes' frames are held and the
+ * window is made tall enough that the whole panel is on screen at once (the panel sits in the
+ * page's scrolling panel, on a phone in its sheet, and a picture is cut where that frame ends).
+ * Held, the scenes never draw at the tall size, which in software rendering slowed the whole run
+ * past CI's limit and kept the next test's browser waiting; the frames are not handed back. The
+ * airbrush is the tool, so its direction is on the picture.
+ */
+for (const frame of FRAMES) {
+  test.describe(frame.name, () => {
+    test.use({
+      viewport: frame.viewport,
+      hasTouch: frame.phone,
+      reducedMotion: 'reduce',
+    });
+    test.describe.configure({ timeout: 240_000 });
+
+    test('the painter’s panel in both themes', async ({ page }) => {
+      await open(page, '/?dev&ask=off&bake=256');
+      await page.addStyleTag({ path: 'e2e/reference-screens.css' });
+      await painting(page);
+      if (frame.phone) await page.locator('#sheet-handle').click();
+      await page.evaluate(() => window.__mt.painting.view().setTool('airbrush'));
+      // No hover on the picture: the pointer is left where the last click was, over a group's row
+      // once the panel scrolls, and moving it away did not clear the row's hover on CI.
+      await page.mouse.move(0, 0);
+      await page.addStyleTag({
+        content: '#paint-controls { pointer-events: none; }',
+      });
+      await freezeFrames(page);
+      await page.setViewportSize({
+        width: frame.viewport.width,
+        height: frame.phone ? 3400 : 2600,
+      });
+      await page.evaluate(() => {
+        // The panel's own scrolling body only: scrollIntoView would move the window too, and the
+        // picture is clipped against the window.
+        const controls = document.querySelector<HTMLElement>('#paint-controls')!;
+        const body = document.querySelector<HTMLElement>('#panel-body')!;
+        body.scrollTop += controls.getBoundingClientRect().top - body.getBoundingClientRect().top;
+        window.scrollTo(0, 0);
+      });
+      // The page clipped to the panel's box, once the box stays where it is (the sheet may still
+      // be moving up on a phone), not a picture of the element: that one waits for animation
+      // frames, which are held.
+      const panel = page.locator('#paint-controls');
+      let clip = (await panel.boundingBox())!;
+      await expect
+        .poll(async () => {
+          const before = JSON.stringify(clip);
+          await page.waitForTimeout(250);
+          clip = (await panel.boundingBox())!;
+          return JSON.stringify(clip) === before;
+        })
+        .toBe(true);
+      for (const theme of THEMES) {
+        await page.emulateMedia({ colorScheme: theme });
+        await expect.soft(page).toHaveScreenshot(`${frame.name}-painting-${theme}.png`, {
+          clip,
+          // A frame 3400 px tall takes seconds a picture in software rendering.
+          timeout: 30_000,
+        });
+      }
     });
   });
 }

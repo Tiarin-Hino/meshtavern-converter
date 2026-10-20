@@ -9,12 +9,11 @@ import {
   dragLeave,
   dragOver,
   error,
-  file,
   open,
   pairsStop,
+  painting,
   question,
 } from './states';
-import { generateFigure } from '../src/regression/shapes';
 
 /**
  * The accessibility scan (#146, spec docs/specs/look-and-feel.md L4, design note
@@ -115,24 +114,23 @@ for (const theme of THEMES) {
 
     test('the painting panel (the ?dev Paint tool)', async ({ page }, testInfo) => {
       test.setTimeout(240_000);
-      await open(page, '/?dev&ask=off');
-      await page.setInputFiles('#file', file('hero.stl', generateFigure(true)));
-      await page.waitForFunction(
-        () =>
-          window.__mt.state.stats !== null &&
-          window.__mt.state.baked !== null &&
-          !window.__mt.state.busy,
-        undefined,
-        { timeout: 180_000 },
-      );
-      await page.locator('#dev-paint > summary').click();
-      await page.locator('#paint-open').click();
-      // Opening builds the painting's targets in software rendering: seconds on a CI runner. A
-      // refusal is written under the controls, so the failure names it.
-      await expect(
-        page.locator('#paint-controls'),
-        await page.locator('#paint-perf').innerText(),
-      ).toBeVisible({ timeout: 60_000 });
+      await open(page, '/?dev&ask=off&bake=256');
+      await painting(page);
+      // The painter's panel (#166) with everything it can show: a stroke's colour as a swatch,
+      // the airbrush's direction, a group hidden and one pulled apart, the groups' tint.
+      await page.evaluate(async () => {
+        const view = window.__mt.painting.view();
+        view.setCamera(0, 5, 1.6);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const hit = view.texelAt(...view.screenOf([0, 14, 6]));
+        if (hit) await view.stroke([hit.point]);
+        view.setTool('airbrush');
+        view.setGroupShown(1, false);
+        view.pullApart(2);
+        view.setGroupTint(true);
+      });
+      await expect(page.locator('#paint-controls [data-swatch]')).not.toHaveCount(0);
+      await expect(page.locator('#paint-controls')).toBeVisible();
       await scan(page, testInfo, `${theme}-painting`);
     });
   });

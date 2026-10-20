@@ -588,107 +588,20 @@
             <figcaption id="dev-kind"></figcaption>
           </figure>
           <details id="dev-paint" class="panel-section" data-in="done" data-mini data-dev>
-            <summary>Paint (team tool, #127, #128, #135)</summary>
-            <button id="paint-open" class="btn btn-sm" type="button">Paint this mini</button>
-            <div id="paint-controls" hidden>
-              <div id="paint-tools" class="actions" role="group" aria-label="Tool"></div>
-              <p id="paint-hint" class="hint"></p>
-              <label class="field" data-slider="sizeMm"
-                ><span>Size</span> <input id="paint-size" type="range" step="0.5"
-              /></label>
-              <label class="field" data-slider="hardness"
-                ><span>Hardness</span>
-                <input id="paint-hardness" type="range" min="0" max="1" step="0.05"
-              /></label>
-              <label class="field" data-slider="opacity"
-                ><span id="paint-opacity-label">Opacity</span>
-                <input id="paint-opacity" type="range" min="0" max="1" step="0.05"
-              /></label>
-              <label class="field" data-slider="tolerance"
-                ><span>Tolerance</span>
-                <input id="paint-tolerance" type="range" min="0" max="1" step="0.05"
-              /></label>
-              <label class="field" data-slider="direction"
-                ><span>From</span>
-                <select id="paint-direction" class="input">
-                  <option value="none">Everywhere</option>
-                  <option value="above">Above</option>
-                  <option value="front">The front</option>
+            <summary>Paint (team tool, #127, #128, #135, #166)</summary>
+            <!-- The painter's panel of the library mounts here (#166); the team section is under it. -->
+            <div id="paint-controls" hidden></div>
+            <div id="paint-team" class="actions" role="group" aria-label="Team">
+              <button id="paint-open" class="btn btn-sm" type="button">Paint this mini</button>
+              <label class="field" hidden
+                ><span class="visually-hidden">Pick</span>
+                <select id="paint-pick-mode" class="input">
+                  <option value="shown">As shown</option>
+                  <option value="painted">As painted</option>
                 </select></label
               >
-              <label class="field"
-                ><span>Colour</span> <input id="paint-colour" type="color"
-              /></label>
-              <div id="paint-recent" class="actions" role="group" hidden></div>
-              <div class="actions" role="group" aria-label="Pipette">
-                <button id="paint-pick" class="btn btn-sm" type="button" aria-pressed="false">
-                  Pick a colour
-                </button>
-                <label class="field"
-                  ><span class="visually-hidden">Pick</span>
-                  <select id="paint-pick-mode" class="input">
-                    <option value="shown">As shown</option>
-                    <option value="painted">As painted</option>
-                  </select></label
-                >
-              </div>
-              <div class="actions" role="group" aria-label="Regions">
-                <button id="paint-base" class="btn btn-sm" type="button">The base</button>
-                <button id="paint-figure" class="btn btn-sm" type="button">The figure</button>
-              </div>
-              <div class="actions" role="group" aria-label="Mask">
-                <button id="paint-mask-base" class="btn btn-sm" type="button">Mask the base</button>
-                <button id="paint-mask-figure" class="btn btn-sm" type="button">
-                  Mask the figure
-                </button>
-                <button id="paint-mask-clear" class="btn btn-sm" type="button">Clear mask</button>
-                <button id="paint-mask-invert" class="btn btn-sm" type="button">Invert mask</button>
-                <button id="paint-mask-show" class="btn btn-sm" type="button" aria-pressed="true">
-                  Show mask
-                </button>
-              </div>
-              <div class="actions" role="group" aria-label="Groups">
-                <div id="paint-groups" class="actions" role="group" aria-label="Groups shown"></div>
-                <button id="paint-groups-all" class="btn btn-sm" type="button">Show all</button>
-                <button
-                  id="paint-groups-tint"
-                  class="btn btn-sm"
-                  type="button"
-                  aria-pressed="false"
-                >
-                  Show groups
-                </button>
-                <label class="field"
-                  ><span id="paint-group-target-label">Add to</span>
-                  <select id="paint-group-target" class="input"></select
-                ></label>
-                <button id="paint-group-fill" class="btn btn-sm" type="button">
-                  Fill the group
-                </button>
-                <button id="paint-group-mask" class="btn btn-sm" type="button">
-                  Mask the group
-                </button>
-                <button id="paint-group-unmask" class="btn btn-sm" type="button">
-                  Unmask the group
-                </button>
-                <button id="paint-groups-apart" class="btn btn-sm" type="button">Pull apart</button>
-                <button id="paint-groups-together" class="btn btn-sm" type="button">
-                  Put together
-                </button>
-              </div>
-              <p id="paint-groups-hint" class="hint"></p>
-              <p id="paint-groups-apart-hint" class="hint"></p>
-              <div class="actions" role="group" aria-label="History">
-                <button id="paint-undo" class="btn btn-sm" type="button">Undo</button>
-                <button id="paint-redo" class="btn btn-sm" type="button">Redo</button>
-                <button id="paint-navigate" class="btn btn-sm" type="button" aria-pressed="false">
-                  Turn the mini
-                </button>
-              </div>
-              <div class="actions" role="group" aria-label="Paint">
-                <button id="paint-save" class="btn btn-sm" type="button">Save</button>
-                <button id="paint-close" class="btn btn-sm" type="button">Close</button>
-              </div>
+              <button id="paint-save" class="btn btn-sm" type="button" hidden>Save</button>
+              <button id="paint-close" class="btn btn-sm" type="button" hidden>Close</button>
             </div>
             <p id="paint-perf" class="hint"></p>
           </details>

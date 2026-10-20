@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as dev from './dev';
 import * as lib from './index';
 import * as painting from './painting';
+import * as paintingPanel from './painting-panel';
 import * as questions from './questions';
 import * as three from './three';
 
@@ -220,6 +221,18 @@ describe('the library entries', () => {
     ]);
   });
 
+  it('painting-panel.ts exports exactly the painter’s panel and its tables (#166)', () => {
+    expect(Object.keys(paintingPanel).sort()).toEqual([
+      'DIRECTIONS',
+      'SIZE_STEP_MM',
+      'SLIDERS',
+      'UNIT_STEP',
+      'mountPaintingPanel',
+      'panelSwatches',
+      'sliderValue',
+    ]);
+  });
+
   it('package.json points at every entry and stylesheet', () => {
     const manifest = JSON.parse(
       readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -232,6 +245,8 @@ describe('the library entries', () => {
       './questions.css': './src/lib/questions.css',
       './painting': './src/lib/painting.ts',
       './painting.css': './src/lib/painting.css',
+      './painting-panel': './src/lib/painting-panel.ts',
+      './painting-panel.css': './src/lib/painting-panel.css',
     });
   });
 

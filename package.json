@@ -11,7 +11,9 @@
     "./questions": "./src/lib/questions.ts",
     "./questions.css": "./src/lib/questions.css",
     "./painting": "./src/lib/painting.ts",
-    "./painting.css": "./src/lib/painting.css"
+    "./painting.css": "./src/lib/painting.css",
+    "./painting-panel": "./src/lib/painting-panel.ts",
+    "./painting-panel.css": "./src/lib/painting-panel.css"
   },
   "engines": {
     "node": ">=20.19"

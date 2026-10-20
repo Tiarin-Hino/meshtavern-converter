@@ -657,9 +657,19 @@ body[data-dragging] #drop-frame {
   font-size: var(--text-sm);
 }
 
-#dev-paint #paint-open,
-#paint-controls > * {
+/* The painter's panel (#166) to the section's edges, its own sections inside; the team's row under it. */
+#paint-controls {
+  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+#paint-team {
   margin-top: var(--space-2);
+}
+
+#paint-team .field {
+  margin: 0;
 }
 
 #dev-tools {
@@ -758,7 +768,7 @@ body[data-dragging] #drop-frame {
     min-width: var(--tap-min);
   }
 
-  #panel input[type='checkbox']:not(.mt-questions *) {
+  #panel input[type='checkbox']:not(.mt-questions *, .mt-painting-panel *) {
     width: 20px;
     height: 20px;
   }
@@ -819,9 +829,4 @@ body[data-dragging] #drop-frame {
     left: var(--space-2);
     bottom: var(--space-2);
   }
-}
-
-/* The colours used (#136): a swatch each, its paint set from the history as its background. */
-.paint-swatch {
-  border-color: var(--line-strong);
 }
