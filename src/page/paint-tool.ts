@@ -1,6 +1,5 @@
 import type { Texture } from 'three';
 import {
-  groupsApart,
   isGroupTool,
   PAINT_SIZE,
   recentColours,
@@ -302,14 +301,8 @@ export function createPaintTool(
         apartBox.dataset.apart = String(index);
         apartBox.setAttribute('aria-label', `${PAINT_COPY.groups.pullApart}: ${names[index]}`);
         apartBox.addEventListener('change', () => {
-          const view = current();
-          const offset = apartBox.checked
-            ? (groupsApart(opened!.mesh, view.groups(), [index], view.state.groups.apart)[0]
-                ?.offset ?? null)
-            : null;
-          // A group the rule leaves in place is not apart: its box says so.
-          if (offset === null) apartBox.checked = false;
-          view.pullApart(index, offset);
+          // The rule's offset for this group alone; one it leaves in place unticks its box.
+          apartBox.checked = current().pullApart(index, apartBox.checked ? undefined : null);
         });
         apartLabel.append(apartBox, ` ${PAINT_COPY.groups.apart}`);
         return [label, apartLabel];

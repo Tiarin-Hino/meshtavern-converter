@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Vec3 } from '../pipeline/base';
 import { GRID_SQUARE_MM } from '../pipeline/size';
-import { placeCameraOnSphere } from '../three/camera';
+import { FRAME_DISTANCE, placeCameraOnSphere } from '../three/camera';
 import { readSceneColours } from '../three/scene-colours';
 import { addTableLights } from '../three/thumbnail';
 
@@ -16,9 +16,6 @@ export interface SceneBox {
   min: Vec3;
   max: Vec3;
 }
-
-/** The camera's distance for a box of `size` at zoom 1, as `placeCameraOnSphere` sets it. */
-const FRAME_DISTANCE = 2.3;
 
 /**
  * The painting view's scene (issue #127, design note `docs/design/painting-engine.md` §10.3): the

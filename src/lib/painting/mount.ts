@@ -233,12 +233,14 @@ export interface PaintingView {
   /**
    * Pulls group `group` apart (#180, design note `docs/design/paint-groups.md` §9): drawn, painted
    * and hit moved by `offset` (mm, the mini's axes), so what it covered can be reached and its own
-   * surface painted without touching a neighbour's; null (or a zero offset) puts it back. Not a
-   * step: undo never puts a group back. A dab on a group apart paints that group alone; a stroke
-   * records the offsets at its start and replays with them, so its bytes are the same with the
-   * groups together.
+   * surface painted without touching a neighbour's; null (or a zero offset) puts it back. Without
+   * an offset, the rule's (`groupsApart`) for this group alone, clear of the groups already apart;
+   * a group the rule leaves in place stays. Whether the group is apart afterwards. Not a step:
+   * undo never puts a group back. A dab on a group apart paints that group alone; a stroke records
+   * the offsets at its start and replays with them, so its bytes are the same with the groups
+   * together.
    */
-  pullApart(group: number, offset: Vec3 | null): void;
+  pullApart(group: number, offset?: Vec3 | null): boolean;
   /** Pulls every group apart by the rule of the parts question (`groupsApart`): group 0 stays. Not a step. */
   pullAllApart(): void;
   /** Puts every group back (#180). Not a step. */
@@ -713,14 +715,21 @@ class Painting implements PaintingView {
     this.emit();
   }
 
-  pullApart(group: number, offset: Vec3 | null): void {
+  pullApart(group: number, offset?: Vec3 | null): boolean {
     this.commitLive();
     this.checkGroup(group);
+    if (offset === undefined) {
+      const opened = this.opened;
+      offset = opened
+        ? (groupsApart(opened.mesh, opened.groups, [group], this.apartList())[0]?.offset ?? null)
+        : null;
+    }
     if (offset !== null && (offset.length !== 3 || !offset.every(Number.isFinite)))
       throw new RangeError('An offset is three finite numbers, mm along the mini’s axes');
     if (offset === null || offset.every((value) => value === 0)) this.apart.delete(group);
     else this.apart.set(group, [offset[0], offset[1], offset[2]]);
     this.movedGroups();
+    return this.apart.has(group);
   }
 
   pullAllApart(): void {
