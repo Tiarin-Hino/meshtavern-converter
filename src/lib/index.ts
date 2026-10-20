@@ -71,6 +71,7 @@ export {
 export {
   ConversionProblem,
   PROBLEM_MESSAGES,
+  PAINT_SOURCE_MESSAGES,
   toProblem,
   type ProblemCode,
 } from './pipeline/problems';
@@ -191,6 +192,35 @@ export {
   AIR_DIR_EDGE,
   AIR_DIR_SOFTNESS,
 } from './pipeline/look';
+// The paint file (#165): a painting saved as its steps, the files it was painted on by their
+// fingerprints, and the choices that convert them again without a question.
+export { CONVERTER_VERSION } from './version';
+export {
+  PAINT_FILE_FORMAT,
+  PAINT_FILE_VERSION,
+  PAINT_ENGINE_VERSION,
+  PAINT_FILE_EXTENSION,
+  PAINT_FILE_TYPE,
+  PAINT_FILE_GZIP_ABOVE,
+  PAINT_FILE_MAX_BYTES,
+  SOURCE_ROLES,
+  paintFileOf,
+  writePaintFile,
+  readPaintFile,
+  paintedOnOlderEngine,
+  engineOf,
+  fingerprintOf,
+  fingerprintSources,
+  sourceRoles,
+  matchSources,
+  convertOptionsOf,
+  type PaintFile,
+  type PaintFileContents,
+  type PaintChoices,
+  type SourceFingerprint,
+  type SourceRole,
+  type EngineRun,
+} from './pipeline/paint-file';
 export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
 export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
 // The automatic groups (#139): the base, the files and the shells, a byte a table-level triangle.

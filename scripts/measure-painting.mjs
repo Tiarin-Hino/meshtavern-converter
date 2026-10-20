@@ -26,6 +26,8 @@ const MB = 1024 ** 2;
 const VIEWPORT = { width: 1920, height: 1080 };
 /** Strokes per brush: the counter's figures of each. */
 const STROKES = 3;
+/** Short strokes painted after the runs, so the replay at open and undo past the window are measured (#165). */
+const SHORT_STROKES = 80;
 /** Pointer samples a stroke across the canvas has: one a frame, as a pointer at 60 Hz. */
 const SAMPLES = 120;
 /** The brushes measured: each tool that strokes at the largest size, the flat brush and the dry brush also at the default. */
@@ -238,6 +240,42 @@ try {
       const delta = (type) => ((open[type] ?? 0) - (without[type] ?? 0)) / MB;
       console.log(
         `memory, view open minus closed: GPU process ${delta('gpu-process').toFixed(0)} MB (${((open['gpu-process'] ?? 0) / MB).toFixed(0)} MB in all), page ${delta('renderer').toFixed(0)} MB`,
+      );
+      // The paint file (#165): the steps above and SHORT_STROKES more replayed at open, as a paint
+      // file opens, then every one undone: past the window, undo replays from the paint as opened.
+      const replay = await page.evaluate(async (count) => {
+        const painting = window.__mt.painting;
+        const view = painting.view();
+        view.showAllGroups();
+        view.putTogether();
+        view.setTool('flat');
+        view.setBrush({ sizeMm: 3, hardness: 0.8, opacity: 1, direction: null });
+        view.setCamera(34, 22, 1);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const canvas = document.querySelector('#paint-view canvas');
+        const { width, height } = canvas.getBoundingClientRect();
+        for (let k = 0; k < count; k++) {
+          view.setColour(`#${(k * 3).toString(16).padStart(2, '0')}4040`);
+          const y = height * (0.3 + (0.4 * (k % 10)) / 10);
+          await view.strokeAt([0.4, 0.5, 0.6].map((x) => [width * x, y]));
+        }
+        const steps = view.history();
+        const bytes = JSON.stringify(steps).length;
+        painting.close();
+        const start = performance.now();
+        await painting.open(null, null, null, { steps });
+        const openMs = performance.now() - start;
+        const undos = [];
+        for (let k = 0; k < steps.length; k++) {
+          const at = performance.now();
+          await view.undo();
+          undos.push(performance.now() - at);
+        }
+        return { steps: steps.length, bytes, openMs, undos };
+      }, SHORT_STROKES);
+      const deep = replay.undos.filter((ms) => ms > 100).length;
+      console.log(
+        `paint file: ${replay.steps} steps, ${(replay.bytes / 1024).toFixed(0)} KiB as JSON · open with them ${replay.openMs.toFixed(0)} ms · undo of every one: median ${median(replay.undos).toFixed(0)} ms, worst ${Math.max(...replay.undos).toFixed(0)} ms, ${deep} over 100 ms`,
       );
     } finally {
       await context.close();

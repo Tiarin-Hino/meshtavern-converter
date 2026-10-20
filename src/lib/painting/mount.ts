@@ -28,6 +28,7 @@ import {
   type ToolId,
 } from '../pipeline/brush';
 import { TriangleBvh, type SurfaceHit } from '../pipeline/bvh';
+import { engineOf, PAINT_ENGINE_VERSION, type EngineRun } from '../pipeline/paint-file';
 import {
   fillRegion as floodRegion,
   triangleAdjacency,
@@ -138,6 +139,14 @@ export interface MiniToPaint {
    * null: the whole mini is group 0.
    */
   groups?: PaintGroups | null;
+  /**
+   * Steps to replay (#165): a paint file's, or a `history()` kept. They are applied over the paint,
+   * mask and groups above as they were the first time, and the view opens at the end of them, with
+   * undo back through all of them. Left out: none.
+   */
+  steps?: PaintStep[] | null;
+  /** The engine each of `steps` was painted on (a paint file's `engines`); left out: this one's. */
+  engines?: EngineRun[] | null;
 }
 
 export interface PaintPerf {
@@ -153,7 +162,7 @@ export interface PaintPerf {
  * What a lift stroke found under its start (#137, design note `docs/design/lift-eraser.md` §7): the
  * step it takes away, as an index into `history()`, or why it takes nothing: no step of this
  * session changed the paint there (bare, or the paint the view was opened with), or the step that
- * did is older than undo reaches. A refused lift stroke draws nothing and leaves no step.
+ * did is older than the lift reaches (the last UNDO_STEPS steps). A refused lift stroke draws nothing and leaves no step.
  */
 export type LiftOutcome = { lifted: number } | { refused: 'nothing-painted' | 'too-long-ago' };
 
@@ -255,6 +264,11 @@ export interface PaintingView {
   paint(): Promise<Albedo>;
   /** The steps applied so far, oldest first, as data the consumer may keep (§4). Undone steps are not in it. */
   history(): PaintStep[];
+  /**
+   * The engine each step of `history()` was painted on, oldest first (#165): the steps replayed at
+   * `open` keep theirs, the rest are PAINT_ENGINE_VERSION's. What a paint file's `engines` holds.
+   */
+  engines(): EngineRun[];
   /** For tests and scripts: a stroke given as points on the surface, in the coordinates the mini is drawn in (#180). */
   stroke(points: Vec3[], pressure?: number[]): Promise<void>;
   /** For tests and scripts: a stroke given as a path on the canvas (CSS px), a point a frame, as a pointer would. */
@@ -360,6 +374,11 @@ class Painting implements PaintingView {
   /** The steps and the keyframes (§8): made at `open`. */
   private timeline: PaintHistory | null = null;
   private readonly keyframes = new Map<number, ViewKeyframe>();
+  /**
+   * The engines of the steps replayed at `open` (#165), and how many of them are still the first
+   * steps of the history: a step pushed after undoing into them drops the rest.
+   */
+  private replayed: { engines: EngineRun[]; kept: number } = { engines: [], kept: 0 };
   private lift: LiftOutcome | null = null;
   /** The mask's tint (#138), shared by every mini this view opens. */
   private readonly tint = { value: tintOf(MASK_SHOWN) };
@@ -490,6 +509,7 @@ class Painting implements PaintingView {
     if (regions && regions.base.length !== mesh.indices.length / 3)
       throw new RangeError('The regions are not this mesh’s: one byte per triangle');
     if (groups) checkGroups(groups, mesh.indices.length / 3);
+    if (mini.steps) checkSteps(mini.steps, mini.engines ?? null, mesh.indices.length / 3, regions);
     const texture = ownTexture(mini.texture);
     if (!texture) throw new RangeError(this.copy.cannotPaint);
     const generation = ++this.generation;
@@ -578,6 +598,13 @@ class Painting implements PaintingView {
     });
     this.perf = NO_PERF;
     this.lift = null;
+    try {
+      this.replaySteps(mini.steps ?? [], mini.engines ?? null);
+    } catch (error) {
+      this.release();
+      texture.dispose();
+      throw error;
+    }
     this.scene.show(shown, {
       min: [box.min.x, box.min.y, box.min.z],
       max: [box.max.x, box.max.y, box.max.z],
@@ -936,7 +963,7 @@ class Painting implements PaintingView {
   /** A step that is not a stroke, applied as its replay and pushed. */
   private async apply(step: PaintFill | MaskChange): Promise<void> {
     this.replay(step, this.timeline!.applied);
-    this.timeline!.push(step);
+    this.record(step);
     this.emit();
     await this.scene.nextFrame();
   }
@@ -964,6 +991,62 @@ class Painting implements PaintingView {
 
   history(): PaintStep[] {
     return (this.timeline?.record() ?? []).map((step) => structuredClone(step));
+  }
+
+  engines(): EngineRun[] {
+    const applied = this.timeline?.applied ?? 0;
+    const replayed = Math.min(this.replayed.kept, applied);
+    const runs: EngineRun[] = [];
+    const add = (engine: number, steps: number): void => {
+      if (steps === 0) return;
+      const last = runs[runs.length - 1];
+      if (last?.engine === engine) last.steps += steps;
+      else runs.push({ engine, steps });
+    };
+    let left = replayed;
+    for (const run of this.replayed.engines) {
+      const steps = Math.min(run.steps, left);
+      add(run.engine, steps);
+      left -= steps;
+    }
+    add(PAINT_ENGINE_VERSION, applied - replayed);
+    return runs;
+  }
+
+  /**
+   * A step applied for the first time goes into the history. Pushed after undoing into the steps
+   * replayed at `open`, it drops those past the cursor (#165).
+   */
+  private record(step: PaintStep): void {
+    const timeline = this.timeline!;
+    this.replayed.kept = Math.min(this.replayed.kept, timeline.applied);
+    timeline.push(step);
+  }
+
+  /**
+   * The steps a paint file gives, replayed at `open` (#165): each applied as undo replays it (a
+   * lift from a keyframe pinned before it) and pushed, so the view opens at the end of them with
+   * undo back through all of them. Checked by `checkSteps` before anything was opened.
+   */
+  private replaySteps(steps: readonly PaintStep[], engines: EngineRun[] | null): void {
+    const timeline = this.timeline!;
+    this.replayed = {
+      engines: engines?.map((run) => ({ ...run })) ?? [
+        { engine: PAINT_ENGINE_VERSION, steps: steps.length },
+      ],
+      kept: steps.length,
+    };
+    steps.forEach((given, index) => {
+      const step = structuredClone(given);
+      // Every engine there is replays as this one does (PAINT_ENGINE_VERSION 1): a brush change
+      // that alters old paintings branches on `engineOf(this.replayed.engines, index)` in `replay`.
+      if (engineOf(this.replayed.engines, index) > PAINT_ENGINE_VERSION)
+        throw new RangeError('A step painted on a newer engine');
+      if (step.kind === 'stroke' && step.lifts !== undefined && !timeline.pin(step.lifts))
+        throw new RangeError(`Step ${index} lifts a step undo no longer reaches`);
+      this.replay(step, index);
+      timeline.push(step);
+    });
   }
 
   async stroke(points: Vec3[], pressure?: number[]): Promise<void> {
@@ -1234,7 +1317,7 @@ class Painting implements PaintingView {
       this.timeline?.prune();
     } else {
       this.passes.commit(this.timeline.applied, live.step.tool);
-      this.timeline.push(live.step);
+      this.record(live.step);
     }
     this.perf = perfOf(live.frames);
     this.emit();
@@ -1437,6 +1520,43 @@ function checkGroups(groups: PaintGroups, triangles: number): void {
     throw new RangeError(`A mini has 1 to ${MAX_GROUPS} groups, not ${count}`);
   for (const group of groups.of)
     if (group >= count) throw new RangeError(`The groups name a group ${group} they do not have`);
+}
+
+/**
+ * Refuses steps that cannot be this mesh's (#165), before anything is opened: a fill of a
+ * triangle it does not have, of a ready region it has none of, a group past the last there may
+ * be, a lift of a step that is not before it, and engine runs that do not cover the steps or name
+ * a newer engine. The shape of each step is `readPaintFile`'s to check.
+ */
+function checkSteps(
+  steps: readonly PaintStep[],
+  engines: readonly EngineRun[] | null,
+  triangles: number,
+  regions: PaintRegions | null | undefined,
+): void {
+  if (engines) {
+    if (engines.reduce((sum, run) => sum + run.steps, 0) !== steps.length)
+      throw new RangeError('The engine runs do not cover the steps');
+    if (engines.some((run) => run.engine > PAINT_ENGINE_VERSION))
+      throw new RangeError('Steps painted on a newer engine');
+  }
+  steps.forEach((step, index) => {
+    const wrong = (what: string): never => {
+      throw new RangeError(`Step ${index} is not this mini’s: ${what}`);
+    };
+    if (step.kind === 'mask') return;
+    if (step.into !== undefined && step.into >= MAX_GROUPS) wrong('a group past the last');
+    for (const group of step.groups?.hidden ?? []) if (group >= MAX_GROUPS) wrong('a group');
+    for (const { group } of step.groups?.apart ?? []) if (group >= MAX_GROUPS) wrong('a group');
+    if (step.kind === 'stroke') {
+      if (step.lifts !== undefined && step.lifts >= index) wrong('a lift of a later step');
+      return;
+    }
+    const { seed } = step;
+    if (seed.kind === 'picked' && seed.triangle >= triangles) wrong('a triangle it does not have');
+    if ((seed.kind === 'base' || seed.kind === 'figure') && !regions) wrong('no ready regions');
+    if (seed.kind === 'group' && seed.group >= MAX_GROUPS) wrong('a group');
+  });
 }
 
 /** sRGB bytes as `#rrggbb`. */

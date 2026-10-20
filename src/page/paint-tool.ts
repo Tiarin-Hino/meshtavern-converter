@@ -2,15 +2,18 @@ import type { Texture } from 'three';
 import {
   isGroupTool,
   PAINT_SIZE,
+  paintAtVertices,
   recentColours,
   TOOL_IDS,
   type Albedo,
   type BrushSettings,
+  type EngineRun,
   type IndexedMesh,
   type Look,
   type PaintGroups,
   type PaintMask,
   type PaintRegions,
+  type PaintStep,
   type ToolId,
 } from '../lib';
 import {
@@ -36,6 +39,12 @@ import {
  * product page's (it is `data-dev`, removed without ?dev). It uses the entry as any consumer would.
  */
 
+/** Steps to replay at open (#165): a paint file's, with the engine each was painted on. */
+export interface PaintReplay {
+  steps: PaintStep[];
+  engines?: EngineRun[] | null;
+}
+
 /** What the page has of the converted mini for painting. */
 export interface MiniForPainting {
   mesh: IndexedMesh;
@@ -52,13 +61,21 @@ export interface MiniForPainting {
 export interface PaintHooks {
   /**
    * Opens the view on the converted mini, with a paint and a mask (#138) to continue from, or bare,
-   * and its automatic groups unless others are given (#139).
+   * and its automatic groups unless others are given (#139), and steps to replay, a paint file's
+   * (#165).
    */
   open: (
     paint?: Albedo | null,
     mask?: PaintMask | null,
     groups?: PaintGroups | null,
+    replay?: PaintReplay | null,
   ) => Promise<void>;
+  /**
+   * The paint's RGBA at points on the surface (#165), through the closest point on the table level
+   * as paintAtVertices samples it: the regression net compares a replayed painting there, in the
+   * mini's own space, whatever the unwrap. Four bytes a point; zeros where no surface is near.
+   */
+  sample: (points: [number, number, number][]) => Promise<number[]>;
   close: () => void;
   /** The view while it is open; its methods are what the tests call. */
   view: () => PaintingView;
@@ -351,6 +368,7 @@ export function createPaintTool(
     paint: Albedo | null = null,
     mask: PaintMask | null = null,
     groups: PaintGroups | null = null,
+    replay: PaintReplay | null = null,
   ): Promise<void> => {
     const found = mini();
     if (!found) throw new Error('No baked mini to paint');
@@ -366,6 +384,8 @@ export function createPaintTool(
       mask,
       regions: found.regions,
       groups: groups ?? found.groups,
+      steps: replay?.steps ?? null,
+      engines: replay?.engines ?? null,
     });
   };
 
@@ -495,6 +515,13 @@ export function createPaintTool(
     view: current,
     table: () => (view?.state.open ? (opened?.mesh ?? null) : null),
     regions: () => (view?.state.open ? (opened?.regions ?? null) : null),
+    sample: async (points) => {
+      const painting = current();
+      const albedo = await painting.paint();
+      const positions = new Float32Array(points.flat());
+      const mesh: IndexedMesh = { positions, indices: new Uint32Array(0) };
+      return Array.from(paintAtVertices(mesh, opened!.mesh, albedo));
+    },
   };
 }
 
