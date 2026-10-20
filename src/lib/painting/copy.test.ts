@@ -74,6 +74,13 @@ describe('PAINT_COPY for the panel', () => {
     expect(PAINT_COPY.mask.label).toBe('Mask');
   });
 
+  it('keeps no word the panel does not show (the review of #166)', () => {
+    expect(PAINT_COPY.groups).not.toHaveProperty('show');
+    expect(PAINT_COPY.groups).not.toHaveProperty('into');
+    expect(PAINT_COPY.groups).not.toHaveProperty('apart');
+    expect(Object.keys(PAINT_COPY.recent)).toEqual(['swatch']);
+  });
+
   it('is a string, or an object of non-empty strings one level deep, everywhere', () => {
     for (const value of Object.values(PAINT_COPY)) {
       if (typeof value === 'string') expect(value.length).toBeGreaterThan(0);

@@ -57,7 +57,7 @@ export const PAINT_COPY = {
     direction: 'From',
   },
   regions: { base: 'The base', figure: 'The figure' },
-  /** The pipette (#135): its button, the two modes, and what it does. */
+  /** The pipette (#135): its button, the two modes, what it does (the panel's tooltip) and a tap that found nothing. */
   pick: {
     button: 'Pick a colour',
     shown: 'As shown',
@@ -86,8 +86,10 @@ export const PAINT_COPY = {
     figure: 'Mask the figure',
   },
   /**
-   * The groups (#139): the panel's row, the names `describeGroup` builds from, and what hiding is.
-   * `part`, `shell` and `hand` are followed by a number.
+   * The groups (#139): the panel's section, the names `describeGroup` builds from, and what hiding
+   * is. `part`, `shell` and `hand` are followed by a number. (#166 retired `show`, `into` and
+   * `apart`: the panel's rows have one Hide toggle, the pressed row as the target, and an Apart
+   * toggle named by `pullApart`.)
    */
   groups: {
     label: 'Groups',
@@ -98,23 +100,20 @@ export const PAINT_COPY = {
     hand: 'Group',
     of: 'of',
     hide: 'Hide',
-    show: 'Show',
     showAll: 'Show all',
     tint: 'Show groups',
     newGroup: 'New group',
-    into: 'Add to',
     fill: 'Fill the group',
     mask: 'Mask the group',
     unmask: 'Unmask the group',
     pullApart: 'Pull apart',
     putTogether: 'Put together',
-    apart: 'Apart',
     hint: 'A hidden group is not drawn and takes no paint, so you can paint what lies behind it. Hiding is not a step: Show brings it back, not Undo.',
     apartHint:
       'A group pulled apart is drawn and painted beside the body, so you can reach every side of it; a stroke on it paints it alone. Pulling apart is not a step either: Put together brings the groups back, not Undo.',
   },
-  /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
-  recent: { label: 'Colours used', swatch: 'Paint with' },
+  /** The colours used (#136): each swatch's name before its colour (the swatches' group is `panel.colours`, #166). */
+  recent: { swatch: 'Paint with' },
   undo: 'Undo',
   redo: 'Redo',
   navigate: 'Turn the mini',

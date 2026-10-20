@@ -27,6 +27,7 @@ Decision 9 of the application's spec 10 (item C6): the panel belongs on this sid
 
 ## Problems and how we solved them
 
+- **Problem.** The panel kept a flag to tell its own cancelled pick from a tap off the mini, and still could not tell a consumer's `cancelPick()` from a miss. **Cause:** the view resolved both with null, though it knew which had happened. **Fix** (the automatic review's note on the build): a pick ended without a tap (cancelled, closed, replaced) resolves with undefined and a tap that hit nothing with null; the flag went. The same review found four words of `PAINT_COPY` that nothing showed once the `?dev` tool's own controls went (`groups.show`, `groups.into`, `groups.apart`, `recent.label`); they were dropped, and the pipette's `pick.hint` became its tooltip.
 - **Problem.** On the phone frame, Show mask's switch was a squashed circle over its own label. **Cause:** the page's phone rule `#panel input[type='checkbox']:not(.mt-questions *)` sizes every checkbox in the panel to 20 px, the switch's input included, and an id selector beats the component's class. **Fix:** the rule leaves `.mt-painting-panel *` alone too; the panel sizes its own checkboxes on a phone.
 - **Problem.** Hiding a group with Space lost the keyboard focus. **Cause:** the state change rebuilds the groups' rows, and the focused button was replaced. **Fix:** the rebuild remembers which control had the focus (`data-target`, `data-shown` or `data-apart` and its group) and focuses its successor; the keyboard test asserts it.
 - **Problem.** A pressed swatch that got the focus showed the accent outline of "pressed", not the focus ring, which the keyboard sweep checks on every control. **Fix:** `.swatch:focus-visible` takes the focus ring after the pressed rule.
@@ -51,4 +52,3 @@ Decision 9 of the application's spec 10 (item C6): the panel belongs on this sid
 - The page's Paint beside Adjust, the paint file's Save and Open, the device palette: #167, which mounts this panel (`painting-panel.md` §11.1).
 - Keyboard shortcuts for Undo and Redo (Ctrl+Z, Ctrl+Shift+Z): once both consumers say where the focus lives while painting.
 - The pipette's mode as a product control: `'shown'` always on the page; `'painted'` stays in the `?dev` team section.
-- A consumer that calls `view.cancelPick()` itself while the panel's pick waits makes the panel say "Nothing to pick there"; the panel cannot tell that null from a tap off the mini. Its own Pick button, closing and a second pick say nothing.

@@ -1692,7 +1692,7 @@ test('carries the look it draws with in its state, the opened one and then setLo
   await page.evaluate(() => window.__mt.painting.view().setLook(window.__mt.state.look));
 });
 
-test('takes the next tap’s colour with pickColour and paints nothing; cancelPick gives null (#166)', async ({
+test('takes the next tap’s colour with pickColour and paints nothing; a pick ended without a tap gives undefined (#166)', async ({
   figurePage: page,
 }) => {
   await paintTheChest(page);
@@ -1704,13 +1704,14 @@ test('takes the next tap’s colour with pickColour and paints nothing; cancelPi
   await page.evaluate(() => {
     const view = window.__mt.painting.view();
     view.setTool('wash');
-    (window as unknown as { picked: Promise<string | null> }).picked = view.pickColour();
+    (window as unknown as { picked: Promise<string | null | undefined> }).picked =
+      view.pickColour();
   });
   expect(await page.evaluate(() => window.__mt.painting.view().state.picking)).toBe(true);
   await expect(host).toHaveClass(/mt-painting-picking/);
   await page.mouse.click(box.x + chest[0], box.y + chest[1]);
   const picked = await page.evaluate(
-    () => (window as unknown as { picked: Promise<string | null> }).picked,
+    () => (window as unknown as { picked: Promise<string | null | undefined> }).picked,
   );
   expect(picked).toBe(shown);
   const after = await page.evaluate(() => window.__mt.painting.view().state);
@@ -1721,25 +1722,28 @@ test('takes the next tap’s colour with pickColour and paints nothing; cancelPi
 
   // As painted, the paint's own bytes; off the mini, null.
   await page.evaluate(() => {
-    (window as unknown as { picked: Promise<string | null> }).picked = window.__mt.painting
-      .view()
-      .pickColour('painted');
+    (window as unknown as { picked: Promise<string | null | undefined> }).picked =
+      window.__mt.painting.view().pickColour('painted');
   });
   await page.mouse.click(box.x + chest[0], box.y + chest[1]);
   expect(
-    await page.evaluate(() => (window as unknown as { picked: Promise<string | null> }).picked),
+    await page.evaluate(
+      () => (window as unknown as { picked: Promise<string | null | undefined> }).picked,
+    ),
   ).toBe('#b03030');
   await page.evaluate(() => {
-    (window as unknown as { picked: Promise<string | null> }).picked = window.__mt.painting
-      .view()
-      .pickColour();
+    (window as unknown as { picked: Promise<string | null | undefined> }).picked =
+      window.__mt.painting.view().pickColour();
   });
   await page.mouse.click(box.x + 2, box.y + 2);
   expect(
-    await page.evaluate(() => (window as unknown as { picked: Promise<string | null> }).picked),
+    await page.evaluate(
+      () => (window as unknown as { picked: Promise<string | null | undefined> }).picked,
+    ),
   ).toBeNull();
 
-  // Cancelled, a second pick, and closing: each resolves the waiting one with null.
+  // Cancelled, a second pick, and closing: each ends the waiting one without a tap, so undefined,
+  // which a panel tells from the null of a tap that hit nothing.
   const ended = await page.evaluate(async () => {
     const view = window.__mt.painting.view();
     const cancelled = view.pickColour();
@@ -1749,9 +1753,10 @@ test('takes the next tap’s colour with pickColour and paints nothing; cancelPi
     const results = [await cancelled, await replaced];
     window.__mt.painting.close();
     results.push(await closed);
-    return { results, picking: view.state.picking };
+    // As strings: undefined does not travel out of evaluate as itself.
+    return { results: results.map(String), picking: view.state.picking };
   });
-  expect(ended.results).toEqual([null, null, null]);
+  expect(ended.results).toEqual(['undefined', 'undefined', 'undefined']);
   expect(ended.picking).toBe(false);
 });
 

@@ -291,12 +291,13 @@ export interface PaintingView {
   colourAt(x: number, y: number, mode?: PickMode): Promise<string | null>;
   /**
    * The pipette on a tap (#166): waits for the next primary pointer-down on the canvas (the left
-   * button, a pen's tip, one finger) and resolves with `colourAt` there, without a stroke; null off
-   * the mini (or bare, `painted`). Not a tool: `state.tool` stays, and no step is made. While it
-   * waits `state.picking` is true and the host carries `mt-painting-picking`. `cancelPick`,
-   * `close`, `dispose` and a second `pickColour` resolve a waiting pick with null.
+   * button, a pen's tip, one finger) and resolves with `colourAt` there, without a stroke: null for
+   * a tap off the mini (or on bare paint, `painted`). Not a tool: `state.tool` stays, and no step
+   * is made. While it waits `state.picking` is true and the host carries `mt-painting-picking`.
+   * `cancelPick`, `close`, `dispose` and a second `pickColour` end a waiting pick without a tap:
+   * it resolves with undefined, so a panel can tell a cancel from a miss.
    */
-  pickColour(mode?: PickMode): Promise<string | null>;
+  pickColour(mode?: PickMode): Promise<string | null | undefined>;
   cancelPick(): void;
   /**
    * The texel under a canvas point, or null off the mini: what a pixel test asserts on. `point` is
@@ -391,7 +392,8 @@ class Painting implements PaintingView {
   /** The look the open mini is drawn with (#166). */
   private look: Look = DEFAULT_LOOK;
   /** The pick waiting for its tap (#166), and its mode. */
-  private picking: { mode: PickMode; resolve: (hex: string | null) => void } | null = null;
+  private picking: { mode: PickMode; resolve: (hex: string | null | undefined) => void } | null =
+    null;
   private readonly cursor: HTMLDivElement;
   private opened: Opened | null = null;
   private live: LiveStroke | null = null;
@@ -525,7 +527,7 @@ class Painting implements PaintingView {
     };
   }
 
-  pickColour(mode: PickMode = PICK_MODE): Promise<string | null> {
+  pickColour(mode: PickMode = PICK_MODE): Promise<string | null | undefined> {
     this.endPick(false);
     return new Promise((resolve) => {
       this.picking = { mode, resolve };
@@ -539,13 +541,13 @@ class Painting implements PaintingView {
     this.endPick(true);
   }
 
-  /** Resolves a waiting pick with null, and says so when `emit`. */
+  /** Ends a waiting pick without a tap: it resolves with undefined, and says so when `emit`. */
   private endPick(emit: boolean): void {
     const picking = this.picking;
     if (!picking) return;
     this.picking = null;
     this.host.classList.remove('mt-painting-picking');
-    picking.resolve(null);
+    picking.resolve(undefined);
     if (emit) this.emit();
   }
 

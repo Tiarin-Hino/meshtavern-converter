@@ -169,7 +169,7 @@ ${BRUSH_SLIDERS.map(slider).join('')}
 </div>
 <div class="panel-section" data-section="colour">
 <h3 class="panel-section-title">${t(copy.panel.colour)}</h3>
-<div class="field"><div class="field-row"><input type="color" data-colour aria-label="${t(copy.panel.colour)}" /><button class="tool" type="button" data-action="pick" aria-label="${t(copy.pick.button)}" title="${t(copy.pick.button)}" aria-pressed="false">${ICONS.pipette}</button></div><div class="swatches" role="group" aria-label="${t(copy.panel.colours)}" data-swatches></div></div>
+<div class="field"><div class="field-row"><input type="color" data-colour aria-label="${t(copy.panel.colour)}" /><button class="tool" type="button" data-action="pick" aria-label="${t(copy.pick.button)}" title="${t(copy.pick.hint)}" aria-pressed="false">${ICONS.pipette}</button></div><div class="swatches" role="group" aria-label="${t(copy.panel.colours)}" data-swatches></div></div>
 </div>
 <div class="panel-section" data-section="regions">
 <h3 class="panel-section-title">${t(copy.panel.regions)}</h3>
@@ -213,8 +213,6 @@ class Panel implements PaintingPanel {
   /** The keys the swatches and the groups' rows were last built for: rebuilt only when one moves. */
   private swatchesFor = '';
   private groupsFor = '';
-  /** The panel's own Pick press ended the pick: its null says nothing. */
-  private cancelled = false;
   /** A notice for the status line (the pipette's, an action's error), shown until the view's next state. */
   private notice: { text: string; until: PaintingState } | null = null;
 
@@ -314,16 +312,13 @@ class Panel implements PaintingPanel {
     on<HTMLInputElement>('[data-colour]', 'input', (input) => view.setColour(input.value));
     act('pick', async () => {
       if (view.state.picking) {
-        this.cancelled = true;
         view.cancelPick();
         return;
       }
-      this.cancelled = false;
       const hex = await view.pickColour(this.pickMode);
       if (hex) view.setColour(hex);
-      // A pick ended by this button, by closing or by another pick says nothing.
-      else if (view.state.open && !view.state.picking && !this.cancelled)
-        this.say(this.copy.pick.nothing);
+      // Null is a tap that hit nothing; a pick ended without a tap (cancelled, closed, replaced) is undefined and says nothing.
+      else if (hex === null) this.say(this.copy.pick.nothing);
     });
     this.find('[data-swatches]').addEventListener(
       'click',
