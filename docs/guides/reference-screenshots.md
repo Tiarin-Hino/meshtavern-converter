@@ -5,7 +5,7 @@
 What they do not show:
 
 - **The 3D canvas.** `e2e/reference-screens.css` hides every `<canvas>`, and the scenes' animation frames are held while a picture is taken (`freezeFrames` in `e2e/states.ts`). CI draws WebGL in software, differently per machine. The mini's look is judged by eye and by the corpus's sheets.
-- **The converting step and its bar.** They move on while the picture is taken, so they are covered by a magenta box (`mask`). The card, its heading and Cancel are still compared.
+- **The converting step and its bar.** They move on while the picture is taken, so they are covered by a magenta box (`mask`). The card, its heading and Cancel are still compared. The box is as wide as the step's words, so the step line is held at "Reducing the detail…" while the pictures are taken (`holdStatus` in `e2e/states.ts`), whichever step the conversion is at.
 - Motion: the pictures are taken with reduced motion and with CSS animations stopped.
 
 ## One set per platform
