@@ -1636,6 +1636,125 @@ test('picks the paint as painted, the pixel as shown, and nothing where there is
   expect(picked.steps).toBe(1);
 });
 
+test('tells a subscriber every change after onChange, until it unsubscribes (#166)', async ({
+  figurePage: page,
+}) => {
+  const heard = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    // The page's onChange writes state.painting: a subscriber called after it sees its own state there.
+    const calls: { tool: string; afterOnChange: boolean }[] = [];
+    const order: string[] = [];
+    const first = view.subscribe((state) => {
+      calls.push({ tool: state.tool, afterOnChange: window.__mt.state.painting === state });
+      order.push('first');
+    });
+    const second = view.subscribe(() => order.push('second'));
+    view.setTool('wash');
+    view.setColour('#2050a0');
+    first();
+    view.setTool('flat');
+    second();
+    view.setTool('ink');
+    view.setTool('flat');
+    return { calls, order };
+  });
+  expect(heard.calls).toEqual([
+    { tool: 'wash', afterOnChange: true },
+    { tool: 'wash', afterOnChange: true },
+  ]);
+  expect(heard.order).toEqual(['first', 'second', 'first', 'second', 'second']);
+});
+
+test('carries the look it draws with in its state, the opened one and then setLook’s (#166)', async ({
+  figurePage: page,
+}) => {
+  const looks = await page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    const opened = view.state.look;
+    const bone = { enabled: true, base: '#d8cdb0', occlusion: 0.8, wash: 0.75, edges: 0.3 };
+    view.setLook(bone);
+    const set = view.state.look;
+    return { opened, set, page: window.__mt.state.look };
+  });
+  // Opened with the page's look.
+  expect(looks.opened).toEqual(looks.page);
+  expect(looks.set).toEqual({
+    enabled: true,
+    base: '#d8cdb0',
+    occlusion: 0.8,
+    wash: 0.75,
+    edges: 0.3,
+  });
+  await page.evaluate(() => window.__mt.painting.view().setLook(window.__mt.state.look));
+});
+
+test('takes the next tap’s colour with pickColour and paints nothing; cancelPick gives null (#166)', async ({
+  figurePage: page,
+}) => {
+  await paintTheChest(page);
+  const chest = await page.evaluate(() => window.__mt.painting.view().screenOf([0, 14, 6]));
+  const shown = await page.evaluate((at) => window.__mt.painting.view().colourAt(...at), chest);
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  const host = page.locator('#paint-view');
+
+  await page.evaluate(() => {
+    const view = window.__mt.painting.view();
+    view.setTool('wash');
+    (window as unknown as { picked: Promise<string | null> }).picked = view.pickColour();
+  });
+  expect(await page.evaluate(() => window.__mt.painting.view().state.picking)).toBe(true);
+  await expect(host).toHaveClass(/mt-painting-picking/);
+  await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+  const picked = await page.evaluate(
+    () => (window as unknown as { picked: Promise<string | null> }).picked,
+  );
+  expect(picked).toBe(shown);
+  const after = await page.evaluate(() => window.__mt.painting.view().state);
+  expect(after.picking).toBe(false);
+  expect(after.tool).toBe('wash');
+  expect(after.steps).toBe(1);
+  await expect(host).not.toHaveClass(/mt-painting-picking/);
+
+  // As painted, the paint's own bytes; off the mini, null.
+  await page.evaluate(() => {
+    (window as unknown as { picked: Promise<string | null> }).picked = window.__mt.painting
+      .view()
+      .pickColour('painted');
+  });
+  await page.mouse.click(box.x + chest[0], box.y + chest[1]);
+  expect(
+    await page.evaluate(() => (window as unknown as { picked: Promise<string | null> }).picked),
+  ).toBe('#b03030');
+  await page.evaluate(() => {
+    (window as unknown as { picked: Promise<string | null> }).picked = window.__mt.painting
+      .view()
+      .pickColour();
+  });
+  await page.mouse.click(box.x + 2, box.y + 2);
+  expect(
+    await page.evaluate(() => (window as unknown as { picked: Promise<string | null> }).picked),
+  ).toBeNull();
+
+  // Cancelled, a second pick, and closing: each resolves the waiting one with null.
+  const ended = await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const cancelled = view.pickColour();
+    view.cancelPick();
+    const replaced = view.pickColour();
+    const closed = view.pickColour();
+    const results = [await cancelled, await replaced];
+    window.__mt.painting.close();
+    results.push(await closed);
+    return { results, picking: view.state.picking };
+  });
+  expect(ended.results).toEqual([null, null, null]);
+  expect(ended.picking).toBe(false);
+});
+
 test('takes the colour under a tap after Pick in the Paint tool, without painting (#135)', async ({
   figurePage: page,
 }) => {

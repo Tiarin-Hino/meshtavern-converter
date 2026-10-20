@@ -189,6 +189,10 @@ export interface PaintingState {
   groups: GroupsState;
   /** Every group but 0 is drawn in its colour (#139). */
   groupTint: boolean;
+  /** The look the open mini is drawn with (#166): `MiniToPaint.look` at `open`, then `setLook`'s. */
+  look: Look;
+  /** A `pickColour` waits for its tap (#166). */
+  picking: boolean;
 }
 
 /** The groups as the view shows them (#139, design note `docs/design/paint-groups.md` §6.3). */
@@ -208,6 +212,11 @@ export interface GroupsState {
 
 export interface PaintingView {
   readonly state: PaintingState;
+  /**
+   * Hears every state the view gives (#166), after the options' `onChange`, in the order of
+   * subscribing: a panel beside the consumer's own listener. The function returned unsubscribes.
+   */
+  subscribe(listener: (state: PaintingState) => void): () => void;
   /** Opens one open after another; resolves without opening when `close`, `dispose` or a later `open` came first. */
   open(mini: MiniToPaint): Promise<void>;
   close(): void;
@@ -280,6 +289,15 @@ export interface PaintingView {
    * texel under the point, whatever its alpha, and null where the mini is bare there.
    */
   colourAt(x: number, y: number, mode?: PickMode): Promise<string | null>;
+  /**
+   * The pipette on a tap (#166): waits for the next primary pointer-down on the canvas (the left
+   * button, a pen's tip, one finger) and resolves with `colourAt` there, without a stroke; null off
+   * the mini (or bare, `painted`). Not a tool: `state.tool` stays, and no step is made. While it
+   * waits `state.picking` is true and the host carries `mt-painting-picking`. `cancelPick`,
+   * `close`, `dispose` and a second `pickColour` resolve a waiting pick with null.
+   */
+  pickColour(mode?: PickMode): Promise<string | null>;
+  cancelPick(): void;
   /**
    * The texel under a canvas point, or null off the mini: what a pixel test asserts on. `point` is
    * in the mini's own coordinates, whatever group is pulled apart (#180).
@@ -368,6 +386,12 @@ class Painting implements PaintingView {
   private readonly passes: PaintPasses;
   private readonly copy: PaintCopy;
   private readonly onChange: ((state: PaintingState) => void) | null;
+  /** The subscribers (#166), each a box of its own so the same function may subscribe twice. */
+  private readonly listeners: { listener: (state: PaintingState) => void }[] = [];
+  /** The look the open mini is drawn with (#166). */
+  private look: Look = DEFAULT_LOOK;
+  /** The pick waiting for its tap (#166), and its mode. */
+  private picking: { mode: PickMode; resolve: (hex: string | null) => void } | null = null;
   private readonly cursor: HTMLDivElement;
   private opened: Opened | null = null;
   private live: LiveStroke | null = null;
@@ -451,6 +475,8 @@ class Painting implements PaintingView {
       maskShown: this.maskShown,
       groups: this.groupsState(),
       groupTint: this.groupTint,
+      look: { ...this.look },
+      picking: this.picking !== null,
     };
   }
 
@@ -487,6 +513,40 @@ class Painting implements PaintingView {
   private emit(): void {
     this.current = this.snapshot();
     this.onChange?.(this.current);
+    for (const { listener } of [...this.listeners]) listener(this.current);
+  }
+
+  subscribe(listener: (state: PaintingState) => void): () => void {
+    const entry = { listener };
+    this.listeners.push(entry);
+    return () => {
+      const at = this.listeners.indexOf(entry);
+      if (at >= 0) this.listeners.splice(at, 1);
+    };
+  }
+
+  pickColour(mode: PickMode = PICK_MODE): Promise<string | null> {
+    this.endPick(false);
+    return new Promise((resolve) => {
+      this.picking = { mode, resolve };
+      this.host.classList.add('mt-painting-picking');
+      this.cursor.hidden = true;
+      this.emit();
+    });
+  }
+
+  cancelPick(): void {
+    this.endPick(true);
+  }
+
+  /** Resolves a waiting pick with null, and says so when `emit`. */
+  private endPick(emit: boolean): void {
+    const picking = this.picking;
+    if (!picking) return;
+    this.picking = null;
+    this.host.classList.remove('mt-painting-picking');
+    picking.resolve(null);
+    if (emit) this.emit();
   }
 
   open(mini: MiniToPaint): Promise<void> {
@@ -540,7 +600,8 @@ class Painting implements PaintingView {
     this.target = 'new';
     this.writeGroupUniform(null);
     const geometry = createGroupedGeometry(mesh, groups.of);
-    const uniforms = createLookUniforms(mini.look ?? DEFAULT_LOOK);
+    this.look = { ...(mini.look ?? DEFAULT_LOOK) };
+    const uniforms = createLookUniforms(this.look);
     const drop = (): void => {
       this.passes.close();
       geometry.dispose();
@@ -616,7 +677,10 @@ class Painting implements PaintingView {
 
   close(): void {
     this.generation++;
+    this.endPick(false);
     this.release();
+    // A pick ended without a mini to release still says so.
+    if (this.current.picking) this.emit();
   }
 
   /** Releases the mini that is open, if any. */
@@ -663,6 +727,7 @@ class Painting implements PaintingView {
   }
 
   setLook(look: Look): void {
+    this.look = { ...look };
     if (this.opened) updateLookUniforms(this.opened.uniforms, look);
     this.emit();
   }
@@ -1129,6 +1194,7 @@ class Painting implements PaintingView {
 
   dispose(): void {
     this.close();
+    this.listeners.length = 0;
     this.passes.dispose();
     this.scene.dispose();
     this.cursor.remove();
@@ -1418,6 +1484,17 @@ class Painting implements PaintingView {
     canvas.addEventListener(
       'pointerdown',
       (event) => {
+        // A pick takes this tap (#166): no stroke, no orbit, and the pointer is not counted.
+        if (this.picking && this.opened && event.button === 0 && this.pointers.size === 0) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          const { mode, resolve } = this.picking;
+          this.picking = null;
+          this.host.classList.remove('mt-painting-picking');
+          this.emit();
+          void this.colourAt(...at(event), mode).then(resolve, () => resolve(null));
+          return;
+        }
         this.pointers.add(event.pointerId);
         if (this.pointers.size > 1) {
           if (this.strokePointer !== null) this.cancelLive();
@@ -1460,7 +1537,10 @@ class Painting implements PaintingView {
 
   /** The cursor ring (§9): the brush's size at the surface under the pointer; not on touch, off the mini or with the fill tool. */
   private moveCursor(event: PointerEvent, [x, y]: [number, number]): void {
-    const hit = event.pointerType === 'touch' || isFillTool(this.tool) ? null : this.hitAt(x, y);
+    const hit =
+      event.pointerType === 'touch' || isFillTool(this.tool) || this.picking
+        ? null
+        : this.hitAt(x, y);
     this.cursor.hidden = hit === null;
     if (!hit) return;
     const size = Math.max(CURSOR_MIN_PX, this.brush.sizeMm * this.scene.pixelsPerMm(hit.point));
