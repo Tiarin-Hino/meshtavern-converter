@@ -99,7 +99,12 @@ export const PAINT_COPY = {
     fill: 'Fill the group',
     mask: 'Mask the group',
     unmask: 'Unmask the group',
+    pullApart: 'Pull apart',
+    putTogether: 'Put together',
+    apart: 'Apart',
     hint: 'A hidden group is not drawn and takes no paint, so you can paint what lies behind it. Hiding is not a step: Show brings it back, not Undo.',
+    apartHint:
+      'A group pulled apart is drawn and painted beside the body, so you can reach every side of it; a stroke on it paints it alone. Pulling apart is not a step either: Put together brings the groups back, not Undo.',
   },
   /** The colours used (#136): a row of swatches from `recentColours`, and each swatch's name before its colour. */
   recent: { label: 'Colours used', swatch: 'Paint with' },

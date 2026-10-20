@@ -2569,7 +2569,8 @@ test('lists the groups in the Paint tool, hides one from its box, and shows them
     (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     await window.__mt.painting.open();
   });
-  const boxes = page.locator('#paint-groups input[type="checkbox"]');
+  // The shown box of each group (the box beside it pulls the group apart, #180).
+  const boxes = page.locator('#paint-groups input[data-group]');
   const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
   await expect(boxes).toHaveCount(count);
   await expect(page.locator('#paint-groups label').first()).toContainText('The body');
@@ -2600,4 +2601,368 @@ test('lists the groups in the Paint tool, hides one from its box, and shows them
       return step.kind === 'fill' ? [step.tool, step.seed] : null;
     }),
   ).toEqual(['mask-fill', { kind: 'group', group: 0 }]);
+});
+
+// Pulling groups apart (#180, design note `docs/design/paint-groups.md` §9).
+
+/**
+ * Opens the view on the figure, pulls every group apart and turns the camera to the front: the
+ * right arm (the shell furthest along +x) lies beside the body with the gap between them. Its
+ * group, its offset, and the body's and the arm's boxes as drawn.
+ */
+async function openWithTheArmApart(page: Page): Promise<{
+  arm: number;
+  offset: [number, number, number];
+  body: { min: number[]; max: number[] };
+  armBox: { min: number[]; max: number[] };
+}> {
+  return page.evaluate(async () => {
+    const painting = window.__mt.painting;
+    await painting.open();
+    const view = painting.view();
+    const table = painting.table()!;
+    const { of, made } = view.groups();
+    const box = (group: number, by: number[]): { min: number[]; max: number[] } => {
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] !== group) continue;
+        for (let corner = 0; corner < 3; corner++) {
+          const v = table.indices[t * 3 + corner]! * 3;
+          for (let k = 0; k < 3; k++) {
+            const value = table.positions[v + k]! + by[k]!;
+            min[k] = Math.min(min[k]!, value);
+            max[k] = Math.max(max[k]!, value);
+          }
+        }
+      }
+      return { min, max };
+    };
+    let arm = -1;
+    let furthest = -Infinity;
+    for (let group = 1; group < made.length; group++) {
+      const { min, max } = box(group, [0, 0, 0]);
+      const middle = (min[0]! + max[0]!) / 2;
+      if (Number.isFinite(middle) && middle > furthest) [arm, furthest] = [group, middle];
+    }
+    const before = { steps: view.state.steps, undone: view.state.undone };
+    view.pullAllApart();
+    const entry = view.state.groups.apart.find((entry) => entry.group === arm);
+    if (!entry) throw new Error(`Group ${arm} was not pulled apart`);
+    if (view.state.steps !== before.steps || view.state.undone !== before.undone)
+      throw new Error('Pulling apart made a step');
+    view.setCamera(0, 5, 1);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return {
+      arm,
+      offset: entry.offset,
+      body: box(0, [0, 0, 0]),
+      armBox: box(arm, entry.offset),
+    };
+  });
+}
+
+/** The texel at the middle of every triangle, and each triangle's group: where a group's paint is read (#139). */
+async function groupTexelsOf(page: Page): Promise<{ of: number[]; texels: number[] }> {
+  return page.evaluate(() => {
+    const painting = window.__mt.painting;
+    const table = painting.table()!;
+    const { of } = painting.view().groups();
+    const texels: number[] = [];
+    for (let t = 0; t < of.length; t++) {
+      let u = 0;
+      let v = 0;
+      for (let corner = 0; corner < 3; corner++) {
+        const vertex = table.indices[t * 3 + corner]!;
+        u += table.uvs![vertex * 2]! / 3;
+        v += table.uvs![vertex * 2 + 1]! / 3;
+      }
+      texels.push(Math.floor(v * 1024) * 1024 + Math.floor(u * 1024));
+    }
+    return { of: Array.from(of), texels };
+  });
+}
+
+test('paints only the group a dab is on when groups are pulled apart, and replays to the same bytes with them together (#180)', async ({
+  figurePage: page,
+}) => {
+  const { arm, offset, body, armBox } = await openWithTheArmApart(page);
+  // The arm lies to the body's +x: pulled apart that way, at least the gap away.
+  expect(offset[0]).toBeGreaterThan(5);
+  expect(armBox.min[0]! - body.max[0]!).toBeGreaterThanOrEqual(9.9);
+  const { of, texels } = await groupTexelsOf(page);
+  const outcome = await page.evaluate(
+    async ({ offset, body, armBox, of, texels }) => {
+      const view = window.__mt.painting.view();
+      const hash = async (): Promise<number> => {
+        const { data } = await view.paint();
+        let h = 0;
+        for (let k = 0; k < data.length; k++) h = (Math.imul(h, 31) + data[k]!) | 0;
+        return h;
+      };
+      const paintedByGroup = async (): Promise<Record<number, number>> => {
+        const { data } = await view.paint();
+        const counts: Record<number, number> = {};
+        texels.forEach((texel, t) => {
+          if (data[texel * 4 + 3] !== 0) counts[of[t]!] = (counts[of[t]!] ?? 0) + 1;
+        });
+        return counts;
+      };
+      const opened = await hash();
+      // The arm's axis as drawn, at the height of its middle, and the pointer's path down its
+      // front, from 4 mm above the middle to 4 mm below.
+      const middle = [6 + offset[0], 19 + offset[1], -1 + offset[2]] as [number, number, number];
+      const p = view.screenOf(middle);
+      const under = view.texelAt(...p)!;
+      const path: [number, number][] = [];
+      for (let dy = 4; dy >= -4; dy -= 1)
+        path.push(view.screenOf([middle[0], middle[1] + dy, middle[2]]));
+      view.setTool('flat');
+      view.setColour('#ffff00');
+      view.setBrush({ sizeMm: 8, hardness: 0.8, opacity: 1 });
+      await view.strokeAt(path);
+      const apart = await paintedByGroup();
+      const withApart = await hash();
+      const step = view.history()[0]!;
+      const dabs = step.kind === 'stroke' ? step.dabs : [];
+      // A path from the body across the gap onto the arm: a second step, its dabs never in the gap.
+      const across: [number, number][] = [];
+      const start = view.screenOf([0, 19, 4]);
+      for (let k = 0; k <= 12; k++)
+        across.push([
+          start[0] + ((p[0] - start[0]) * k) / 12,
+          start[1] + ((p[1] - start[1]) * k) / 12,
+        ]);
+      await view.strokeAt(across);
+      const crossing = view.history()[1]!;
+      const crossingDabs = crossing.kind === 'stroke' ? crossing.dabs : [];
+      let inGap = 0;
+      for (let k = 0; k < crossingDabs.length; k += 4) {
+        const x = crossingDabs[k]!;
+        if (x > body.max[0]! + 1 && x < armBox.min[0]! - 1) inGap++;
+      }
+      const both = await paintedByGroup();
+      await view.undo();
+      const stateApart = view.state.groups.apart;
+      // Together again: undo and redo replay the stroke with the offsets it recorded.
+      view.putTogether();
+      const together = view.state.groups.apart;
+      await view.undo();
+      const undone = await hash();
+      await view.redo();
+      const redone = await hash();
+      // The same dabs with the groups together, in the mini's own coordinates: the body's shoulder
+      // takes paint too, within the brush of the arm.
+      const own: [number, number, number][] = [];
+      for (let k = 0; k < dabs.length; k += 4)
+        own.push([dabs[k]! - offset[0], dabs[k + 1]! - offset[1], dabs[k + 2]! - offset[2]]);
+      await view.stroke(own);
+      const togetherPainted = await paintedByGroup();
+      const records = view.history().map((step) => (step.kind === 'mask' ? null : step.groups));
+      return {
+        underGroup: of[under.triangle],
+        underPoint: under.point,
+        dabs: dabs.length / 4,
+        apart,
+        inGap,
+        crossingDabs: crossingDabs.length / 4,
+        both,
+        stateApart,
+        together,
+        undone: undone === opened,
+        redone: redone === withApart,
+        togetherPainted,
+        records,
+      };
+    },
+    { offset, body, armBox, of, texels },
+  );
+  // The tap lands on the arm as drawn, and gives the point in the mini's own coordinates.
+  expect(outcome.underGroup).toBe(arm);
+  expect(outcome.underPoint[0]).toBeLessThan(10);
+  expect(outcome.dabs).toBeGreaterThanOrEqual(4);
+  // The stroke down the arm paints the arm alone: the body's shoulder, within the brush in the
+  // mini's own coordinates, lies the gap away as drawn.
+  expect(outcome.apart[arm]).toBeGreaterThan(50);
+  expect(outcome.apart[0] ?? 0).toBe(0);
+  expect(Object.keys(outcome.apart)).toEqual([String(arm)]);
+  // Across the gap the brush lifts: both take paint, no dab lies between them.
+  expect(outcome.crossingDabs).toBeGreaterThan(4);
+  expect(outcome.inGap).toBe(0);
+  expect(outcome.both[0]).toBeGreaterThan(0);
+  expect(outcome.both[arm]).toBeGreaterThan(outcome.apart[arm]!);
+  // Undo leaves the groups apart; Put together is not a step.
+  expect(outcome.stateApart.map((entry) => entry.group)).toContain(arm);
+  expect(outcome.together).toEqual([]);
+  expect(outcome.undone).toBe(true);
+  expect(outcome.redone).toBe(true);
+  expect(outcome.togetherPainted[0]).toBeGreaterThan(0);
+  expect(outcome.records[0]).toEqual({
+    hidden: [],
+    apart: expect.arrayContaining([{ group: arm, offset }]),
+  });
+  expect(outcome.records[1]).toBeUndefined();
+});
+
+test('makes an arm-without-hand group with the arm pulled apart, a band of mask at the wrist and one tap of the group fill (#180)', async ({
+  figurePage: page,
+}) => {
+  const { arm, offset } = await openWithTheArmApart(page);
+  // The wrist: a 3 mm band of mask round the arm at y = 17 (the arm spans 13 to 25), laid from
+  // eight sides on the arm as drawn, through the middles of the triangles the band crosses.
+  const original = await page.evaluate(
+    async ({ arm, offset }) => {
+      const painting = window.__mt.painting;
+      const view = painting.view();
+      const table = painting.table()!;
+      const { of } = view.groups();
+      const ring: [number, number, number][] = [];
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] !== arm) continue;
+        const middle = [0, 0, 0];
+        for (let corner = 0; corner < 3; corner++) {
+          const v = table.indices[t * 3 + corner]! * 3;
+          for (let k = 0; k < 3; k++) middle[k] = middle[k]! + table.positions[v + k]! / 3;
+        }
+        if (Math.abs(middle[1]! - 17) < 0.8)
+          ring.push([middle[0]! + offset[0], middle[1]! + offset[1], middle[2]! + offset[2]]);
+      }
+      view.setTool('mask');
+      view.setBrush({ sizeMm: 3, hardness: 0.9, opacity: 1 });
+      for (let side = 0; side < 8; side++) {
+        view.setCamera(side * 45, 5, 1.6);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const inSight = ring.filter((point) => {
+          const hit = view.texelAt(...view.screenOf(point));
+          if (hit === null || of[hit.triangle] !== arm) return false;
+          const own = [point[0] - offset[0], point[1] - offset[1], point[2] - offset[2]];
+          return Math.hypot(...own.map((c, k) => c - hit.point[k]!)) < 0.3;
+        });
+        await view.stroke(inSight);
+      }
+      view.setCamera(0, 5, 1);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      view.setTool('group-fill');
+      view.setGroupTarget('new');
+      return { of: Array.from(of), ring: ring.length, steps: view.state.steps };
+    },
+    { arm, offset },
+  );
+  expect(original.ring).toBeGreaterThan(8);
+  expect(original.steps).toBeGreaterThan(0);
+  // One tap on the arm above the band, as drawn.
+  const upper = await page.evaluate(
+    ({ offset }) =>
+      window.__mt.painting.view().screenOf([6 + offset[0], 22 + offset[1], 1 + offset[2]]),
+    { offset },
+  );
+  const box = (await page.locator('#paint-view canvas').boundingBox())!;
+  await page.mouse.click(box.x + upper[0], box.y + upper[1]);
+  await page.waitForFunction(
+    (before) => window.__mt.painting.view().state.steps === before + 1,
+    original.steps,
+  );
+  const filled = await page.evaluate(
+    ({ original, arm }) => {
+      const painting = window.__mt.painting;
+      const view = painting.view();
+      const table = painting.table()!;
+      const { of, made } = view.groups();
+      const group = made.length - 1;
+      const y = (t: number): number =>
+        [0, 1, 2].reduce(
+          (sum, corner) => sum + table.positions[table.indices[t * 3 + corner]! * 3 + 1]! / 3,
+          0,
+        );
+      let inGroup = 0;
+      let fromElsewhere = 0;
+      let below = 0;
+      let armAbove = 0;
+      let armAboveLeft = 0;
+      let handLeft = 0;
+      let handMoved = 0;
+      for (let t = 0; t < of.length; t++) {
+        if (of[t] === group) {
+          inGroup++;
+          if (original[t] !== arm) fromElsewhere++;
+          if (y(t) < 15) below++;
+        }
+        if (original[t] !== arm) continue;
+        // Above the band: the 3 mm brush laid mask up to 18.5 mm.
+        if (y(t) > 19.5) {
+          armAbove++;
+          if (of[t] !== group) armAboveLeft++;
+        }
+        // The hand, below the band.
+        if (y(t) < 15) {
+          if (of[t] === arm) handLeft++;
+          else handMoved++;
+        }
+      }
+      const step = view.history().at(-1)!;
+      return {
+        made: made.at(-1),
+        record: step.kind === 'fill' ? step.groups : null,
+        inGroup,
+        fromElsewhere,
+        below,
+        armAbove,
+        armAboveLeft,
+        handLeft,
+        handMoved,
+        apart: view.state.groups.apart.map((entry) => entry.group),
+      };
+    },
+    { original: original.of, arm },
+  );
+  expect(filled.made).toEqual({ by: 'hand' });
+  // The arm above the wrist, and only that: nothing of the body, nothing below the band.
+  expect(filled.inGroup).toBeGreaterThan(100);
+  expect(filled.fromElsewhere).toBe(0);
+  expect(filled.below).toBe(0);
+  expect(filled.armAbove).toBeGreaterThan(100);
+  expect(filled.armAboveLeft).toBe(0);
+  // The hand stays in the arm's group, which keeps its offset.
+  expect(filled.handLeft).toBeGreaterThan(10);
+  expect(filled.handMoved).toBe(0);
+  expect(filled.apart).toContain(arm);
+  expect(filled.record?.apart.map((entry) => entry.group)).toContain(arm);
+});
+
+test('pulls the groups apart and puts them together from the Paint tool, one group from its box (#180)', async ({
+  figurePage: page,
+}) => {
+  await page.evaluate(async () => {
+    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
+    await window.__mt.painting.open();
+  });
+  const apart = (): Promise<number[]> =>
+    page.evaluate(() => window.__mt.painting.view().state.groups.apart.map((entry) => entry.group));
+  const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
+  // A box a group but the body, unchecked: nothing is apart.
+  const boxes = page.locator('#paint-groups input[data-apart]');
+  await expect(boxes).toHaveCount(count - 1);
+  await expect(page.locator('#paint-groups-together')).toBeDisabled();
+  expect(await apart()).toEqual([]);
+
+  await page.locator('#paint-groups-apart').click();
+  // The base, the head and both arms all lie within the gap of the body.
+  expect((await apart()).length).toBeGreaterThanOrEqual(4);
+  await expect(boxes.first()).toBeChecked();
+  await expect(page.locator('#paint-groups-together')).toBeEnabled();
+  await page.locator('#paint-groups-together').click();
+  expect(await apart()).toEqual([]);
+  await expect(boxes.first()).not.toBeChecked();
+
+  await boxes.nth(1).check();
+  expect(await apart()).toEqual([2]);
+  await boxes.nth(1).uncheck();
+  expect(await apart()).toEqual([]);
+  // Not a step, and hiding is untouched.
+  expect(
+    await page.evaluate(() => {
+      const { steps, undone, groups } = window.__mt.painting.view().state;
+      return { steps, undone, hidden: groups.hidden };
+    }),
+  ).toEqual({ steps: 0, undone: 0, hidden: [] });
 });

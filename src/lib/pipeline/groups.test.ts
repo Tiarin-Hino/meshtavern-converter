@@ -9,10 +9,12 @@ import {
   generateWingedFigure,
   RECESS_BASE,
 } from '../../regression/shapes';
+import { APART_MIN_GAP_MM, APART_SHARE, pulledApart } from './assemble';
+import type { Vec3 } from './base';
 import type { GroupOrigin, PaintGroups } from './brush';
 import { TriangleBvh, type SurfaceHit } from './bvh';
 import { triangleAdjacency } from './fill';
-import { groupsOf, SHELL_MIN_TRIANGLES } from './groups';
+import { groupsApart, groupsOf, SHELL_MIN_TRIANGLES } from './groups';
 import { weldVertices, type IndexedMesh } from './mesh';
 import { regionsOf } from './regions';
 import { runPipeline, type ConversionResult } from './run';
@@ -276,6 +278,166 @@ describe('groupsOf: the shells of one file', { timeout: 60_000 }, () => {
   it('refuses regions that are not the mesh’s', () => {
     const mesh = meshOf(generateBoulder());
     expect(() => groupsOf(mesh, { regions: { base: new Uint8Array(3), method: 'plain' } })).toThrow(
+      RangeError,
+    );
+  });
+});
+
+// Pulling groups apart (#180, design note `docs/design/paint-groups.md` §9): the apart rule of the
+// parts question over the groups' boxes.
+
+/** The box of a group's triangles, moved by `by`. */
+function boxOfGroup(
+  mesh: IndexedMesh,
+  of: Uint8Array,
+  group: number,
+  by: Vec3 = [0, 0, 0],
+): { min: Vec3; max: Vec3 } | null {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  let any = false;
+  for (let t = 0; t < of.length; t++) {
+    if (of[t] !== group) continue;
+    any = true;
+    for (let corner = 0; corner < 3; corner++) {
+      const v = mesh.indices[t * 3 + corner]! * 3;
+      for (let k = 0; k < 3; k++) {
+        const value = mesh.positions[v + k]! + by[k]!;
+        min[k] = Math.min(min[k]!, value);
+        max[k] = Math.max(max[k]!, value);
+      }
+    }
+  }
+  return any ? { min, max } : null;
+}
+
+const clearOf = (a: { min: Vec3; max: Vec3 }, b: { min: Vec3; max: Vec3 }, gap: number): boolean =>
+  [0, 1, 2].some((k) => a.min[k]! >= b.max[k]! + gap || b.min[k]! >= a.max[k]! + gap);
+
+const middleOf = ({ min, max }: { min: Vec3; max: Vec3 }): Vec3 => [
+  (min[0] + max[0]) / 2,
+  (min[1] + max[1]) / 2,
+  (min[2] + max[2]) / 2,
+];
+
+/** The gap the apart rule keeps around the body's box. */
+function gapAround(body: { min: Vec3; max: Vec3 }): number {
+  const side = Math.max(...[0, 1, 2].map((k) => body.max[k]! - body.min[k]!));
+  return Math.max(APART_MIN_GAP_MM, APART_SHARE * side);
+}
+
+describe('groupsApart', () => {
+  it('moves the groups as pulledApart moves the same shapes as files, bit for bit', () => {
+    const { body, wing, tip } = generateWingedFigure();
+    const meshes = [body, wing, tip].map(meshOf);
+    // The three files as one mesh, each file's triangles a group.
+    const positions = new Float32Array(meshes.reduce((n, m) => n + m.positions.length, 0));
+    const indices = new Uint32Array(meshes.reduce((n, m) => n + m.indices.length, 0));
+    const of = new Uint8Array(indices.length / 3);
+    let vertex = 0;
+    let index = 0;
+    meshes.forEach((mesh, file) => {
+      positions.set(mesh.positions, vertex * 3);
+      for (let k = 0; k < mesh.indices.length; k++) indices[index + k] = mesh.indices[k]! + vertex;
+      of.fill(file, index / 3, (index + mesh.indices.length) / 3);
+      vertex += mesh.positions.length / 3;
+      index += mesh.indices.length;
+    });
+    const merged: IndexedMesh = { positions, indices };
+    const groups: PaintGroups = {
+      of,
+      made: [{ by: 'body' }, { by: 'part', file: 1 }, { by: 'part', file: 2 }],
+    };
+    const apart = groupsApart(merged, groups);
+    const pulled = pulledApart(meshes, [0, 1, 2]);
+    // The wing and the tip overlap the body's box within the gap: both move, the same way.
+    expect(apart.map((entry) => entry.group)).toEqual([1, 2]);
+    expect(apart.map((entry) => entry.offset)).toEqual(pulled.slice(1).map((p) => p.translation));
+    expect(pulled[0]!.translation).toEqual([0, 0, 0]);
+  });
+
+  it('pulls every shell of the figure clear of the body and of one another, along the line from the body', () => {
+    const mesh = meshOf(generateFigure(true));
+    const groups = groupsOf(mesh);
+    // The body, its base, the head and the two arms: separate shells, each buried in the body.
+    expect(groups.made.length).toBeGreaterThanOrEqual(5);
+    const apart = groupsApart(mesh, groups);
+    expect(apart.map((entry) => entry.group)).toEqual(
+      groups.made.map((_, group) => group).slice(1),
+    );
+    const body = boxOfGroup(mesh, groups.of, 0)!;
+    const gap = gapAround(body);
+    const placed = [body];
+    for (const { group, offset } of apart) {
+      expect(offset.some((value) => value !== 0)).toBe(true);
+      const own = boxOfGroup(mesh, groups.of, group)!;
+      const moved = boxOfGroup(mesh, groups.of, group, offset)!;
+      // Clear of the body's box and of every box placed before it by the gap, within rounding.
+      for (const other of placed) expect(clearOf(moved, other, gap - 1e-6)).toBe(true);
+      placed.push(moved);
+      // Along the line from the body's middle to its own: the cross product vanishes.
+      const from = middleOf(body);
+      const to = middleOf(own);
+      const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+      const cross = [
+        d[1]! * offset[2] - d[2]! * offset[1],
+        d[2]! * offset[0] - d[0]! * offset[2],
+        d[0]! * offset[1] - d[1]! * offset[0],
+      ];
+      expect(Math.hypot(...cross)).toBeLessThan(1e-6 * Math.hypot(...d) * Math.hypot(...offset));
+      // And away from the body, not towards it.
+      expect(d[0]! * offset[0] + d[1]! * offset[1] + d[2]! * offset[2]).toBeGreaterThan(0);
+    }
+  });
+
+  it('pulls one group apart on its own with `only`, and never the body', () => {
+    const mesh = meshOf(generateFigure(true));
+    const groups = groupsOf(mesh);
+    const all = groupsApart(mesh, groups);
+    const last = groups.made.length - 1;
+    const alone = groupsApart(mesh, groups, [last]);
+    expect(alone.map((entry) => entry.group)).toEqual([last]);
+    // Alone, nothing was moved before it: the least move that clears the body, never further
+    // than with every group moved before it.
+    const withAll = all.find((entry) => entry.group === last)!;
+    expect(Math.hypot(...alone[0]!.offset)).toBeLessThanOrEqual(
+      Math.hypot(...withAll.offset) + 1e-9,
+    );
+    const body = boxOfGroup(mesh, groups.of, 0)!;
+    const moved = boxOfGroup(mesh, groups.of, last, alone[0]!.offset)!;
+    expect(clearOf(moved, body, gapAround(body) - 1e-6)).toBe(true);
+    expect(groupsApart(mesh, groups, [0])).toEqual([]);
+    // Repeats and groups the mini does not have are ignored.
+    expect(groupsApart(mesh, groups, [last, last, 99])).toEqual(alone);
+  });
+
+  it('pulls one more group apart clear of those already apart, which stay', () => {
+    const mesh = meshOf(generateFigure(true));
+    const groups = groupsOf(mesh);
+    const all = groupsApart(mesh, groups);
+    expect(all.length).toBeGreaterThan(1);
+    const [first, ...rest] = all;
+    // Every other group apart where the rule put it, then the first pulled on its own.
+    const one = groupsApart(mesh, groups, [first!.group], rest);
+    expect(one.map((entry) => entry.group)).toEqual([first!.group]);
+    const body = boxOfGroup(mesh, groups.of, 0)!;
+    const gap = gapAround(body) - 1e-6;
+    const moved = boxOfGroup(mesh, groups.of, first!.group, one[0]!.offset)!;
+    for (const { group, offset } of rest)
+      expect(clearOf(moved, boxOfGroup(mesh, groups.of, group, offset)!, gap)).toBe(true);
+    // Without `only` the list is ignored: every group is laid out afresh.
+    expect(groupsApart(mesh, groups, undefined, rest)).toEqual(all);
+  });
+
+  it('leaves a fused sculpt and an empty group alone, and refuses another mesh’s groups', () => {
+    const mesh = meshOf(generateBoulder());
+    const groups = groupsOf(mesh);
+    expect(groupsApart(mesh, groups)).toEqual([]);
+    // A group emptied by later steps stays in `made` (#139): nothing to move.
+    expect(groupsApart(mesh, { of: groups.of, made: [...groups.made, { by: 'hand' }] })).toEqual(
+      [],
+    );
+    expect(() => groupsApart(mesh, { of: new Uint8Array(3), made: groups.made })).toThrow(
       RangeError,
     );
   });

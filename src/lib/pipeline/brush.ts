@@ -140,9 +140,10 @@ export interface PaintGroups {
 }
 
 /**
- * Which groups were hidden and pulled apart when a step was made (#139): what its replay sets, so
- * it gives the same bytes whatever is hidden when it replays. Offsets are in mm (pulling apart is
- * #139's follow-up; no group is apart until then).
+ * Which groups were hidden (#139) and pulled apart (#180) when a step was made: what its replay
+ * sets, so it renders the same depth map and distances, and gives the same bytes, whatever is
+ * hidden or apart when it replays. Offsets are in mm along the mini's axes; a step made with
+ * nothing hidden and nothing apart has no record.
  */
 export interface StepGroups {
   hidden: number[];
