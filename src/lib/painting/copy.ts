@@ -78,6 +78,7 @@ export const PAINT_COPY = {
     'This painting was saved by an older version of the brushes; it replays as it was painted.',
   /** The mask's whole changes and its tint (#138): for a panel's buttons. */
   mask: {
+    label: 'Mask',
     clear: 'Clear mask',
     invert: 'Invert mask',
     show: 'Show mask',
@@ -118,6 +119,29 @@ export const PAINT_COPY = {
   redo: 'Redo',
   navigate: 'Turn the mini',
   hint: 'Paint with one finger or the left button; two fingers or the right button turn the mini.',
+  /** The painter's panel (#166, `docs/design/painting-panel.md` §6): its sections' titles and units. */
+  panel: {
+    tool: 'Tool',
+    colour: 'Colour',
+    colours: 'Colours',
+    regions: 'Regions',
+    regionsHint: 'Fills the region with the colour in one tap.',
+    history: 'History',
+    mm: 'mm',
+    percent: '%',
+  },
+  /** The airbrush's directions in the panel (#166). */
+  directions: { none: 'Everywhere', above: 'Above', front: 'The front' },
+  /** The panel's Look section (#166), the page's Look on the same components. */
+  look: {
+    label: 'Look',
+    presets: 'Starting points',
+    enabled: 'Primed and washed',
+    base: 'Base coat',
+    occlusion: 'Shadows',
+    wash: 'Wash',
+    edges: 'Edges',
+  },
 } as const;
 
 /** The words a consumer may replace: `copy` in `mountPainting`'s options, field by field. */

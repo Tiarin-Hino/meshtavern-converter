@@ -47,3 +47,41 @@ describe('describeGroup', () => {
     expect(() => describeGroup(made, made.length)).toThrow(RangeError);
   });
 });
+
+// The painter's panel's words (#166, design note `docs/design/painting-panel.md` §6).
+describe('PAINT_COPY for the panel', () => {
+  it('has the sections’ titles, the directions and the look', () => {
+    expect(Object.keys(PAINT_COPY.panel)).toEqual([
+      'tool',
+      'colour',
+      'colours',
+      'regions',
+      'regionsHint',
+      'history',
+      'mm',
+      'percent',
+    ]);
+    expect(Object.keys(PAINT_COPY.directions)).toEqual(['none', 'above', 'front']);
+    expect(Object.keys(PAINT_COPY.look)).toEqual([
+      'label',
+      'presets',
+      'enabled',
+      'base',
+      'occlusion',
+      'wash',
+      'edges',
+    ]);
+    expect(PAINT_COPY.mask.label).toBe('Mask');
+  });
+
+  it('is a string, or an object of non-empty strings one level deep, everywhere', () => {
+    for (const value of Object.values(PAINT_COPY)) {
+      if (typeof value === 'string') expect(value.length).toBeGreaterThan(0);
+      else
+        for (const word of Object.values(value)) {
+          expect(typeof word).toBe('string');
+          expect((word as string).length).toBeGreaterThan(0);
+        }
+    }
+  });
+});
