@@ -37,6 +37,8 @@ Decision 9 of the application's spec 10 (item C6): the panel belongs on this sid
 
 - **Problem.** On CI the panel's pictures differed from the container's set by 189–222 pixels, 1 %. **Cause:** the base coat's hex was in `--font-code`, and the theme ships no monospace, so each machine drew it in its own (the container and the CI runner have different ones); every other line is Inter or Fraunces from the theme and matched. A group's row also stood in its hover colour on CI, under Playwright's tolerance: the pointer left over the panel after its scroll, and moving it to the corner did not clear the hover there. **Fix:** the hex is in the theme's text face with tabular figures; the panel takes no pointer events while its pictures are taken.
 
+- **Problem.** CI's run was cancelled at its 45 minutes, and a phone's panel test spent its 240 s waiting for a browser context. **Cause:** the panel's tests converted and painted at 2,600 and 3,400 px tall, so the viewer and the paint scene drew canvases that size in software rendering throughout, and the next test waited for their teardown; main's own runs already take 37–42 of the 45 minutes. **Fix:** the page works at the frame's size, the scenes' frames are held, and only then is the window made tall for the picture; the frames are not handed back. The panel tests went from 25–40 s to 16–19 s in the container.
+
 ## Dead ends
 
 - **Leaving `aria-label` flipping between Hide and Show** as the note's §5.7 has it. A toggle button whose name changes with its pressed state reads twice inverted ("Show, pressed" for a hidden group). The build keeps one name, "Hide: The base", with `aria-pressed` while hidden, and only the icon changes; noted on the PR for the PM.
