@@ -162,7 +162,7 @@ export interface PaintPerf {
  * What a lift stroke found under its start (#137, design note `docs/design/lift-eraser.md` §7): the
  * step it takes away, as an index into `history()`, or why it takes nothing: no step of this
  * session changed the paint there (bare, or the paint the view was opened with), or the step that
- * did is older than undo reaches. A refused lift stroke draws nothing and leaves no step.
+ * did is older than the lift reaches (the last UNDO_STEPS steps). A refused lift stroke draws nothing and leaves no step.
  */
 export type LiftOutcome = { lifted: number } | { refused: 'nothing-painted' | 'too-long-ago' };
 

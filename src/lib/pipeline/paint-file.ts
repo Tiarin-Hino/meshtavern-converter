@@ -184,9 +184,14 @@ export async function fingerprintOf(
   stl: ArrayBuffer | Uint8Array,
   role: SourceRole,
 ): Promise<SourceFingerprint> {
+  return { role, ...(await digestOf(stl)) };
+}
+
+/** A file's size and SHA-256: what a fingerprint holds besides the role. */
+async function digestOf(stl: ArrayBuffer | Uint8Array): Promise<Omit<SourceFingerprint, 'role'>> {
   const view = stl instanceof Uint8Array ? stl : new Uint8Array(stl);
   const digest = await crypto.subtle.digest('SHA-256', view as Uint8Array<ArrayBuffer>);
-  return { role, bytes: view.length, sha256: hex(new Uint8Array(digest)) };
+  return { bytes: view.length, sha256: hex(new Uint8Array(digest)) };
 }
 
 /**
@@ -222,7 +227,7 @@ export async function matchSources<T extends ArrayBuffer | Uint8Array>(
   file: Pick<PaintFile, 'sources'>,
   stls: readonly T[],
 ): Promise<T[]> {
-  const given = await Promise.all(stls.map((stl) => fingerprintOf(stl, 'figure')));
+  const given = await Promise.all(stls.map(digestOf));
   const free = new Set(given.map((_, k) => k));
   const ordered: (T | undefined)[] = file.sources.map((source) => {
     for (const k of free)

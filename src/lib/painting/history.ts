@@ -90,7 +90,7 @@ export class PaintHistory {
     return this.keyframes;
   }
 
-  /** The steps applied, oldest first: every one since the paint was opened, also those too far back to undo. */
+  /** The steps applied, oldest first: every one since the paint was opened. */
   record(): PaintStep[] {
     return this.steps.slice(0, this.cursor);
   }

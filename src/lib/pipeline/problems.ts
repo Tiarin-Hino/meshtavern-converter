@@ -19,7 +19,7 @@ export type ProblemCode =
   | 'paint-file-newer'
   /**
    * A paint file given files that are not the ones it names (#165): one is missing, different or
-   * extra. The message says which (`sourcesMessage` in paint-file.ts); this one is the fallback.
+   * extra. The message says which (`matchSources` in paint-file.ts picks it from `PAINT_SOURCE_MESSAGES`); this one is the fallback.
    */
   | 'paint-file-sources'
   /** The safety net: the estimate let the file through, but memory ran out anyway. */
