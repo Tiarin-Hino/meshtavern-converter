@@ -70,6 +70,12 @@ export const PAINT_COPY = {
     nothingPainted: 'Nothing painted here to lift: the paint the mini came with stays.',
     tooLongAgo: 'Painted too long ago to lift: only the most recent steps can be taken away.',
   },
+  /**
+   * The one line a consumer shows when a paint file painted on an older engine replays (#165,
+   * `paintedOnOlderEngine`; decision 13 of the application's spec 10).
+   */
+  olderEngine:
+    'This painting was saved by an older version of the brushes; it replays as it was painted.',
   /** The mask's whole changes and its tint (#138): for a panel's buttons. */
   mask: {
     clear: 'Clear mask',

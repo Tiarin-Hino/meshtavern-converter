@@ -139,19 +139,43 @@ describe('PaintHistory', () => {
     expect(history.record().map(numberOf)).toEqual([...upTo(18), 100]);
   });
 
-  it('keeps at least UNDO_STEPS steps to undo, and at most six keyframes', () => {
+  it('undoes every step back to the paint as opened, with at most seven keyframes (#165)', () => {
+    const most = Math.ceil(UNDO_STEPS / KEYFRAME_EVERY) + 2;
     for (const n of [UNDO_STEPS + 5, 60, 64, 65, 120]) {
       const { paint, history } = painted(n);
-      expect(history.undoable).toBeGreaterThanOrEqual(UNDO_STEPS);
-      expect(history.undoable).toBeLessThan(UNDO_STEPS + KEYFRAME_EVERY);
-      expect(paint.copies.size).toBeLessThanOrEqual(Math.ceil(UNDO_STEPS / KEYFRAME_EVERY) + 1);
+      expect(history.undoable).toBe(n);
+      expect(paint.copies.size).toBeLessThanOrEqual(most);
       let undone = 0;
-      while (history.undo() !== null) undone++;
-      expect(undone).toBe(history.undone);
-      expect(paint.paint).toEqual(upTo(n - undone));
-      // The record keeps every step applied, also those too far back to undo.
-      expect(history.record().length).toBe(n - undone);
+      let slow = 0;
+      for (let replays = history.undo(); replays !== null; replays = history.undo()) {
+        undone++;
+        expect(paint.paint).toEqual(upTo(n - undone));
+        if (replays >= KEYFRAME_EVERY) slow++;
+        expect(paint.copies.size).toBeLessThanOrEqual(most);
+      }
+      expect(undone).toBe(n);
+      expect(history.record()).toEqual([]);
+      // Within the window every undo is cheap; past it, the window moves back once a window.
+      expect(slow).toBeLessThanOrEqual(Math.ceil(n / UNDO_STEPS));
+      for (let k = 0; k < n; k++) expect(history.redo()).toBe(true);
+      expect(paint.paint).toEqual(upTo(n));
+      expect(paint.copies.size).toBeLessThanOrEqual(most);
     }
+  });
+
+  it('replays from the paint as opened once when undo passes the window, then from the window again (#165)', () => {
+    const { paint, history } = painted(120);
+    expect(history.oldest).toBe(70);
+    for (let k = 0; k < 50; k++) history.undo();
+    expect(history.applied).toBe(70);
+    // Step 70 to 69: below the window, from the paint as opened.
+    expect(history.undo()).toBe(69);
+    expect(paint.paint).toEqual(upTo(69));
+    expect(history.oldest).toBe(10);
+    expect(history.kept).toEqual([0, 10, 20, 30, 40, 50, 60]);
+    // The next undo is from the window's keyframe again.
+    expect(history.undo()).toBe(8);
+    expect(paint.paint).toEqual(upTo(68));
   });
 });
 
@@ -172,7 +196,7 @@ describe('PaintHistory and the lift (#137)', () => {
     expect(paint.replays).toBe(0);
   });
 
-  it('refuses a step older than undo reaches: painted too long ago', () => {
+  it('refuses a step older than the window: painted too long ago', () => {
     const { history } = painted(65);
     expect(history.oldest).toBe(10);
     expect(history.pin(9)).toBe(false);
@@ -225,19 +249,48 @@ describe('PaintHistory and the lift (#137)', () => {
     live(paint, history, lift(13));
     for (let k = 26; k < 70; k++) live(paint, history, step(k));
     expect(history.oldest).toBe(20);
-    expect(history.kept).toEqual([13, 20, 30, 40, 50, 60, 70]);
+    expect(history.kept).toEqual([0, 13, 20, 30, 40, 50, 60, 70]);
     const expected = paint.paint.slice();
-    let undone = 0;
-    while (history.undo() !== null) undone++;
-    expect(undone).toBe(50);
+    for (let k = 0; k < 50; k++) history.undo();
     expect(paint.paint).toEqual(upTo(20));
-    for (let k = 0; k < undone; k++) history.redo();
+    for (let k = 0; k < 50; k++) history.redo();
     expect(paint.paint).toEqual(expected);
-    // The window passes the lift: nothing replays it any more, and the pin goes.
+    // The window passes the lift: the pin goes.
     for (let k = 70; k < 80; k++) live(paint, history, step(k));
     expect(history.oldest).toBe(30);
     expect(paint.copies.has(13)).toBe(false);
-    expect(history.kept).toEqual([30, 40, 50, 60, 70, 80]);
+    expect(history.kept).toEqual([0, 30, 40, 50, 60, 70, 80]);
+    // Undo past the window replays the lift again, from a keyframe made on the way (#165).
+    const late = paint.paint.slice();
+    let undone = 0;
+    while (history.applied > 26) {
+      history.undo();
+      undone++;
+    }
+    expect(paint.paint).toEqual(upTo(25).filter((n) => n !== 13));
+    expect(paint.paint).not.toContain(13);
+    for (let k = 0; k < undone; k++) history.redo();
+    expect(paint.paint).toEqual(late);
+  });
+
+  it('replays every step a paint file gives, and undoes through all of them (#165)', () => {
+    // As `open` replays a file: each step applied, pushed, a lift pinned first.
+    const paint = new FakePaint();
+    const history = new PaintHistory(paint);
+    const steps = [...upTo(30).map(step), lift(12), ...upTo(80).slice(31).map(step)];
+    steps.forEach((s, k) => {
+      const lifted = liftedBy(s);
+      if (lifted !== undefined) expect(history.pin(lifted)).toBe(true);
+      paint.paint = applied(paint, s);
+      history.push(s);
+      expect(history.applied).toBe(k + 1);
+    });
+    const end = paint.paint.slice();
+    expect(end).not.toContain(12);
+    while (history.undo() !== null);
+    expect(paint.paint).toEqual([]);
+    while (history.redo());
+    expect(paint.paint).toEqual(end);
   });
 
   it('pins one keyframe for every lift of the same step', () => {
