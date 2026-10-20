@@ -27,8 +27,8 @@ export default tseslint.config(
   },
   {
     // The page, the regression net and the e2e tests use the library like any other consumer:
-    // through src/lib/index.ts, three.ts, dev.ts, questions.ts and painting.ts, never its inside
-    // (issues #50, #119, #127).
+    // through src/lib/index.ts, three.ts, dev.ts, questions.ts, painting.ts and painting-panel.ts,
+    // never its inside (issues #50, #119, #127, #166).
     files: ['src/page/**', 'src/regression/**', 'e2e/**'],
     rules: {
       'no-restricted-imports': [
@@ -42,10 +42,11 @@ export default tseslint.config(
                 '**/lib/three/*',
                 '**/lib/questions/*',
                 '**/lib/painting/*',
+                '**/lib/painting-panel/*',
                 '**/lib/read-file',
               ],
               message:
-                'import from src/lib/index.ts, three.ts, dev.ts, questions.ts or painting.ts: the page uses the library like any other consumer',
+                'import from src/lib/index.ts, three.ts, dev.ts, questions.ts, painting.ts or painting-panel.ts: the page uses the library like any other consumer',
             },
           ],
         },

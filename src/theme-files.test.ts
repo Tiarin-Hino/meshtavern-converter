@@ -22,6 +22,7 @@ const STYLESHEETS = [
   'src/page/style.css',
   'src/lib/questions.css',
   'src/lib/painting.css',
+  'src/lib/painting-panel.css',
 ];
 /**
  * The copy: the application's files of these names, the README that names its commit, and the

@@ -8,6 +8,9 @@ import type { PaintCopy } from '../painting';
 
 type Vec3 = [number, number, number];
 
+/** Between a number and its percent sign, as the specs write it. */
+const THIN_SPACE = '\u2009';
+
 /** The size slider's step, in mm. _(proposal)_ */
 export const SIZE_STEP_MM = 0.5;
 /** The step of the sliders from 0 to 1 (hardness, opacity, tolerance, the look's). _(proposal)_ */
@@ -85,5 +88,5 @@ export function sliderValue(
     const mm = Math.round(value * 10) / 10;
     return `${Number.isInteger(mm) ? mm : mm.toFixed(1)} ${copy.mm}`;
   }
-  return `${Math.round(value * 100)} ${copy.percent}`;
+  return `${Math.round(value * 100)}${THIN_SPACE}${copy.percent}`;
 }
