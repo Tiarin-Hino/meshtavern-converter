@@ -1455,7 +1455,7 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
       rows.push({
         tool,
         // The ?dev panel says what the brush does (PAINT_COPY.toolHints).
-        hint: document.querySelector('#paint-hint')?.textContent ?? '',
+        hint: document.querySelector('#paint-controls [data-hint]')?.textContent ?? '',
         steps: view.state.steps - steps,
         changed: after !== before,
         undone,
@@ -1766,8 +1766,10 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
   const chest = await page.evaluate(() => window.__mt.painting.view().screenOf([0, 14, 6]));
   const shown = await page.evaluate((at) => window.__mt.painting.view().colourAt(...at), chest);
   const box = (await page.locator('#paint-view canvas').boundingBox())!;
-  const pick = page.locator('#paint-pick');
-  await expect(pick).toHaveText('Pick a colour');
+  // The panel's pipette (#166): an icon button named by PAINT_COPY.pick.button.
+  const pick = page.locator('#paint-controls [data-action="pick"]');
+  const status = page.locator('#paint-controls [data-status]');
+  await expect(pick).toHaveAccessibleName('Pick a colour');
 
   await pick.click();
   await expect(pick).toHaveAttribute('aria-pressed', 'true');
@@ -1775,19 +1777,31 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
   await page.waitForFunction(() => window.__mt.painting.view().state.colour !== '#2050a0');
   expect(await page.evaluate(() => window.__mt.painting.view().state.colour)).toBe(shown);
   await expect(pick).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#paint-controls [data-colour]')).toHaveValue(shown!);
+
+  // Off the mini: nothing to pick, said on the status line; a second press cancels without a word.
+  await pick.click();
+  await page.mouse.click(box.x + 2, box.y + 2);
+  await expect(status).toHaveText('Nothing to pick there: off the mini, or no paint on it.');
+  await pick.click();
+  await pick.click();
+  await expect(pick).toHaveAttribute('aria-pressed', 'false');
+  await expect(status).toHaveText('');
 
   await page.locator('#paint-pick-mode').selectOption('painted');
+  expect(await page.evaluate(() => window.__mt.painting.panel().state.pickMode)).toBe('painted');
   await pick.click();
   await page.mouse.click(box.x + chest[0], box.y + chest[1]);
   await page.waitForFunction(() => window.__mt.painting.view().state.colour === '#b03030');
   expect(await page.evaluate(() => window.__mt.painting.view().state.steps)).toBe(1);
+  await page.locator('#paint-pick-mode').selectOption('shown');
 });
 
 test('shows the colours used as swatches in the Paint tool, and a click paints with one again (#136)', async ({
   figurePage: page,
 }) => {
   await paintTheChest(page);
-  const swatches = page.locator('#paint-recent .paint-swatch');
+  const swatches = page.locator('#paint-controls [data-swatches] [data-swatch]');
   await page.evaluate(async () => {
     (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     const view = window.__mt.painting.view();
@@ -1804,7 +1818,7 @@ test('shows the colours used as swatches in the Paint tool, and a click paints w
     view.setTool('flat');
   });
   await expect(swatches).toHaveCount(2);
-  expect(await swatches.evaluateAll((all) => all.map((s) => s.dataset.colour))).toEqual([
+  expect(await swatches.evaluateAll((all) => all.map((s) => s.dataset.swatch))).toEqual([
     '#2050a0',
     '#b03030',
   ]);
@@ -1812,7 +1826,8 @@ test('shows the colours used as swatches in the Paint tool, and a click paints w
 
   await swatches.nth(1).click();
   expect(await page.evaluate(() => window.__mt.painting.view().state.colour)).toBe('#b03030');
-  await expect(page.locator('#paint-colour')).toHaveValue('#b03030');
+  await expect(page.locator('#paint-controls [data-colour]')).toHaveValue('#b03030');
+  await expect(swatches.nth(1)).toHaveAttribute('aria-pressed', 'true');
 
   // Undone steps are not in the history, so their colours leave the row.
   await page.evaluate(async () => {
@@ -1821,7 +1836,16 @@ test('shows the colours used as swatches in the Paint tool, and a click paints w
     await view.undo();
   });
   await expect(swatches).toHaveCount(1);
-  await expect(swatches.first()).toHaveAttribute('data-colour', '#b03030');
+  await expect(swatches.first()).toHaveAttribute('data-swatch', '#b03030');
+
+  // The consumer's palette after the mini's colours, each once (#166).
+  await page.evaluate(() => window.__mt.painting.panel().setPalette(['#B03030', '#ffffff']));
+  expect(await page.evaluate(() => window.__mt.painting.panel().state.swatches)).toEqual([
+    '#b03030',
+    '#ffffff',
+  ]);
+  await expect(swatches).toHaveCount(2);
+  await page.evaluate(() => window.__mt.painting.panel().setPalette([]));
 });
 // The mask (#138, design note `docs/design/paint-mask.md`): masked surface keeps its bytes under
 // every tool; the mask is made with its own tools, each one step, goes in and out as pixels, shows
@@ -2692,31 +2716,36 @@ test('lists the groups in the Paint tool, hides one from its box, and shows them
     (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     await window.__mt.painting.open();
   });
-  // The shown box of each group (the box beside it pulls the group apart, #180).
-  const boxes = page.locator('#paint-groups input[data-group]');
+  // The panel's rows (#166): a row a group with its Hide (the Apart beside it pulls it apart, #180).
+  const panel = page.locator('#paint-controls');
+  const rows = panel.locator('[data-groups]');
+  const hide = rows.locator('[data-shown]');
   const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
-  await expect(boxes).toHaveCount(count);
-  await expect(page.locator('#paint-groups label').first()).toContainText('The body');
-  await expect(page.locator('#paint-groups')).toContainText('The base');
-  await expect(page.locator('#paint-groups')).toContainText('Shell 2 of the body');
+  await expect(hide).toHaveCount(count);
+  await expect(rows.locator('[data-group="0"]')).toContainText('The body');
+  await expect(rows).toContainText('The base');
+  await expect(rows).toContainText('Shell 2 of the body');
   // The target starts at a new group: nothing to fill or mask yet.
-  await expect(page.locator('#paint-group-target')).toHaveValue('new');
-  await expect(page.locator('#paint-group-fill')).toBeDisabled();
+  await expect(rows.locator('[data-target="new"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel.locator('[data-action="group-fill"]')).toBeDisabled();
 
-  await boxes.nth(1).uncheck();
+  await hide.nth(1).click();
   expect(await page.evaluate(() => window.__mt.painting.view().state.groups.hidden)).toEqual([1]);
-  await page.locator('#paint-groups-all').click();
+  await expect(rows.locator('[data-group="1"]')).toHaveClass(/row-hidden/);
+  await expect(hide.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await panel.locator('[data-action="groups-all"]').click();
   expect(await page.evaluate(() => window.__mt.painting.view().state.groups.hidden)).toEqual([]);
-  await expect(boxes.nth(1)).toBeChecked();
+  await expect(hide.nth(1)).toHaveAttribute('aria-pressed', 'false');
 
-  await page.locator('#paint-tools button[data-tool="group"]').click();
+  await panel.locator('[data-tool="group"]').click();
   expect(await page.evaluate(() => window.__mt.painting.view().state.groupTint)).toBe(true);
-  await expect(page.locator('#paint-groups-tint')).toHaveAttribute('aria-pressed', 'true');
-  await page.locator('#paint-tools button[data-tool="flat"]').click();
+  await expect(panel.locator('[data-action="groups-tint"]')).toBeChecked();
+  await panel.locator('[data-tool="flat"]').click();
   expect(await page.evaluate(() => window.__mt.painting.view().state.groupTint)).toBe(false);
 
-  await page.locator('#paint-group-target').selectOption('0');
-  await page.locator('#paint-group-mask').click();
+  await rows.locator('[data-target="0"]').click();
+  await expect(rows.locator('[data-group="0"]')).toHaveClass(/row-selected/);
+  await panel.locator('[data-action="group-mask"]').click();
   await page.waitForFunction(() => window.__mt.painting.view().state.steps === 1);
   expect(
     await page.evaluate(() => {
@@ -3062,24 +3091,27 @@ test('pulls the groups apart and puts them together from the Paint tool, one gro
   const apart = (): Promise<number[]> =>
     page.evaluate(() => window.__mt.painting.view().state.groups.apart.map((entry) => entry.group));
   const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
-  // A box a group but the body, unchecked: nothing is apart.
-  const boxes = page.locator('#paint-groups input[data-apart]');
+  // An Apart a group but the body, unpressed: nothing is apart.
+  const panel = page.locator('#paint-controls');
+  const boxes = panel.locator('[data-groups] [data-apart]');
+  const together = panel.locator('[data-action="groups-together"]');
   await expect(boxes).toHaveCount(count - 1);
-  await expect(page.locator('#paint-groups-together')).toBeDisabled();
+  await expect(together).toBeDisabled();
   expect(await apart()).toEqual([]);
 
-  await page.locator('#paint-groups-apart').click();
+  await panel.locator('[data-action="groups-apart"]').click();
   // The base, the head and both arms all lie within the gap of the body.
   expect((await apart()).length).toBeGreaterThanOrEqual(4);
-  await expect(boxes.first()).toBeChecked();
-  await expect(page.locator('#paint-groups-together')).toBeEnabled();
-  await page.locator('#paint-groups-together').click();
+  await expect(boxes.first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(together).toBeEnabled();
+  await together.click();
   expect(await apart()).toEqual([]);
-  await expect(boxes.first()).not.toBeChecked();
+  await expect(boxes.first()).toHaveAttribute('aria-pressed', 'false');
 
-  await boxes.nth(1).check();
+  await boxes.nth(1).click();
   expect(await apart()).toEqual([2]);
-  await boxes.nth(1).uncheck();
+  await expect(boxes.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await boxes.nth(1).click();
   expect(await apart()).toEqual([]);
   // Not a step, and hiding is untouched.
   expect(
