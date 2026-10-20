@@ -123,6 +123,12 @@
   outline-offset: 2px;
 }
 
+/* The focus ring wins over the pressed outline, as on every other control. */
+.mt-painting-panel .swatch:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 .mt-painting-panel .swatch:disabled {
   cursor: not-allowed;
 }

@@ -166,3 +166,22 @@ export async function thawFrames(page: Page): Promise<void> {
     for (const callback of held.queue) held.raf(callback);
   });
 }
+
+/**
+ * The `?dev` Paint tool open on the generated figure (#166: the painter's panel), converted without
+ * the question and baked small (`bake=256`) to keep it short in software rendering. The caller
+ * opened the page at `/?dev&ask=off&bake=256`.
+ */
+export async function painting(page: Page): Promise<void> {
+  await page.setInputFiles('#file', file('hero.stl', generateFigure(true)));
+  await page.waitForFunction(
+    () => window.__mt.state.page === 'done' && !window.__mt.state.busy && window.__mt.state.baked,
+    undefined,
+    { timeout: 180_000 },
+  );
+  await page.locator('#dev-paint > summary').click();
+  await page.locator('#paint-open').click();
+  await page.waitForFunction(() => window.__mt.state.painting?.open === true, undefined, {
+    timeout: 180_000,
+  });
+}

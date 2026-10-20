@@ -545,6 +545,17 @@ class Panel implements PaintingPanel {
       rows.push(
         `<li class="row${isNew ? ' row-selected' : ''}" data-group="new"><button class="row-main" type="button" data-target="new" aria-pressed="${isNew}">${escapeHtml(copy.newGroup)}</button></li>`,
       );
-    this.find('[data-groups]').innerHTML = rows.join('');
+    // The focus stays on the control it was on, in its new row: a key press rebuilds the rows.
+    const host = this.find('[data-groups]');
+    const focused = host.contains(document.activeElement)
+      ? (['target', 'shown', 'apart'] as const)
+          .map((name) => {
+            const value = (document.activeElement as HTMLElement).dataset[name];
+            return value === undefined ? null : `[data-${name}="${value}"]`;
+          })
+          .find((selector) => selector !== null)
+      : null;
+    host.innerHTML = rows.join('');
+    if (focused) host.querySelector<HTMLElement>(focused)?.focus();
   }
 }

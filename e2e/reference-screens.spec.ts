@@ -8,6 +8,7 @@ import {
   freezeFrames,
   holdStatus,
   open,
+  painting,
   releaseStatus,
   thawFrames,
 } from './states';
@@ -88,6 +89,44 @@ for (const frame of FRAMES) {
         () => window.__mt.state.page === 'done' && !window.__mt.state.busy,
       );
       await both(page, frame.name, 'done');
+    });
+  });
+}
+
+/**
+ * The painter's panel (#166, design note docs/design/painting-panel.md §12): the ?dev Paint tool on
+ * the generated figure with the panel mounted, compared as the panel alone (`#paint-controls`)
+ * in both themes. A test of its own beside the five states, so their time budget holds. The frames
+ * are the three widths made tall enough that the whole panel is on screen at once: the panel sits
+ * in the page's scrolling panel (and, on a phone, in its sheet), and a picture of an element is
+ * cut where its scrolling frame ends. The airbrush is the tool, so its direction is on the picture.
+ */
+for (const frame of FRAMES) {
+  test.describe(frame.name, () => {
+    test.use({
+      viewport: { width: frame.viewport.width, height: frame.phone ? 3400 : 2600 },
+      hasTouch: frame.phone,
+      reducedMotion: 'reduce',
+    });
+
+    test('the painter’s panel in both themes', async ({ page }) => {
+      test.setTimeout(240_000);
+      await open(page, '/?dev&ask=off&bake=256');
+      await page.addStyleTag({ path: 'e2e/reference-screens.css' });
+      await painting(page);
+      if (frame.phone) await page.locator('#sheet-handle').click();
+      await page.evaluate(() => {
+        window.__mt.painting.view().setTool('airbrush');
+        document.querySelector('#paint-controls')!.scrollIntoView({ block: 'start' });
+      });
+      await freezeFrames(page);
+      for (const theme of THEMES) {
+        await page.emulateMedia({ colorScheme: theme });
+        await expect
+          .soft(page.locator('#paint-controls'))
+          .toHaveScreenshot(`${frame.name}-painting-${theme}.png`);
+      }
+      await thawFrames(page);
     });
   });
 }

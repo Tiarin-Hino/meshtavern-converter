@@ -768,7 +768,7 @@ body[data-dragging] #drop-frame {
     min-width: var(--tap-min);
   }
 
-  #panel input[type='checkbox']:not(.mt-questions *) {
+  #panel input[type='checkbox']:not(.mt-questions *, .mt-painting-panel *) {
     width: 20px;
     height: 20px;
   }
