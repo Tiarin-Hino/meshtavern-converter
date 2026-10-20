@@ -22,7 +22,7 @@ import type { PaintStep } from '../pipeline/brush';
 export const KEYFRAME_EVERY = 10;
 /**
  * Steps undone at most KEYFRAME_EVERY − 1 replays each (§8): the window the keyframes cover. Undo
- * reaches further, back to the paint as opened, replaying from it (#165). _(proposal)_
+ * reaches further, back to the paint as opened, replaying from it (#165; PM decision 2026-10-20, #186).
  */
 export const UNDO_STEPS = 50;
 

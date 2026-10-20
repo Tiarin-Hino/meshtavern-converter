@@ -25,9 +25,9 @@ import { generateFigure } from '../src/regression/shapes';
 
 const RECORDED = 'src/regression/painting.mtpaint';
 const REPLAYED = 'src/regression/painting-replay.json';
-/** A channel of a replayed sample may differ from the recorded one by this much (of 255). _(proposal)_ */
+/** A channel of a replayed sample may differ from the recorded one by this much (of 255). _(PM decision 2026-10-20, #186)_ */
 const REPLAY_TOLERANCE = 8;
-/** At most this share of the samples may differ by more: texels at a stroke's edge, on another GPU. _(proposal)_ */
+/** At most this share of the samples may differ by more: texels at a stroke's edge, on another GPU. _(PM decision 2026-10-20, #186)_ */
 const REPLAY_OUTLIERS = 0.02;
 
 const figureStl = (): ArrayBuffer => encodeBinaryStl(generateFigure(true));

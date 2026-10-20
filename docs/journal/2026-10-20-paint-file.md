@@ -48,7 +48,7 @@ The painting of every step kind, saved and reopened, gave the same paint, mask a
 
 - Not measured on the reference laptop.
 - The panel (next issue) and the page's Save and Open (the one after) are what people will see; this adds no button.
-- The undo reach (all steps) is this PR's proposal, as the issue asked.
+- The PM accepted every proposal on 2026-10-20 (on #186): undo back through every step, the file's shape and limits, the refusal sentences and the older-engine line, the replay tolerance.
 
 ## Story angle
 

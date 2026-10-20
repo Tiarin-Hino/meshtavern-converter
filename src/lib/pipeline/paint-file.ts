@@ -39,20 +39,20 @@ export const PAINT_FILE_VERSION = 1;
  * replays with a warning in one line (`PAINT_COPY.olderEngine`); one on a newer engine is refused.
  */
 export const PAINT_ENGINE_VERSION = 1;
-/** The paint file's extension. _(proposal)_ */
+/** The paint file's extension. _(PM decision 2026-10-20, #186)_ */
 export const PAINT_FILE_EXTENSION = '.mtpaint';
 /** Its media type, for a download or a file picker. */
 export const PAINT_FILE_TYPE = 'application/vnd.meshtavern.paint+json';
-/** A paint file larger than this is written gzip-compressed. _(proposal)_ */
+/** A paint file larger than this is written gzip-compressed. _(PM decision 2026-10-20, #186)_ */
 export const PAINT_FILE_GZIP_ABOVE = 1024 * 1024;
-/** A paint file is never read beyond this, compressed or not: a long session is a few hundred KiB. _(proposal)_ */
+/** A paint file is never read beyond this, compressed or not: a long session is a few hundred KiB. _(PM decision 2026-10-20, #186)_ */
 export const PAINT_FILE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** What a file was to the mini (#165): its figure (the body, of a figure in parts), a part, or the base. */
 export type SourceRole = 'figure' | 'part' | 'base';
 export const SOURCE_ROLES: readonly SourceRole[] = ['figure', 'part', 'base'];
 
-/** One file the mini was converted from, by its contents. _(proposal: SHA-256, size and role)_ */
+/** One file the mini was converted from, by its contents. _(SHA-256, size and role: PM decision 2026-10-20, #186)_ */
 export interface SourceFingerprint {
   role: SourceRole;
   /** Its size in bytes. */
