@@ -66,6 +66,35 @@ export async function converting(page: Page, quadsPerSide = 300): Promise<void> 
   );
 }
 
+/**
+ * Holds the status line at `text` until `releaseStatus`: the conversion goes on and writes each
+ * step into it, and the line is put back at once, before the page is drawn again. A picture of the
+ * converting state then has the same line, and the same width of its mask, whichever step the
+ * conversion is at: the line is as wide as its words, and "Reducing the detail…" is 2 px wider
+ * than "Joining the surface…"; the pictures hold "Reducing the detail…".
+ */
+export async function holdStatus(page: Page, text: string): Promise<void> {
+  await page.evaluate((held) => {
+    const w = window as typeof window & { __heldStatus?: MutationObserver };
+    const line = document.querySelector('#status .status-text')!;
+    w.__heldStatus?.disconnect();
+    const hold = () => {
+      if (line.textContent !== held) line.textContent = held;
+    };
+    hold();
+    w.__heldStatus = new MutationObserver(hold);
+    w.__heldStatus.observe(line, { childList: true, characterData: true, subtree: true });
+  }, text);
+}
+
+export async function releaseStatus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as typeof window & { __heldStatus?: MutationObserver };
+    w.__heldStatus?.disconnect();
+    delete w.__heldStatus;
+  });
+}
+
 /** Stops a conversion and waits for the page to settle back. */
 export async function cancel(page: Page): Promise<void> {
   await page.evaluate(() => window.__mt.cancel());

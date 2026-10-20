@@ -1,5 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
-import { asking, cancel, converting, error, freezeFrames, open, thawFrames } from './states';
+import { describeProgress } from '../src/page/page-state';
+import {
+  asking,
+  cancel,
+  converting,
+  error,
+  freezeFrames,
+  holdStatus,
+  open,
+  releaseStatus,
+  thawFrames,
+} from './states';
 
 /**
  * The reference screenshots (#146, spec docs/specs/look-and-feel.md L4, design note
@@ -51,14 +62,18 @@ for (const frame of FRAMES) {
       await both(page, frame.name, 'empty');
 
       // Converting: one conversion per picture, so the conversion cannot end between the two
-      // themes; the step and the bar move on while the picture is taken, so they are masked. A
-      // conversion that ended under the picture fails the run instead of recording the done state.
+      // themes; the step and the bar move on while the picture is taken, so they are masked. The
+      // mask is as wide as the step's words, so the line is held at the step the pictures were
+      // taken at (holdStatus) while the conversion goes on. A conversion that ended under the
+      // picture fails the run instead of recording the done state.
       for (const theme of THEMES) {
         await converting(page, 600);
+        await holdStatus(page, describeProgress({ step: 'simplify', percent: 0 }));
         await freezeFrames(page);
         await shot(page, `${frame.name}-converting`, theme, ['#status', '#progress']);
         expect(await page.evaluate(() => window.__mt.state.page)).toBe('converting');
         await thawFrames(page);
+        await releaseStatus(page);
         await cancel(page);
       }
 
