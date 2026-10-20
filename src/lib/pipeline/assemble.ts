@@ -335,7 +335,7 @@ function boxOfMesh(positions: Float32Array, by: Vec3 = [0, 0, 0]): Box {
 }
 
 /** A box moved by `by`. */
-const movedBox = ({ min, max }: Box, by: Vec3): Box => ({
+export const movedBox = ({ min, max }: Box, by: Vec3): Box => ({
   min: [min[0] + by[0], min[1] + by[1], min[2] + by[2]],
   max: [max[0] + by[0], max[1] + by[1], max[2] + by[2]],
 });
@@ -348,10 +348,12 @@ const overlap = (a: Box, b: Box, gap: number): boolean =>
  * of the body's is moved along the line from the middle of the body's box to the middle of its
  * own, just far enough that it clears the body's box and those of the boxes moved before it by
  * `APART_SHARE` of the body's largest side (at least `APART_MIN_GAP_MM`). The body and boxes
- * already apart stay, at zero. One translation per box, in the boxes' order. Shared by the parts
- * at the parts question (`pulledApart`) and the painter's groups (`groupsApart`, #180).
+ * already apart stay, at zero. One translation per box, in the boxes' order. `fixed` are boxes
+ * that do not move but are kept clear of, as those moved before (the painter's groups already
+ * pulled apart, when one more is). Shared by the parts at the parts question (`pulledApart`) and
+ * the painter's groups (`groupsApart`, #180).
  */
-export function apartTranslations(boxes: readonly Box[]): Vec3[] {
+export function apartTranslations(boxes: readonly Box[], fixed: readonly Box[] = []): Vec3[] {
   const body = boxes[0];
   if (!body) return [];
   const side = Math.max(...[0, 1, 2].map((k) => body.max[k]! - body.min[k]!));
@@ -361,7 +363,7 @@ export function apartTranslations(boxes: readonly Box[]): Vec3[] {
     (box.min[1] + box.max[1]) / 2,
     (box.min[2] + box.max[2]) / 2,
   ];
-  const placed = [body];
+  const placed = [body, ...fixed];
   return boxes.map((own, k) => {
     if (k === 0 || !overlap(own, body, gap)) {
       if (k > 0) placed.push(own);

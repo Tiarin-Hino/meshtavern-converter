@@ -411,6 +411,24 @@ describe('groupsApart', () => {
     expect(groupsApart(mesh, groups, [last, last, 99])).toEqual(alone);
   });
 
+  it('pulls one more group apart clear of those already apart, which stay', () => {
+    const mesh = meshOf(generateFigure(true));
+    const groups = groupsOf(mesh);
+    const all = groupsApart(mesh, groups);
+    expect(all.length).toBeGreaterThan(1);
+    const [first, ...rest] = all;
+    // Every other group apart where the rule put it, then the first pulled on its own.
+    const one = groupsApart(mesh, groups, [first!.group], rest);
+    expect(one.map((entry) => entry.group)).toEqual([first!.group]);
+    const body = boxOfGroup(mesh, groups.of, 0)!;
+    const gap = gapAround(body) - 1e-6;
+    const moved = boxOfGroup(mesh, groups.of, first!.group, one[0]!.offset)!;
+    for (const { group, offset } of rest)
+      expect(clearOf(moved, boxOfGroup(mesh, groups.of, group, offset)!, gap)).toBe(true);
+    // Without `only` the list is ignored: every group is laid out afresh.
+    expect(groupsApart(mesh, groups, undefined, rest)).toEqual(all);
+  });
+
   it('leaves a fused sculpt and an empty group alone, and refuses another mesh’s groups', () => {
     const mesh = meshOf(generateBoulder());
     const groups = groupsOf(mesh);

@@ -304,8 +304,11 @@ export function createPaintTool(
         apartBox.addEventListener('change', () => {
           const view = current();
           const offset = apartBox.checked
-            ? (groupsApart(opened!.mesh, view.groups(), [index])[0]?.offset ?? null)
+            ? (groupsApart(opened!.mesh, view.groups(), [index], view.state.groups.apart)[0]
+                ?.offset ?? null)
             : null;
+          // A group the rule leaves in place is not apart: its box says so.
+          if (offset === null) apartBox.checked = false;
           view.pullApart(index, offset);
         });
         apartLabel.append(apartBox, ` ${PAINT_COPY.groups.apart}`);

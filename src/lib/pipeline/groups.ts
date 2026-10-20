@@ -1,4 +1,4 @@
-import { apartTranslations, type Box, type PartResult } from './assemble';
+import { apartTranslations, movedBox, type Box, type PartResult } from './assemble';
 import { MIN_NORMAL_AGREEMENT } from './bake';
 import type { Vec3 } from './base';
 import { MAX_GROUPS, type GroupOrigin, type PaintGroups, type PaintRegions } from './brush';
@@ -98,12 +98,14 @@ export interface GroupApart {
  * lands on a group moved before it. The groups moved, in their order, with their offsets in the
  * mesh's coordinates; a group the rule leaves in place (clear of the body already, or without a
  * triangle) is not listed. `only` names the groups to move, in that order, the others left where
- * they are: for pulling one group apart on its own. Group 0 in `only` is ignored.
+ * they are; those of them in `apart` are kept clear of at their offsets, as groups moved before:
+ * for pulling one group apart on its own beside those already apart. Group 0 in `only` is ignored.
  */
 export function groupsApart(
   table: IndexedMesh,
   groups: PaintGroups,
   only?: readonly number[],
+  apart: readonly GroupApart[] = [],
 ): GroupApart[] {
   const triangles = table.indices.length / 3;
   if (groups.of.length !== triangles)
@@ -136,7 +138,15 @@ export function groupsApart(
       boxes[group] &&
       list.indexOf(group) === k,
   );
-  const translations = apartTranslations([body, ...moved.map((group) => boxes[group]!)]);
+  // With `only`, the groups already apart and not named stay where they are drawn, and the moved
+  // ones clear them as they clear those moved before them.
+  const fixed: Box[] = [];
+  if (only)
+    for (const { group, offset } of apart) {
+      const box = boxes[group];
+      if (box && group > 0 && !moved.includes(group)) fixed.push(movedBox(box, offset));
+    }
+  const translations = apartTranslations([body, ...moved.map((group) => boxes[group]!)], fixed);
   const out: GroupApart[] = [];
   moved.forEach((group, k) => {
     const offset = translations[k + 1]!;
