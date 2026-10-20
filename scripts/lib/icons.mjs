@@ -1,5 +1,5 @@
 // The icons the page and the question view draw (#143, design note look-and-feel.md §5): Lucide
-// icons from the pinned lucide-static package, written as inline SVG into two committed modules,
+// icons from the pinned lucide-static package, written as inline SVG into three committed modules,
 // as the table application bundles its own (web/src/app/icons.ts there): no icon font, no sprite,
 // no request. scripts/make-icons.mjs writes the modules; src/icons.test.ts regenerates them from
 // node_modules and fails when a committed one differs. Pure but for reading the package's files.
@@ -69,6 +69,31 @@ export const ICON_SETS = {
     'loader-circle',
     'shapes',
     'grip-horizontal',
+  ],
+  // What the painter's panel draws (#166, design note painting-panel.md §7): the history row,
+  // the paint tools, the pipette, the mask's and the groups' tools and the groups' rows.
+  'src/lib/painting-panel/icons.ts': [
+    'undo-2',
+    'redo-2',
+    'orbit',
+    'paintbrush',
+    'paint-bucket',
+    'eraser',
+    'layers',
+    'droplet',
+    'pencil',
+    'brush',
+    'spray-can',
+    'pipette',
+    'shield',
+    'shield-off',
+    'shield-plus',
+    'shield-minus',
+    'group',
+    'lasso-select',
+    'eye',
+    'eye-off',
+    'move-3d',
   ],
 };
 
