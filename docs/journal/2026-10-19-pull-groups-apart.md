@@ -3,7 +3,7 @@ title: Groups pulled apart, each painted on its own
 date: 2026-10-19
 phase: 2
 issues: [180, 139]
-prs: []
+prs: [181]
 topics: [painting, ui, textures, testing, performance]
 ---
 
@@ -11,7 +11,7 @@ topics: [painting, ui, textures, testing, performance]
 
 The painter can pull a mini's groups apart: the arm, the head, the shield or the base is drawn beside the body with a gap, every side of it in reach, and a stroke on it paints it alone, where the same stroke with the groups together would also catch the shoulder behind it. Put together brings everything back. Like hiding (#139), pulling apart is not a step: Undo never moves a group. In the team's Paint tool a Pull apart button lays every group out at once, Put together gathers them, and a box beside each group pulls that one apart on its own.
 
-Built quietly (`/implement-quiet`, Fable 5.1) while the PM used the PC: the pixel tests and the frame figures wait for the full run.
+Built quietly (`/implement-quiet`, Fable 5.1) while the PM used the PC; the full run (`/continue-pr`, Opus 5.5, 2026-10-20) ran the deferred list on the development PC, fixed the `?dev` tool's box a group, and ends the work in PR #181.
 
 ## Why
 
@@ -32,6 +32,9 @@ The PM's decision on #139 (2026-10-13, corrected): pull groups apart while paint
 - **The #139 Paint tool test counted eleven boxes where it expected six.** CI's first run. **Cause:** the new "Apart" box beside every group but the body matched its `input[type="checkbox"]` locator. **Fix:** it counts the shown boxes, `input[data-group]`. The same run had two timeouts outside this change (the smoke test's look presets at 30 s, the phone's meet test at 240 s), and the second run two more (the phone's meet test again, the smoke benchmark at 180 s), 117 passed. The Playwright reports of main's run and this branch's, side by side, say why: every spec ran 30–40 % slower on this branch's runner, the ones this change does not touch included (the feedback spec 115 → 155 s, the up question's large mesh 25 → 51 s, the thumbnail 25 → 44 s), and the painting spec 965 → 1,412 s, of which the three new tests are 109 s. The phone test's tap on the sole from below never brought the next question (56 ms for the tap, then 227 s waiting); a touch whose release lands between `TAP_MAX_MS` (400 ms) and `FOCUS_HOLD_MS` (500 ms) is neither a tap nor a hold, which a starved page can do to a Playwright tap. Filed as its own issue; the tests run none of this change's code.
 - **Shell heredocs in the Git Bash tool** failed on quotes again, as #139's entry warned; the edits went through the editor and small Python scripts instead.
 
+- **The `?dev` box a group pulled it on top of a group already apart, and stayed ticked when the rule left it in place.** Found reading the diff in the full run. **Cause:** `groupsApart(…, [k])` laid the one group out against the body alone; and with nothing changed in the state, the panel's key did not change, so the box was not rebuilt. **Fix:** `groupsApart` takes the groups already apart (`apart`, only read with `only`) and keeps the one it moves clear of them as of groups moved before it (`apartTranslations(boxes, fixed)`; `pulledApart` passes none and gives the same bits); the box unticks itself when the rule gives no offset. Node-tested (`pulls one more group apart clear of those already apart, which stay`).
+- **The full e2e run in the container had three failures, none of this change.** The reference screens' "converting" pictures on the phones (40 pixels, 1 %) and the smoke test "offers look presets" at its 30 s timeout failed in both of two repeats on this branch and in both of two on `main` (8ef2748) in the same container, so they are main's; the stall test "does not freeze" failed once of two on the branch and passed on main, the load-dependent limit of a software renderer on 4 cores (it runs none of the painting code). Left for their own issue.
+
 ## Dead ends
 
 None. The note's two alternatives (a fifth number a dab for the dab's group, so the record stays in the mini's own coordinates; lifting the brush by group) were weighed, not built: the first changes the record and `spaceDabs` for the same bytes, the second changes strokes made with nothing apart.
@@ -40,11 +43,14 @@ None. The note's two alternatives (a fifth number a dab for the dab's group, so 
 
 - **`groupsApart` on the generated figure (five groups), Node:** well under a millisecond; it is one pass over the triangles for the boxes and the rule over five boxes.
 - **The frame counter with every group apart** (`scripts/measure-painting.mjs`, a new run: the flat brush at 16 mm after `pullAllApart()`; a hit now casts once per offset at every sample): waits for the full run on the development PC. The criterion is #127's.
+- **The frame counter with every group apart**, development PC (RTX 3060, Chrome, D3D11), `node scripts/measure-painting.mjs`, the flat brush at 16 mm after `pullAllApart()`: the generated figure (35,012 triangles, 8 groups apart: its 5 and the three the group-brush runs before it made) median 0.2 ms, worst 0.3–0.6 ms; large-01 with its base (59,954 triangles, 4 apart) median 0.2 ms, worst 0.4–0.8 ms; 0 slow frames, between frames 6.1 ms (the display's), every stroke with its commit 724–732 ms, the same as the runs with nothing apart. #127's criterion holds; #139's figures (median 0.2–0.3 ms, worst ≤ 1.0 ms) unchanged. GPU process with the view open: 239 MB and 236 MB more than closed, as before. Fewer dabs than the other runs: the stroke's path crosses the canvas and the groups as drawn are smaller once framed apart, so more samples miss.
+- **The pixel tests in real Chromium** (`npm run docker:e2e -- e2e/painting.spec.ts`, 4 cores of the PC, software rendering in the container): 42 passed in 21.5 min, the three new ones 29.0 s, 49.2 s and 10.1 s; the whole bar `npm run docker:e2e` 116 passed of 119 in 36.8 min (the three failures above, main's). `npm run docker:check`: 60 files, 725 tests.
+- **Screenshots** in real Chrome on the PC (`docs/design/paint-groups-apart*.png`): the generated figure pulled apart; a stroke down the pulled-apart arm, yellow on the arm alone; put together after Undo and Redo, the same paint on the arm alone; the same dabs with the groups together, which paint the shoulder as well.
 - **The pixel tests** (`e2e/painting.spec.ts`, three new tests: a stroke down the pulled-apart arm paints the arm's texels and none of the body's where the same dabs with the groups together paint the shoulder, undo and redo to the same bytes with the groups together, and no dab across the gap; a band of mask at the wrist and one group-fill tap make the arm above the wrist a group, the hand staying with the arm; the Paint tool's buttons and boxes) passed in CI's first run of the PR (software rendering); not yet run on the PC.
 
 ## Still open
 
-- The frame figures with groups apart on the development PC and the reference laptop, and the pixel tests in real Chrome: `/continue-pr`.
+- The frame figures with groups apart on the reference laptop (the development PC's are above).
 - The PM's call on this PR: the dabs stay four numbers in the drawn coordinates with the recorded offsets (the note's §9 proposal), the brush lifting between offsets rather than groups, and the words.
 - A group the rule leaves in place (already clear of the body) is not moved by Pull apart, nor by its box in the Paint tool; an offset by hand (`pullApart(k, offset)`) moves it. Whether the tool should offer a hand offset is a product call.
 
