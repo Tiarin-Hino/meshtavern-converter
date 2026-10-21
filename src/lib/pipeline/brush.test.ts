@@ -14,7 +14,10 @@ import {
   unitDirection,
   type BrushSettings,
   type DabHit,
+  type FillToolId,
+  type PaintFill,
   type PaintStep,
+  type PaintStroke,
   type ToolId,
 } from './brush';
 import {
@@ -185,8 +188,19 @@ describe('ownerMap', () => {
 });
 
 describe('toolMask', () => {
-  it('paints every texel with the flat brush, the eraser and the fill', () => {
-    for (const tool of ['flat', 'eraser', 'fill'] as const)
+  it('paints every texel with the flat brush, the eraser, the lift, the fill, the mask’s and the groups’ tools', () => {
+    for (const tool of [
+      'flat',
+      'eraser',
+      'lift',
+      'fill',
+      'mask',
+      'unmask',
+      'mask-fill',
+      'unmask-fill',
+      'group',
+      'group-fill',
+    ] as const)
       for (const cavity of [-1, 0, 1])
         expect(toolMask(tool, cavity, 0.3, [0, 1, 0], DEFAULT_BRUSH)).toBe(1);
   });
@@ -353,7 +367,7 @@ describe('recentColours', () => {
     far: 1000,
     viewport: [800, 600] as [number, number],
   };
-  const stroke = (colour: string, tool: Exclude<ToolId, 'fill'> = 'flat'): PaintStep => ({
+  const stroke = (colour: string, tool: Exclude<ToolId, FillToolId> = 'flat'): PaintStep => ({
     kind: 'stroke',
     tool,
     colour,
@@ -391,6 +405,32 @@ describe('recentColours', () => {
     const steps = [stroke('#111111'), stroke('#222222', 'eraser'), stroke('#333333', 'eraser')];
     expect(recentColours(steps)).toEqual(['#111111']);
     expect(recentColours([stroke('#222222', 'eraser')])).toEqual([]);
+  });
+
+  it('leaves the lift out too (#137): it brings back colours, it lays none', () => {
+    expect(recentColours([stroke('#111111'), stroke('#222222', 'lift')])).toEqual(['#111111']);
+  });
+
+  it('leaves the mask’s steps out (#138): they lay no colour', () => {
+    const steps: PaintStep[] = [
+      stroke('#111111'),
+      stroke('#222222', 'mask'),
+      stroke('#333333', 'unmask'),
+      { ...(fill('#444444') as PaintFill), tool: 'mask-fill' },
+      { kind: 'mask', change: 'invert' },
+      { kind: 'mask', change: 'clear' },
+    ];
+    expect(recentColours(steps)).toEqual(['#111111']);
+  });
+
+  it('leaves the unmask fill and the groups’ steps out (#139): they lay no colour either', () => {
+    const steps: PaintStep[] = [
+      stroke('#111111'),
+      { ...(fill('#222222') as PaintFill), tool: 'unmask-fill' },
+      { ...(stroke('#333333', 'group') as PaintStroke), into: 1 },
+      { ...(fill('#444444') as PaintFill), tool: 'group-fill', into: 2 },
+    ];
+    expect(recentColours(steps)).toEqual(['#111111']);
   });
 
   it('stops at the limit, the newest kept', () => {

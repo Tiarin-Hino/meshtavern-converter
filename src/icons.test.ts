@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { ICON_SETS, iconMarkup, iconModule, LUCIDE_VERSION } from '../scripts/lib/icons.mjs';
 import { ICONS as PAGE_ICONS } from './page/icons';
 import { ICONS as QUESTION_ICONS } from './lib/questions/icons';
+import { ICONS as PANEL_ICONS } from './lib/painting-panel/icons';
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const PACKAGE = JSON.parse(read('package.json'));
@@ -25,7 +26,12 @@ describe('the icon modules', () => {
   it('hold decorative SVG in currentColor, the names of their lists', () => {
     expect(Object.keys(QUESTION_ICONS)).toEqual(ICON_SETS['src/lib/questions/icons.ts']);
     expect(Object.keys(PAGE_ICONS)).toEqual(ICON_SETS['src/page/icons.ts']);
-    for (const svg of [...Object.values(QUESTION_ICONS), ...Object.values(PAGE_ICONS)]) {
+    expect(Object.keys(PANEL_ICONS)).toEqual(ICON_SETS['src/lib/painting-panel/icons.ts']);
+    for (const svg of [
+      ...Object.values(QUESTION_ICONS),
+      ...Object.values(PAGE_ICONS),
+      ...Object.values(PANEL_ICONS),
+    ]) {
       expect(svg).toMatch(/^<svg class="icon" aria-hidden="true" focusable="false" /);
       expect(svg).toMatch(/<\/svg>$/);
       expect(svg).toContain('viewBox="0 0 24 24"');

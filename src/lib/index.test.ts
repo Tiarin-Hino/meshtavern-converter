@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as dev from './dev';
 import * as lib from './index';
 import * as painting from './painting';
+import * as paintingPanel from './painting-panel';
 import * as questions from './questions';
 import * as three from './three';
 
@@ -17,8 +18,11 @@ describe('the library entries', () => {
       'AIR_DIR_SOFTNESS',
       'AIR_FLOW_GAIN',
       'AIR_HARDNESS',
+      'APART_MIN_GAP_MM',
+      'APART_SHARE',
       'BAKED_LEVEL',
       'BAKE_STEPS',
+      'CONVERTER_VERSION',
       'CREATURE_SIZES',
       'ConversionCancelled',
       'ConversionProblem',
@@ -33,23 +37,37 @@ describe('the library entries', () => {
       'DRY_THRESHOLD',
       'FILL_ANGLE_DEG',
       'FILL_CREASE_CAVITY',
+      'FILL_TOOL_IDS',
       'FLAT_CAVITY',
       'GRID_SQUARE_MM',
+      'GROUP_TOOL_IDS',
       'IDENTITY',
       'INK_FLAT',
       'LOD_SPECS',
       'LOOK_PRESETS',
+      'MASK_TOOL_IDS',
+      'MAX_GROUPS',
       'MAX_PAIRS',
       'MAX_PARTS',
       'MAX_STROKES',
+      'PAINT_ENGINE_VERSION',
+      'PAINT_FILE_EXTENSION',
+      'PAINT_FILE_FORMAT',
+      'PAINT_FILE_GZIP_ABOVE',
+      'PAINT_FILE_MAX_BYTES',
+      'PAINT_FILE_TYPE',
+      'PAINT_FILE_VERSION',
       'PAINT_REACH_MM',
       'PAINT_SIZE',
+      'PAINT_SOURCE_MESSAGES',
       'PROBLEM_MESSAGES',
       'RECENT_COLOURS_MAX',
       'REGION_REACH_MM',
+      'SHELL_MIN_TRIANGLES',
       'SIZES',
       'SNIFF_BYTES',
       'SOURCE_PRESETS',
+      'SOURCE_ROLES',
       'STEPS',
       'TOOL_IDS',
       'TOP_CONE_DEG',
@@ -60,30 +78,47 @@ describe('the library entries', () => {
       'WASH_LIFT',
       'WASH_OCCLUSION',
       'checkFits',
+      'convertOptionsOf',
       'encodeGlb',
+      'engineOf',
       'estimateConversionBytes',
       'fillRegion',
       'findSourcePreset',
+      'fingerprintOf',
+      'fingerprintSources',
       'footprintMm',
       'fromAxisAngle',
       'glbEncoderReady',
+      'groupsApart',
+      'groupsOf',
+      'isFillTool',
+      'isGroupTool',
+      'isMaskTool',
+      'matchFingerprints',
+      'matchSources',
       'memoryBudgetBytes',
       'multiply',
       'paintAtVertices',
+      'paintFileOf',
+      'paintedOnOlderEngine',
+      'paintedTexture',
       'pairsAllowed',
       'presetOf',
       'readKtx2Header',
+      'readPaintFile',
       'readStlFile',
       'readStlFiles',
       'recentColours',
       'regionsOf',
       'sizeLabel',
       'sniffStl',
+      'sourceRoles',
       'spaceDabs',
       'toProblem',
       'toolMask',
       'turnAngleDeg',
       'vertexColours',
+      'writePaintFile',
     ]);
   });
 
@@ -159,7 +194,7 @@ describe('the library entries', () => {
     ]);
   });
 
-  it('painting.ts exports exactly the painting view and its words (#127, #135)', () => {
+  it('painting.ts exports exactly the painting view and its words (#127, #135, #139)', () => {
     expect(Object.keys(painting).sort()).toEqual([
       'BRUSH_DEPTH_MM',
       'BRUSH_DEPTH_SOFT_MM',
@@ -170,12 +205,33 @@ describe('the library entries', () => {
       'DEPTH_BIAS_MM',
       'FACING_MIN_COS',
       'FRAME_BUDGET_MS',
+      'GROUP_COLOURS',
+      'GROUP_COVER',
+      'GROUP_TINT_SHOWN',
+      'GROUP_TINT_STRENGTH',
       'KEYFRAME_EVERY',
+      'MASK_CUT',
+      'MASK_SHOWN',
+      'MASK_TINT',
+      'MASK_TINT_STRENGTH',
       'PAINT_COPY',
       'PAINT_DILATION_RINGS',
       'PICK_MODE',
       'UNDO_STEPS',
+      'describeGroup',
       'mountPainting',
+    ]);
+  });
+
+  it('painting-panel.ts exports exactly the painter’s panel and its tables (#166)', () => {
+    expect(Object.keys(paintingPanel).sort()).toEqual([
+      'DIRECTIONS',
+      'SIZE_STEP_MM',
+      'SLIDERS',
+      'UNIT_STEP',
+      'mountPaintingPanel',
+      'panelSwatches',
+      'sliderValue',
     ]);
   });
 
@@ -191,6 +247,8 @@ describe('the library entries', () => {
       './questions.css': './src/lib/questions.css',
       './painting': './src/lib/painting.ts',
       './painting.css': './src/lib/painting.css',
+      './painting-panel': './src/lib/painting-panel.ts',
+      './painting-panel.css': './src/lib/painting-panel.css',
     });
   });
 

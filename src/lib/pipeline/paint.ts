@@ -1,5 +1,13 @@
 import { dilate, forEachIslandTexel, MIN_NORMAL_AGREEMENT } from './bake';
 import { TriangleBvh, type SurfaceHit } from './bvh';
+import {
+  CAVITY_GAIN,
+  paintedBase,
+  paintFromBytes,
+  parseHexColour,
+  pointColour,
+  type Look,
+} from './look';
 import type { IndexedMesh } from './mesh';
 
 /**
@@ -119,4 +127,63 @@ export function paintWhere(
   });
   dilate(size, data, written, PAINT_DILATION);
   return { width: size, height: size, data };
+}
+
+/**
+ * What the painted texture is computed from (#167): per texel of the paint, the cavity (−1 crease
+ * … +1 edge, after CAVITY_GAIN, as the baked material decodes it), the occlusion (0 buried … 1
+ * open), and 1 where the texel takes paint (an island's or its gutter's). The painting view's
+ * `surface()` gives it, read from the detail texture the person painted on.
+ */
+export interface ShadedTexels {
+  cavity: Float32Array;
+  occlusion: Float32Array;
+  owned: Uint8Array;
+}
+
+const linearToSrgb = (value: number): number =>
+  value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
+const srgbByte = (value: number): number =>
+  Math.round(Math.max(0, Math.min(1, linearToSrgb(value))) * 255);
+
+/**
+ * The painted look per texel (#167, design note painter-on-the-page.md §6.1): the colour a viewer
+ * shows on the table level, as an opaque sRGB texture laid out like `albedo`, for a GLB whose
+ * material has no look of its own. A texel the surface owns is `pointColour` of its occlusion and
+ * cavity with the paint where its alpha is above 0 (the coat and the paint alone when the look is
+ * disabled); every other texel is the base coat. Not a multiplication of the paint by the look:
+ * the edges add light.
+ */
+export function paintedTexture(surface: ShadedTexels, look: Look, albedo: Albedo): Albedo {
+  const { width, height, data } = albedo;
+  const count = width * height;
+  if (data.length !== count * 4)
+    throw new RangeError(`A ${width} × ${height} paint texture is ${count * 4} bytes`);
+  if (surface.owned.length !== count || surface.cavity.length !== count)
+    throw new RangeError(`The surface has ${surface.owned.length} texels, the paint ${count}`);
+  const base = parseHexColour(look.base);
+  const coat = base.map(srgbByte);
+  const out = new Uint8Array(count * 4);
+  for (let texel = 0; texel < count; texel++) {
+    const k = texel * 4;
+    out[k + 3] = 255;
+    if (!surface.owned[texel]) {
+      out.set(coat, k);
+      continue;
+    }
+    const paint = data[k + 3]! > 0 ? paintFromBytes(data, k) : null;
+    const colour = look.enabled
+      ? pointColour(
+          base,
+          look,
+          surface.occlusion[texel]!,
+          surface.cavity[texel]! / CAVITY_GAIN,
+          paint,
+        )
+      : paintedBase(base, paint);
+    out[k] = srgbByte(colour[0]);
+    out[k + 1] = srgbByte(colour[1]);
+    out[k + 2] = srgbByte(colour[2]);
+  }
+  return { width, height, data: out };
 }

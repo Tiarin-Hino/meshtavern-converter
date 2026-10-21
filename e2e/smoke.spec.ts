@@ -368,6 +368,10 @@ test('applies the primed-and-washed look and lets the user adjust it', async ({
 test('offers look presets, and the export says which one the mini has', async ({
   page,
 }, testInfo) => {
+  // A picture of the viewport per preset: about 4.5 s each where the scene is drawn in software
+  // on a shared machine (the test container on 4 cores: 24–26 s for the five, 35 s when the
+  // reference screens ran beside it), past the default 30 s.
+  test.setTimeout(120_000);
   await page.evaluate(() => window.__mt.loadGenerated(200));
   await page.locator('#look > summary').click();
   const presets = page.getByRole('group', { name: 'Starting points' }).getByRole('button');

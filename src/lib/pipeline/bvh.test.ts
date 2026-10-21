@@ -226,6 +226,23 @@ describe('TriangleBvh.raycast and within', { timeout: 30_000 }, () => {
     });
   }
 
+  it('finds what lies behind the triangles `accept` leaves out (#139: a hidden group)', () => {
+    const tree = new TriangleBvh(recess);
+    // Straight down onto the recess floor at z = 3; the floor's triangles left out, the
+    // underside at z = 0 is the next surface below.
+    const floor = tree.raycast([0, 0, 50], [0, 0, -1])!;
+    // Every triangle with all three corners on the floor's plane.
+    const all = new Set<number>();
+    for (let t = 0; t < recess.indices.length / 3; t++)
+      if ([0, 1, 2].every((k) => recess.positions[recess.indices[t * 3 + k]! * 3 + 2] === 3))
+        all.add(t);
+    const behind = tree.raycast([0, 0, 50], [0, 0, -1], (t) => !all.has(t));
+    expect(all.has(floor.triangle)).toBe(true);
+    expect(behind!.t).toBeCloseTo(50, 5);
+    expect(all.has(behind!.triangle)).toBe(false);
+    expect(tree.raycast([0, 0, 50], [0, 0, -1], () => false)).toBeNull();
+  });
+
   it('misses with a ray that points away, or runs beside the mesh', () => {
     const tree = new TriangleBvh(recess);
     expect(tree.raycast([0, 0, 50], [0, 0, 1])).toBeNull();

@@ -6,3 +6,5 @@ package-lock.json
 # The application's theme files, copied byte for byte (#142, #143); the mockups' generated icon sheet.
 public/theme/
 docs/design/look-and-feel/icons.css
+# The recorded painting's replayed samples (#165), written by e2e/paint-file.spec.ts.
+src/regression/painting-replay.json

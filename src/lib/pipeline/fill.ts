@@ -111,17 +111,58 @@ export interface FillOptions {
   regions?: PaintRegions | null;
   /** Built once per mini (`triangleAdjacency`); made here when left out. */
   adjacency?: TriangleAdjacency;
+  /**
+   * The mask's cut (#138, design note `docs/design/paint-mask.md` §5): a byte a triangle, non-zero
+   * where the mask covers the triangle's middle. A cut triangle bounds a picked fill: it is never
+   * entered, and a seed on one fills nothing. Ready regions take no cut.
+   */
+  cut?: Uint8Array | null;
+  /**
+   * The hidden groups (#139, design note `docs/design/paint-groups.md` §6.2): a byte a triangle,
+   * non-zero where its group is hidden. A hidden triangle bounds a picked fill as a cut one does.
+   */
+  hidden?: Uint8Array | null;
+  /**
+   * The groups pulled apart (#139): a byte a triangle, the class of its group's offset (0 at none,
+   * k for the k-th distinct offset). A picked fill never crosses from one class to another.
+   */
+  apart?: Uint8Array | null;
+  /** A byte a triangle, the group it is in (#139): for `within` and a `group` seed. */
+  groupOf?: Uint8Array | null;
+  /** The group a picked fill may not leave (#139, the group fill): a seed in another fills nothing. */
+  within?: number | null;
+  /**
+   * The fold and the crease bound the flood (§7.1): true unless false. The group fill floods all
+   * that is connected (#139): its bounds are the cut, the hidden and pulled-apart groups and
+   * `within`, and `tolerance` is unused.
+   */
+  folds?: boolean;
 }
 
 /**
  * The triangles a fill covers, in ascending order. A `picked` seed floods from its triangle
  * across every shared edge that is not a bound: an edge is a bound when the angle between its
  * two faces exceeds the angle bound, or when both its corners' cavity (`mesh.cavity`, raw) lies
- * below the crease bound. A `base` or `figure` seed takes the ready region's triangles, no flood;
- * it needs `regions`, and a mini without them is refused.
+ * below the crease bound (unless `folds` is false), and a triangle the mask cuts (#138), that is
+ * hidden, pulled apart from the seed's or outside `within` (#139) is never entered; a seed on one
+ * fills nothing. A `base` or `figure` seed takes the ready region's triangles, no flood; it needs
+ * `regions`, and a mini without them is refused. A `group` seed takes the group's triangles, no
+ * flood; it needs `groupOf` (#139).
  */
 export function fillRegion(mesh: IndexedMesh, seed: FillSeed, options: FillOptions): Uint32Array {
   const triangles = mesh.indices.length / 3;
+  const perTriangle = (bytes: Uint8Array | null | undefined, name: string): Uint8Array | null => {
+    if (bytes && bytes.length !== triangles)
+      throw new RangeError(`The ${name} is not this mesh’s: one byte per triangle`);
+    return bytes ?? null;
+  };
+  const groupOf = perTriangle(options.groupOf, 'group map');
+  if (seed.kind === 'group') {
+    if (!groupOf) throw new RangeError('This mini has no groups to fill');
+    const region: number[] = [];
+    for (let t = 0; t < triangles; t++) if (groupOf[t] === seed.group) region.push(t);
+    return Uint32Array.from(region);
+  }
   if (seed.kind !== 'picked') {
     const base = options.regions?.base;
     if (!base) throw new RangeError('This mini has no ready regions to fill');
@@ -133,6 +174,20 @@ export function fillRegion(mesh: IndexedMesh, seed: FillSeed, options: FillOptio
   }
   if (!(seed.triangle >= 0 && seed.triangle < triangles))
     throw new RangeError(`No triangle ${seed.triangle} to fill from`);
+  const cut = perTriangle(options.cut, 'cut');
+  const hidden = perTriangle(options.hidden, 'hidden map');
+  const apart = perTriangle(options.apart, 'apart map');
+  const within = options.within ?? null;
+  if (within !== null && !groupOf) throw new RangeError('A fill within a group needs the groups');
+  // Where a picked flood may not go: cut, hidden, another offset class, another group.
+  const seedClass = apart?.[seed.triangle] ?? 0;
+  const closed = (t: number): boolean =>
+    !!cut?.[t] ||
+    !!hidden?.[t] ||
+    (apart !== null && apart[t] !== seedClass) ||
+    (within !== null && groupOf![t] !== within);
+  if (closed(seed.triangle)) return new Uint32Array(0);
+  const folds = options.folds ?? true;
   const { start, neighbours, edgeA, edgeB, faceNormals } =
     options.adjacency ?? triangleAdjacency(mesh);
   const tolerance = Math.max(0, Math.min(1, options.tolerance));
@@ -149,7 +204,12 @@ export function fillRegion(mesh: IndexedMesh, seed: FillSeed, options: FillOptio
     const t = queue[head++]!;
     for (let k = start[t]!; k < start[t + 1]!; k++) {
       const n = neighbours[k]!;
-      if (inside[n]) continue;
+      if (inside[n] || closed(n)) continue;
+      if (!folds) {
+        inside[n] = 1;
+        queue[tail++] = n;
+        continue;
+      }
       const cos =
         faceNormals[t * 3]! * faceNormals[n * 3]! +
         faceNormals[t * 3 + 1]! * faceNormals[n * 3 + 1]! +

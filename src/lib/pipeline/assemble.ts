@@ -315,8 +315,14 @@ export function proposedJoints(
   return proposals;
 }
 
+/** An axis-aligned box in mm: what the apart rule moves. */
+export interface Box {
+  min: Vec3;
+  max: Vec3;
+}
+
 /** The box of a mesh's vertices, moved by `by`. */
-function boxOfMesh(positions: Float32Array, by: Vec3 = [0, 0, 0]): { min: Vec3; max: Vec3 } {
+function boxOfMesh(positions: Float32Array, by: Vec3 = [0, 0, 0]): Box {
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < positions.length; i += 3) {
@@ -325,42 +331,43 @@ function boxOfMesh(positions: Float32Array, by: Vec3 = [0, 0, 0]): { min: Vec3; 
       if (positions[i + k]! > max[k]!) max[k] = positions[i + k]!;
     }
   }
-  return {
-    min: [min[0] + by[0], min[1] + by[1], min[2] + by[2]],
-    max: [max[0] + by[0], max[1] + by[1], max[2] + by[2]],
-  };
+  return movedBox({ min, max }, by);
 }
 
-const overlap = (a: { min: Vec3; max: Vec3 }, b: { min: Vec3; max: Vec3 }, gap: number): boolean =>
+/** A box moved by `by`. */
+export const movedBox = ({ min, max }: Box, by: Vec3): Box => ({
+  min: [min[0] + by[0], min[1] + by[1], min[2] + by[2]],
+  max: [max[0] + by[0], max[1] + by[1], max[2] + by[2]],
+});
+
+const overlap = (a: Box, b: Box, gap: number): boolean =>
   [0, 1, 2].every((k) => a.min[k]! < b.max[k]! + gap && b.min[k]! < a.max[k]! + gap);
 
 /**
- * The parts laid apart for marking (#93, PM decision 2026-10-01: shown separately, as a figure
- * beside its base): each part whose box comes within the gap of the body's is moved along the
- * line from the middle of the body's box to the middle of its own, just far enough that its box
- * clears the body's and those of the parts moved before it by `APART_SHARE` of the body's largest
- * side (at least `APART_MIN_GAP_MM`). The body and parts already apart stay. The direction keeps
- * where a part belongs (a wing to its side, a tail behind), so the connectors face each other.
- * Translations in the body's file frame.
+ * The apart rule over boxes, the first one the body's: each other box that comes within the gap
+ * of the body's is moved along the line from the middle of the body's box to the middle of its
+ * own, just far enough that it clears the body's box and those of the boxes moved before it by
+ * `APART_SHARE` of the body's largest side (at least `APART_MIN_GAP_MM`). The body and boxes
+ * already apart stay, at zero. One translation per box, in the boxes' order. `fixed` are boxes
+ * that do not move but are kept clear of, as those moved before (the painter's groups already
+ * pulled apart, when one more is). Shared by the parts at the parts question (`pulledApart`) and
+ * the painter's groups (`groupsApart`, #180).
  */
-export function pulledApart(
-  meshes: readonly IndexedMesh[],
-  figureFiles: readonly number[],
-): { file: number; translation: Vec3 }[] {
-  const body = boxOfMesh(meshes[figureFiles[0]!]!.positions);
+export function apartTranslations(boxes: readonly Box[], fixed: readonly Box[] = []): Vec3[] {
+  const body = boxes[0];
+  if (!body) return [];
   const side = Math.max(...[0, 1, 2].map((k) => body.max[k]! - body.min[k]!));
   const gap = Math.max(APART_MIN_GAP_MM, APART_SHARE * side);
-  const middle = (box: { min: Vec3; max: Vec3 }): Vec3 => [
+  const middle = (box: Box): Vec3 => [
     (box.min[0] + box.max[0]) / 2,
     (box.min[1] + box.max[1]) / 2,
     (box.min[2] + box.max[2]) / 2,
   ];
-  const placed = [body];
-  return figureFiles.map((file, k) => {
-    const own = boxOfMesh(meshes[file]!.positions);
+  const placed = [body, ...fixed];
+  return boxes.map((own, k) => {
     if (k === 0 || !overlap(own, body, gap)) {
       if (k > 0) placed.push(own);
-      return { file, translation: [0, 0, 0] };
+      return [0, 0, 0];
     }
     const from = middle(body);
     const to = middle(own);
@@ -376,16 +383,32 @@ export function pulledApart(
     }
     if (!Number.isFinite(t) || t < 0) t = 0;
     const at = (s: number): Vec3 => [away[0] * s, away[1] * s, away[2] * s];
-    // Further, a gap at a time, while it lands on a part moved before it.
+    // Further, a gap at a time, while it lands on a box moved before it.
     for (let step = 0; step < APART_MAX_STEPS; step++) {
-      const moved = boxOfMesh(meshes[file]!.positions, at(t));
+      const moved = movedBox(own, at(t));
       if (!placed.some((other) => overlap(moved, other, gap))) break;
       t += gap;
     }
     const translation = at(t);
-    placed.push(boxOfMesh(meshes[file]!.positions, translation));
-    return { file, translation };
+    placed.push(movedBox(own, translation));
+    return translation;
   });
+}
+
+/**
+ * The parts laid apart for marking (#93, PM decision 2026-10-01: shown separately, as a figure
+ * beside its base): the apart rule (`apartTranslations`) over the parts' boxes, the body's first.
+ * The direction keeps where a part belongs (a wing to its side, a tail behind), so the connectors
+ * face each other. Translations in the body's file frame.
+ */
+export function pulledApart(
+  meshes: readonly IndexedMesh[],
+  figureFiles: readonly number[],
+): { file: number; translation: Vec3 }[] {
+  const translations = apartTranslations(
+    figureFiles.map((file) => boxOfMesh(meshes[file]!.positions)),
+  );
+  return figureFiles.map((file, k) => ({ file, translation: translations[k]! }));
 }
 
 /**

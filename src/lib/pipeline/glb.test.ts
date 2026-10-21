@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { deflateSync } from 'node:zlib';
 import { validateBytes } from 'gltf-validator';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -345,3 +347,160 @@ describe('encodeGlb', () => {
     expect(() => encodeGlb(empty, { ...options, compact: false })).toThrow();
   });
 });
+
+describe('encodeGlb, painted (#167)', () => {
+  const vertexCount = sheet.positions.length / 3;
+  const uvs = new Float32Array(vertexCount * 2).map((_, i) => (i % 7) / 7);
+  const unwrapped: IndexedMesh = { ...sheet, uvs };
+  const sizing: Sizing = {
+    units: 'mm',
+    unitsMethod: 'guessed',
+    scale: 1,
+    base: null,
+    plainBase: null,
+    size: 'medium',
+    sizeMethod: 'suggested',
+    footprintSquares: 1,
+    baseDiameterMm: 25,
+    suggestedFrom: 'default',
+    warnings: [],
+  };
+  // Red on every other vertex, bare on the rest.
+  const paint = new Uint8Array(vertexCount * 4);
+  for (let v = 0; v < vertexCount; v += 2) paint.set([200, 30, 20, 255], v * 4);
+
+  // The bytes of #167's files with `asset.generator` renamed to PolyWash (#147): with the old
+  // name, 'MeshTavern Converter', the encoder gives #167's hashes again.
+  it.each([
+    [false, false, '395619590178e13ad9549cb5be7beca03b4322b1d82daf13b96705675e405134'],
+    [true, false, '569a5cefd172b1d7e47339344069e1dc57bd1e6fdfcb69c5e15e63454c6fb667'],
+    [false, true, 'c99ae5f9819a8461be5ecdd50725605fb218db09141d236190ffa47395d9c2b2'],
+    [true, true, '98f72f1cd131dbae0094eef6f50763284813373495ed0f5010509f428d224196'],
+  ])(
+    'without a paint is byte for byte the file before (compact: %s, uvs: %s)',
+    (compact, withUvs, sha256) => {
+      const glb = encodeGlb(withUvs ? unwrapped : sheet, {
+        ...options,
+        compact,
+        paint: null,
+        texture: null,
+      });
+      expect(createHash('sha256').update(new Uint8Array(glb)).digest('hex')).toBe(sha256);
+    },
+  );
+
+  it.each([false, true])(
+    'with a paint per vertex, COLOR_0 is the look over it (compact: %s)',
+    async (compact) => {
+      const glb = encodeGlb(sheet, { ...options, compact, sizing, paint });
+      const { json } = parse(glb);
+      expect(json.extras.meshtavern!.paint).toBe('vertex');
+      expect(json.meshes[0]!.primitives[0]!.attributes.COLOR_0).toBe(3);
+      expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+    },
+  );
+
+  it('stores the painted colours, each with its vertex, in the plain variant', () => {
+    const { json, bin } = parse(encodeGlb(sheet, { ...options, compact: false, paint }));
+    const view = json.bufferViews[json.accessors[3]!.bufferView]!;
+    const stored = bin.subarray(view.byteOffset, view.byteOffset + view.byteLength);
+    const colours = vertexColours(sheet, DEFAULT_LOOK, paint);
+    const toByte = (value: number): number => Math.round(Math.max(0, Math.min(1, value)) * 255);
+    for (const v of [0, 1, 2, 3, vertexCount - 1])
+      expect([...stored.subarray(v * 4, v * 4 + 3)]).toEqual(
+        [...colours.subarray(v * 3, v * 3 + 3)].map(toByte),
+      );
+    // The painted vertices are redder than the bare ones beside them.
+    expect(stored[0]! - stored[1]!).toBeGreaterThan(stored[4]! - stored[5]!);
+  });
+
+  it.each([false, true])(
+    'with a texture, the material takes it and COLOR_0 is left out (compact: %s)',
+    async (compact) => {
+      const texture = { mimeType: 'image/png' as const, bytes: tinyPng() };
+      const glb = encodeGlb(unwrapped, { ...options, compact, sizing, texture });
+      const { json, bin } = parse(glb);
+      const gltf = json as unknown as {
+        images: { bufferView: number; mimeType: string }[];
+        samplers: Record<string, number>[];
+        textures: { sampler: number; source: number }[];
+        materials: { pbrMetallicRoughness: { baseColorTexture?: Record<string, number> } }[];
+      };
+      expect(json.meshes[0]!.primitives[0]!.attributes).toEqual({
+        POSITION: 1,
+        NORMAL: 2,
+        _SHADING: 3,
+        TEXCOORD_0: 4,
+      });
+      expect(gltf.images).toEqual([{ bufferView: expect.any(Number), mimeType: 'image/png' }]);
+      expect(gltf.samplers).toEqual([
+        { magFilter: 9729, minFilter: 9729, wrapS: 33071, wrapT: 33071 },
+      ]);
+      expect(gltf.textures).toEqual([{ sampler: 0, source: 0 }]);
+      expect(gltf.materials[0]!.pbrMetallicRoughness.baseColorTexture).toEqual({
+        index: 0,
+        texCoord: 0,
+      });
+      expect(json.extras.meshtavern!.paint).toBe('texture');
+      const view = json.bufferViews[gltf.images[0]!.bufferView]!;
+      expect(view.byteOffset % 4).toBe(0);
+      expect([...bin.subarray(view.byteOffset, view.byteOffset + view.byteLength)]).toEqual([
+        ...texture.bytes,
+      ]);
+      expect(await validate(glb)).toEqual({ errors: 0, messages: [] });
+    },
+  );
+
+  it('refuses a texture without texture coordinates, and a paint of the wrong length', () => {
+    const texture = { mimeType: 'image/png' as const, bytes: tinyPng() };
+    expect(() => encodeGlb(sheet, { ...options, compact: false, texture })).toThrow(RangeError);
+    expect(() =>
+      encodeGlb(sheet, { ...options, compact: false, paint: new Uint8Array(4) }),
+    ).toThrow(RangeError);
+  });
+});
+
+/** A 2 × 2 opaque RGBA PNG, made here so the validator reads a real image (#167). */
+function tinyPng(): Uint8Array {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (bytes: Uint8Array): number => {
+    let c = 0xffffffff;
+    for (const byte of bytes) c = crcTable[(c ^ byte) & 0xff]! ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Uint8Array): Uint8Array => {
+    const out = new Uint8Array(12 + data.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, data.length);
+    out.set(new TextEncoder().encode(type), 4);
+    out.set(data, 8);
+    view.setUint32(8 + data.length, crc(out.subarray(4, 8 + data.length)));
+    return out;
+  };
+  const header = new Uint8Array(13);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint32(0, 2);
+  headerView.setUint32(4, 2);
+  header.set([8, 6, 0, 0, 0], 8);
+  // Each row: filter 0, then two RGBA texels.
+  const rows = Uint8Array.from([
+    0, 200, 30, 20, 255, 90, 90, 90, 255, 0, 90, 90, 90, 255, 200, 30, 20, 255,
+  ]);
+  const parts = [
+    Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header),
+    chunk('IDAT', new Uint8Array(deflateSync(rows))),
+    chunk('IEND', new Uint8Array(0)),
+  ];
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}

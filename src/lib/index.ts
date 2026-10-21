@@ -43,9 +43,12 @@ export type {
   UpReason,
   UpRole,
 } from './pipeline/ask';
-// A figure in several files, and the pairs of patches where its parts meet (issue #93).
+// A figure in several files, and the pairs of patches where its parts meet (issue #93); the apart
+// rule's constants, which the painter's groupsApart shares (#180).
 export {
   MAX_PARTS,
+  APART_SHARE,
+  APART_MIN_GAP_MM,
   type PairSummary,
   type PartResult,
   type PartsOptions,
@@ -68,6 +71,7 @@ export {
 export {
   ConversionProblem,
   PROBLEM_MESSAGES,
+  PAINT_SOURCE_MESSAGES,
   toProblem,
   type ProblemCode,
 } from './pipeline/problems';
@@ -135,12 +139,25 @@ export {
   type LookPresetId,
 } from './pipeline/look';
 // Paint (issue #125): the far and close levels take the table level's paint per vertex.
-export { PAINT_REACH_MM, paintAtVertices, type Albedo } from './pipeline/paint';
+export {
+  PAINT_REACH_MM,
+  paintAtVertices,
+  paintedTexture,
+  type Albedo,
+  type ShadedTexels,
+} from './pipeline/paint';
 // The painting engine's data (issue #127): strokes and fills as plain numbers a consumer can keep,
 // and the parts that need no GPU. The view that paints is ./painting.ts.
 export {
   PAINT_SIZE,
   TOOL_IDS,
+  MASK_TOOL_IDS,
+  GROUP_TOOL_IDS,
+  FILL_TOOL_IDS,
+  isMaskTool,
+  isGroupTool,
+  isFillTool,
+  MAX_GROUPS,
   DEFAULT_BRUSH,
   DAB_SPACING,
   RECENT_COLOURS_MAX,
@@ -148,13 +165,21 @@ export {
   spaceDabs,
   toolMask,
   type ToolId,
+  type MaskToolId,
+  type GroupToolId,
+  type FillToolId,
   type BrushSettings,
   type PaintStep,
   type PaintStroke,
   type PaintFill,
+  type MaskChange,
+  type PaintMask,
   type StrokeCamera,
   type FillSeed,
   type PaintRegions,
+  type PaintGroups,
+  type GroupOrigin,
+  type StepGroups,
 } from './pipeline/brush';
 // The hobby brushes' masks (#128): what toolMask reads, beside the look's constants; the dry
 // brush's reference (#133) is measured from flat.
@@ -173,8 +198,46 @@ export {
   AIR_DIR_EDGE,
   AIR_DIR_SOFTNESS,
 } from './pipeline/look';
+// The paint file (#165): a painting saved as its steps, the files it was painted on by their
+// fingerprints, and the choices that convert them again without a question.
+export { CONVERTER_VERSION } from './version';
+export {
+  PAINT_FILE_FORMAT,
+  PAINT_FILE_VERSION,
+  PAINT_ENGINE_VERSION,
+  PAINT_FILE_EXTENSION,
+  PAINT_FILE_TYPE,
+  PAINT_FILE_GZIP_ABOVE,
+  PAINT_FILE_MAX_BYTES,
+  SOURCE_ROLES,
+  paintFileOf,
+  writePaintFile,
+  readPaintFile,
+  paintedOnOlderEngine,
+  engineOf,
+  fingerprintOf,
+  fingerprintSources,
+  sourceRoles,
+  matchSources,
+  matchFingerprints,
+  convertOptionsOf,
+  type PaintFile,
+  type PaintFileContents,
+  type PaintChoices,
+  type SourceFingerprint,
+  type SourceRole,
+  type EngineRun,
+} from './pipeline/paint-file';
 export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
 export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
+// The automatic groups (#139): the base, the files and the shells, a byte a table-level triangle.
+export {
+  SHELL_MIN_TRIANGLES,
+  groupsOf,
+  groupsApart,
+  type GroupSources,
+  type GroupApart,
+} from './pipeline/groups';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
 export { readKtx2Header, type Ktx2Header } from './pipeline/compress';

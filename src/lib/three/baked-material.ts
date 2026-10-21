@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { BakedMaps } from '../pipeline/bake';
+import { MAX_GROUPS } from '../pipeline/brush';
 import { CAVITY_GAIN, DARKEST, HIGHLIGHT, parseHexColour, type Look } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 
@@ -57,6 +58,46 @@ const LOOK_GLSL = /* glsl */ `
   diffuseColor.rgb = mix( mtBase, mtCoat, uLook.x );
 `;
 
+/** The tint over the look (#138): the mask's colour where the tint map's red is. */
+const TINT_GLSL = /* glsl */ `
+  diffuseColor.rgb = mix( diffuseColor.rgb, uTint.rgb, texture2D( uTintMap, vNormalMapUv ).r * uTint.w );
+`;
+
+/** The groups in the vertex shader (#139): the attribute, the uniform, and the group to the fragment. */
+const GROUP_VERTEX_DECLARATIONS = /* glsl */ `
+attribute float group;
+uniform vec4 uGroups[ ${MAX_GROUPS} ];
+flat varying float vGroup;
+vec4 mtGroup;
+`;
+const GROUP_BEGIN_VERTEX = /* glsl */ `
+mtGroup = uGroups[ int( group + 0.5 ) ];
+vGroup = group;
+transformed += mtGroup.xyz;
+`;
+/** A hidden group's vertices at one point outside the view: no area, no fragment. */
+const GROUP_PROJECT_VERTEX = /* glsl */ `
+if ( mtGroup.w > 0.5 ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );
+`;
+const groupFragmentDeclarations = (colours: number): string => /* glsl */ `
+uniform vec3 uGroupColours[ ${colours} ];
+uniform vec4 uGroupTint;
+uniform sampler2D uGroupStrokeMap;
+uniform vec4 uGroupStroke;
+flat varying float vGroup;
+`;
+
+/**
+ * The groups' tint over the look and the mask's (#139): every group but 0 in its colour, by the
+ * tint's x; and while a group stroke is on the canvas, its coverage in the target group's colour.
+ */
+const groupTint = (colours: number): string => /* glsl */ `
+  int mtGroupIndex = int( vGroup + 0.5 );
+  if ( mtGroupIndex > 0 )
+    diffuseColor.rgb = mix( diffuseColor.rgb, uGroupColours[ mtGroupIndex % ${colours} ], uGroupTint.x );
+  diffuseColor.rgb = mix( diffuseColor.rgb, uGroupStroke.rgb, texture2D( uGroupStrokeMap, vNormalMapUv ).r * uGroupStroke.w );
+`;
+
 /**
  * Uncompressed detail texture. `detail` is uploaded as it is; pass a copy when several
  * minis must each own their texture (as different minis on a real table would).
@@ -81,6 +122,27 @@ export interface BakedMaterialOptions {
    * removing it needs a new material.
    */
   map?: THREE.Texture | null;
+  /**
+   * A tint over the surface (#138: the painting view's mask): where the texture's red channel is
+   * 1, the colour (`uniform`'s xyz, linear) is mixed in by `uniform`'s w after the look; w 0 shows
+   * none. Laid out as `map`, and owned by the consumer as it.
+   */
+  tint?: { map: THREE.Texture; uniform: { value: THREE.Vector4 } } | null;
+  /**
+   * The groups (#139, the painting view's, `docs/design/paint-groups.md` §5.2): the geometry has a
+   * `group` attribute (a byte a vertex), and `uniform` a vec4 a group (MAX_GROUPS), its offset in
+   * mm in xyz added to every vertex of the group, 1 in w where it is hidden: a hidden group's
+   * triangles are drawn nowhere. `colours` (linear, one a group by its index modulo their number)
+   * are mixed into every group but 0 by `tint`'s x; `stroke`'s red, laid out as `map`, mixes in
+   * `strokeTint`'s colour by its w. All owned by the consumer.
+   */
+  groups?: {
+    uniform: { value: THREE.Vector4[] };
+    colours: { value: THREE.Vector3[] };
+    tint: { value: THREE.Vector4 };
+    stroke: THREE.Texture;
+    strokeTint: { value: THREE.Vector4 };
+  } | null;
 }
 
 /**
@@ -94,6 +156,9 @@ export function createBakedMaterial(
   options: BakedMaterialOptions = {},
 ): THREE.MeshStandardMaterial {
   const paint = options.map ?? null;
+  const tint = options.tint ?? null;
+  const groups = options.groups ?? null;
+  const colours = groups?.colours.value.length ?? 0;
   const material = new THREE.MeshStandardMaterial({
     color: new THREE.Color(1, 1, 1),
     roughness: 0.75,
@@ -105,25 +170,45 @@ export function createBakedMaterial(
     shader.uniforms.uBase = uniforms.uBase;
     shader.uniforms.uLook = uniforms.uLook;
     if (paint) shader.uniforms.uPaint = { value: paint };
+    if (tint) {
+      shader.uniforms.uTintMap = { value: tint.map };
+      shader.uniforms.uTint = tint.uniform;
+    }
+    if (groups) {
+      shader.uniforms.uGroups = groups.uniform;
+      shader.uniforms.uGroupColours = groups.colours;
+      shader.uniforms.uGroupTint = groups.tint;
+      shader.uniforms.uGroupStrokeMap = { value: groups.stroke };
+      shader.uniforms.uGroupStroke = groups.strokeTint;
+    }
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nattribute float occlusion;\nvarying float vOcclusion;',
+        `#include <common>\nattribute float occlusion;\nvarying float vOcclusion;${groups ? GROUP_VERTEX_DECLARATIONS : ''}`,
       )
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOcclusion = occlusion;');
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\nvOcclusion = occlusion;${groups ? GROUP_BEGIN_VERTEX : ''}`,
+      )
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>${groups ? GROUP_PROJECT_VERTEX : ''}`,
+      );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform vec3 uBase;\nuniform vec4 uLook;\n${paint ? 'uniform sampler2D uPaint;\n' : ''}varying float vOcclusion;`,
+        `#include <common>\nuniform vec3 uBase;\nuniform vec4 uLook;\n${paint ? 'uniform sampler2D uPaint;\n' : ''}${tint ? 'uniform sampler2D uTintMap;\nuniform vec4 uTint;\n' : ''}${groups ? groupFragmentDeclarations(colours) : ''}varying float vOcclusion;`,
       )
       .replace(
         '#include <color_fragment>',
-        `#include <color_fragment>\n${paint ? PAINTED_COAT_GLSL : COAT_GLSL}${LOOK_GLSL}`,
+        `#include <color_fragment>\n${paint ? PAINTED_COAT_GLSL : COAT_GLSL}${LOOK_GLSL}${tint ? TINT_GLSL : ''}${groups ? groupTint(colours) : ''}`,
       );
   };
-  // All baked minis share one compiled program, and all painted ones another; each material
-  // still has its own uniforms (three.js asks every material for them once).
-  material.customProgramCacheKey = () => (paint ? 'meshtavern-baked-painted' : 'meshtavern-baked');
+  // All baked minis share one compiled program, all painted ones another, the painting view's
+  // tinted ones a third and its grouped ones (#139) a fourth; each material still has its own
+  // uniforms (three.js asks every material for them once).
+  const key = `meshtavern-baked${paint ? '-painted' : ''}${tint ? '-tinted' : ''}${groups ? `-grouped${colours}` : ''}`;
+  material.customProgramCacheKey = () => key;
   return material;
 }
 

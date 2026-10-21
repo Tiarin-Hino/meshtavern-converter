@@ -12,7 +12,8 @@ export interface Dialog {
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input, select, textarea, [tabindex="0"]';
 
-export function createDialog(scrim: HTMLElement): Dialog {
+/** `onClose` hears every close, however it came (#167: the confirm dialog's no). */
+export function createDialog(scrim: HTMLElement, onClose?: () => void): Dialog {
   const box = scrim.querySelector<HTMLElement>('.dialog')!;
   let opener: HTMLElement | null = null;
 
@@ -21,6 +22,7 @@ export function createDialog(scrim: HTMLElement): Dialog {
     scrim.hidden = true;
     opener?.focus();
     opener = null;
+    onClose?.();
   };
 
   scrim.addEventListener('click', (event) => {

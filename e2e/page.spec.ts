@@ -328,10 +328,10 @@ test("keeps the team's tools behind ?dev", async ({ page }) => {
   const tools = ['#stats', '#stress', '#bench', '#compact', '#perf', '#dev-badge'];
   const glb = { name: 'mini.glb', mimeType: 'model/gltf-binary', buffer: Buffer.alloc(64, 1) };
 
-  // Without dev: none of the tools exist, the picker offers STL only, a GLB is refused.
+  // Without dev: none of the tools exist, the picker offers STL and paint files, a GLB is refused.
   await open(page, '/?bake=off');
   for (const tool of tools) await expect(page.locator(tool), tool).toHaveCount(0);
-  await expect(page.locator('#file')).toHaveAttribute('accept', '.stl');
+  await expect(page.locator('#file')).toHaveAttribute('accept', '.stl,.mtpaint');
   await page.setInputFiles('#file', glb);
   await expect(page.locator('#status')).toHaveText('mini.glb is not an STL file.');
   expect(await page.evaluate(() => window.__mt.state.imported)).toBeNull();
@@ -340,7 +340,7 @@ test("keeps the team's tools behind ?dev", async ({ page }) => {
   await open(page, '/?dev&bake=off');
   for (const tool of tools) await expect(page.locator(tool), tool).toHaveCount(1);
   await expect(page.locator('#dev-badge')).toHaveClass(/badge-warn/);
-  await expect(page.locator('#file')).toHaveAttribute('accept', '.stl,.glb');
+  await expect(page.locator('#file')).toHaveAttribute('accept', '.stl,.mtpaint,.glb');
   for (const button of await page.locator('#stress button, #bench button').all())
     await expect(button).toHaveClass(/\bbtn\b/);
   await expect(page.locator('#bench a')).toHaveCount(3);

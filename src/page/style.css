@@ -43,6 +43,7 @@ body[data-state='converting'] [data-in]:not([data-in~='converting']),
 body[data-state='asking'] [data-in]:not([data-in~='asking']),
 body[data-state='done'] [data-in]:not([data-in~='done']),
 body[data-state='error'] [data-in]:not([data-in~='error']),
+body[data-state='painting'] [data-in]:not([data-in~='painting']),
 /* An opened GLB (dev) has nothing to size, adjust or export. */
 body[data-kind='glb'] [data-mini] {
   display: none !important;
@@ -131,7 +132,7 @@ a.menu-item {
   inset: 0;
 }
 
-/* The team's Paint tool (#127): the painting view over the viewport, the same box. */
+/* The painter (#127, #167): the painting view over the viewport, the same box. */
 #paint-view {
   position: absolute;
   inset: 0;
@@ -549,6 +550,25 @@ body[data-state='empty'] #panel {
   flex: none;
 }
 
+/* Paint (#167): the section's one button at the panel's width, as the mockup draws it. */
+#paint-open {
+  width: 100%;
+}
+
+/* The painter's footer: Open at the start, Save and Done at the end (§3.3). */
+#paint-file-open {
+  margin-right: auto;
+}
+
+/* The painter's panel (#166) in the painting state: its own sections, the frame's padding. */
+#paint-panel {
+  border-top: 1px solid var(--line);
+}
+
+#summary #paint-file-forget {
+  margin-top: var(--space-2);
+}
+
 /* The grab handle shows on a phone only. */
 .sheet-handle {
   display: none;
@@ -651,15 +671,8 @@ body[data-dragging] #drop-frame {
     0 0 / 16px 16px;
 }
 
-#dev-paint summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-
-#dev-paint #paint-open,
-#paint-controls > * {
-  margin-top: var(--space-2);
+#paint-team .field {
+  margin: 0;
 }
 
 #dev-tools {
@@ -758,7 +771,7 @@ body[data-dragging] #drop-frame {
     min-width: var(--tap-min);
   }
 
-  #panel input[type='checkbox']:not(.mt-questions *) {
+  #panel input[type='checkbox']:not(.mt-questions *, .mt-painting-panel *) {
     width: 20px;
     height: 20px;
   }
@@ -769,7 +782,8 @@ body[data-dragging] #drop-frame {
 
   /* The viewport, then the sheet under it, so the sheet never covers the mini (#41). */
   body[data-state='done'] #stage,
-  body[data-state='asking'] #stage {
+  body[data-state='asking'] #stage,
+  body[data-state='painting'] #stage {
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
@@ -819,9 +833,4 @@ body[data-dragging] #drop-frame {
     left: var(--space-2);
     bottom: var(--space-2);
   }
-}
-
-/* The colours used (#136): a swatch each, its paint set from the history as its background. */
-.paint-swatch {
-  border-color: var(--line-strong);
 }

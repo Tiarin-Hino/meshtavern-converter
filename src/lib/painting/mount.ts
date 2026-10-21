@@ -4,6 +4,9 @@ import {
   DAB_SPACING,
   DEFAULT_BRUSH,
   DEFAULT_PAINT_COLOUR,
+  isFillTool,
+  isGroupTool,
+  MAX_GROUPS,
   MOUSE_PRESSURE,
   PAINT_SIZE,
   TOOL_IDS,
@@ -11,24 +14,31 @@ import {
   unitDirection,
   type BrushSettings,
   type DabHit,
+  type FillToolId,
+  type GroupOrigin,
+  type MaskChange,
+  type PaintGroups,
+  type PaintMask,
   type PaintRegions,
   type FillSeed,
   type PaintFill,
   type PaintStep,
   type PaintStroke,
+  type StepGroups,
   type ToolId,
 } from '../pipeline/brush';
-import { TriangleBvh } from '../pipeline/bvh';
+import { TriangleBvh, type SurfaceHit } from '../pipeline/bvh';
+import { engineOf, PAINT_ENGINE_VERSION, type EngineRun } from '../pipeline/paint-file';
 import {
   fillRegion as floodRegion,
   triangleAdjacency,
   type TriangleAdjacency,
 } from '../pipeline/fill';
+import { groupsApart } from '../pipeline/groups';
 import { DEFAULT_LOOK, parseHexColour, type Look } from '../pipeline/look';
 import type { IndexedMesh } from '../pipeline/mesh';
 import type { Albedo } from '../pipeline/paint';
 import {
-  createBakedGeometry,
   createBakedMaterial,
   createDetailTexture,
   createLookUniforms,
@@ -36,19 +46,32 @@ import {
   updateLookUniforms,
 } from '../three/baked-material';
 import { ownCopy } from '../three/compressed-texture';
+import {
+  GROUP_COLOURS,
+  GROUP_STROKE_TINT_STRENGTH,
+  GROUP_TINT_STRENGTH,
+  MASK_TINT,
+  MASK_TINT_STRENGTH,
+} from '../three/scene-colours';
 import { PAINT_COPY, type PaintCopy } from './copy';
+import { createGroupedGeometry, writeGroups } from './geometry';
 import {
   BRUSH_DEPTH_MM,
   BRUSH_DEPTH_SOFT_MM,
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
+  MASK_CUT,
   PAINT_DILATION_RINGS,
   PaintPasses,
+  disposeKeyframe,
+  stampedStep,
+  type Keyframe,
   type PaintSurface,
 } from './passes';
 import { KEYFRAME_EVERY, PaintHistory, UNDO_STEPS } from './history';
-import { PaintScene } from './scene';
+import { PaintScene, type SceneBox } from './scene';
 import { toolPass } from './tools';
 
 export {
@@ -57,16 +80,29 @@ export {
   DABS_PER_PASS,
   DEPTH_BIAS_MM,
   FACING_MIN_COS,
+  GROUP_COVER,
+  MASK_CUT,
   PAINT_DILATION_RINGS,
   KEYFRAME_EVERY,
   UNDO_STEPS,
+  MASK_TINT,
+  MASK_TINT_STRENGTH,
+  GROUP_COLOURS,
+  GROUP_TINT_STRENGTH,
 };
+
+/** The mask's tint is shown when a view is mounted (#138). _(proposal)_ */
+export const MASK_SHOWN = true;
+/** The groups' tint is shown when a view is mounted (#139). _(proposal)_ */
+export const GROUP_TINT_SHOWN = false;
 
 /** The brush's diameter on the surface, in mm, at least and at most. _(proposal)_ */
 export const BRUSH_MIN_MM = 0.5;
 export const BRUSH_MAX_MM = 16;
 /** The cursor ring is never drawn smaller than this, in CSS pixels. _(proposal)_ */
 export const CURSOR_MIN_PX = 4;
+/** A lift stroke's first point is a hit on the surface: its texel is found within this, in mm (#137). */
+const LIFT_REACH_MM = 0.01;
 /** A frame longer than this, in ms, is counted as slow: 30 frames a second. _(proposal)_ */
 export const FRAME_BUDGET_MS = 33;
 
@@ -96,6 +132,21 @@ export interface MiniToPaint {
   paint?: Albedo | null;
   /** The ready regions of the fill (§7.2): `regionsOf(...)`, kept by the consumer or made again. Left out: no ready regions. */
   regions?: PaintRegions | null;
+  /** The mask to continue from (#138), PAINT_SIZE square, a byte a texel, as `mask()` gave it; left out or null: nothing masked. */
+  mask?: PaintMask | null;
+  /**
+   * The groups to continue with (#139), as `groups()` gave them, or `groupsOf(...)`; left out or
+   * null: the whole mini is group 0.
+   */
+  groups?: PaintGroups | null;
+  /**
+   * Steps to replay (#165): a paint file's, or a `history()` kept. They are applied over the paint,
+   * mask and groups above as they were the first time, and the view opens at the end of them, with
+   * undo back through all of them. Left out: none.
+   */
+  steps?: PaintStep[] | null;
+  /** The engine each of `steps` was painted on (a paint file's `engines`); left out: this one's. */
+  engines?: EngineRun[] | null;
 }
 
 export interface PaintPerf {
@@ -106,6 +157,14 @@ export interface PaintPerf {
   /** Frames over FRAME_BUDGET_MS. */
   slow: number;
 }
+
+/**
+ * What a lift stroke found under its start (#137, design note `docs/design/lift-eraser.md` §7): the
+ * step it takes away, as an index into `history()`, or why it takes nothing: no step of this
+ * session changed the paint there (bare, or the paint the view was opened with), or the step that
+ * did is older than the lift reaches (the last UNDO_STEPS steps). A refused lift stroke draws nothing and leaves no step.
+ */
+export type LiftOutcome = { lifted: number } | { refused: 'nothing-painted' | 'too-long-ago' };
 
 export interface PaintingState {
   open: boolean;
@@ -122,10 +181,42 @@ export interface PaintingState {
   painting: boolean;
   /** The frame counter of the last stroke (§11.3). */
   perf: PaintPerf;
+  /** What the last lift stroke since `open` found under its start (#137); null before the first. */
+  lift: LiftOutcome | null;
+  /** The mask's tint is drawn over the masked surface (#138). */
+  maskShown: boolean;
+  /** The groups (#139): each one's origin and triangles now, which are hidden, which apart, and the group tools' target. */
+  groups: GroupsState;
+  /** Every group but 0 is drawn in its colour (#139). */
+  groupTint: boolean;
+  /** The look the open mini is drawn with (#166): `MiniToPaint.look` at `open`, then `setLook`'s. */
+  look: Look;
+  /** A `pickColour` waits for its tap (#166). */
+  picking: boolean;
+}
+
+/** The groups as the view shows them (#139, design note `docs/design/paint-groups.md` §6.3). */
+export interface GroupsState {
+  /** Groups 0 … n − 1: how each was made and how many triangles it has now. */
+  list: { origin: GroupOrigin; triangles: number }[];
+  /** The groups not drawn, ascending. */
+  hidden: number[];
+  /**
+   * The groups pulled apart (#180) and their offsets in mm, by group: each is drawn, painted and
+   * hit where its offset puts it; the mini's own coordinates do not move.
+   */
+  apart: { group: number; offset: Vec3 }[];
+  /** The group the group tools add to; `list.length` for a new one. */
+  target: number;
 }
 
 export interface PaintingView {
   readonly state: PaintingState;
+  /**
+   * Hears every state the view gives (#166), after the options' `onChange`, in the order of
+   * subscribing: a panel beside the consumer's own listener. The function returned unsubscribes.
+   */
+  subscribe(listener: (state: PaintingState) => void): () => void;
   /** Opens one open after another; resolves without opening when `close`, `dispose` or a later `open` came first. */
   open(mini: MiniToPaint): Promise<void>;
   close(): void;
@@ -137,13 +228,57 @@ export interface PaintingView {
   setNavigating(on: boolean): void;
   /** Fills a ready region (§7.2); a tap with the fill tool fills the region under it. */
   fillRegion(region: 'base' | 'figure'): Promise<void>;
+  /** Masks a ready region (#138): a mask fill of it, one step; a tap with `mask-fill` masks the region under it. */
+  maskRegion(region: 'base' | 'figure'): Promise<void>;
+  /** Clears the mask (#138): one step. */
+  clearMask(): Promise<void>;
+  /** Inverts the mask, masked texels open and open ones masked (#138): one step. */
+  invertMask(): Promise<void>;
+  /** The mask as pixels (#138): PAINT_SIZE square, a byte a texel, 0 open … 255 masked, row 0 at v = 0. Never part of `paint()`. */
+  mask(): Promise<PaintMask>;
+  /** Draws the mask's tint over the masked surface, or not (#138): no step. */
+  setMaskShown(on: boolean): void;
+  /** The groups as data (#139): the map and how each group was made. Synchronous: the map is CPU data. */
+  groups(): PaintGroups;
+  /** Draws group `group` or not (#139); a hidden group takes no paint, and what lies behind it can be painted. Not a step. */
+  setGroupShown(group: number, shown: boolean): void;
+  /** Draws every group again (#139). Not a step. */
+  showAllGroups(): void;
+  /** The group the group tools add to (#139); `'new'` makes a new one at the next group step. */
+  setGroupTarget(group: number | 'new'): void;
+  /** Draws every group but 0 in its colour, or not (#139). Not a step. */
+  setGroupTint(on: boolean): void;
+  /**
+   * Pulls group `group` apart (#180, design note `docs/design/paint-groups.md` §9): drawn, painted
+   * and hit moved by `offset` (mm, the mini's axes), so what it covered can be reached and its own
+   * surface painted without touching a neighbour's; null (or a zero offset) puts it back. Without
+   * an offset, the rule's (`groupsApart`) for this group alone, clear of the groups already apart;
+   * a group the rule leaves in place stays. Whether the group is apart afterwards. Not a step:
+   * undo never puts a group back. A dab on a group apart paints that group alone; a stroke records
+   * the offsets at its start and replays with them, so its bytes are the same with the groups
+   * together.
+   */
+  pullApart(group: number, offset?: Vec3 | null): boolean;
+  /** Pulls every group apart by the rule of the parts question (`groupsApart`): group 0 stays. Not a step. */
+  pullAllApart(): void;
+  /** Puts every group back (#180). Not a step. */
+  putTogether(): void;
+  /** A paint fill of a group's triangles (#139): one `fill` step with a `group` seed. */
+  fillGroup(group: number): Promise<void>;
+  /** A group's triangles masked or unmasked (#139): one `mask-fill` or `unmask-fill` step with a `group` seed. */
+  maskGroup(group: number, masked: boolean): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
   /** The paint as pixels: PAINT_SIZE square, sRGB, straight alpha, row 0 at v = 0. Resolves after the GPU read. */
   paint(): Promise<Albedo>;
   /** The steps applied so far, oldest first, as data the consumer may keep (§4). Undone steps are not in it. */
   history(): PaintStep[];
-  /** For tests and scripts: a stroke given as points on the surface. */
+  /**
+   * The engine each step of `history()` was painted on, oldest first (#165): the steps replayed at
+   * `open` keep theirs, the rest are PAINT_ENGINE_VERSION's. What a paint file's `engines` holds.
+   */
+  engines(): EngineRun[];
+  /** For tests and scripts: a stroke given as points on the surface, in the coordinates the mini is drawn in (#180). */
   stroke(points: Vec3[], pressure?: number[]): Promise<void>;
   /** For tests and scripts: a stroke given as a path on the canvas (CSS px), a point a frame, as a pointer would. */
   strokeAt(path: [number, number][]): Promise<void>;
@@ -154,14 +289,33 @@ export interface PaintingView {
    * texel under the point, whatever its alpha, and null where the mini is bare there.
    */
   colourAt(x: number, y: number, mode?: PickMode): Promise<string | null>;
-  /** The texel under a canvas point, or null off the mini: what a pixel test asserts on. */
+  /**
+   * The pipette on a tap (#166): waits for the next primary pointer-down on the canvas (the left
+   * button, a pen's tip, one finger) and resolves with `colourAt` there, without a stroke: null for
+   * a tap off the mini (or on bare paint, `painted`). Not a tool: `state.tool` stays, and no step
+   * is made. While it waits `state.picking` is true and the host carries `mt-painting-picking`.
+   * `cancelPick`, `close`, `dispose` and a second `pickColour` end a waiting pick without a tap:
+   * it resolves with undefined, so a panel can tell a cancel from a miss.
+   */
+  pickColour(mode?: PickMode): Promise<string | null | undefined>;
+  cancelPick(): void;
+  /**
+   * The texel under a canvas point, or null off the mini: what a pixel test asserts on. `point` is
+   * in the mini's own coordinates, whatever group is pulled apart (#180).
+   */
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null;
-  /** Where a point of the mini is on the canvas, CSS px: what a test strokes along. */
+  /** Where a point is on the canvas, CSS px, in the coordinates the mini is drawn in: what a test strokes along. */
   screenOf(point: Vec3): [number, number];
   /** For tests: what the tools' masks read at every texel (cavity, occlusion, normal), as the composite reads it (#128). */
   surface(): Promise<PaintSurface>;
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void;
   setWireframe(on: boolean): void;
+  /**
+   * Shows the view or hides it (#167): hidden, its frame loop is stopped and pointer input is
+   * ignored, and everything else works as before (`paint`, `surface`, `history`, `setLook`, `open`).
+   * Not a step, not in the state; a view is shown until this says otherwise.
+   */
+  setShown(shown: boolean): void;
   dispose(): void;
 }
 
@@ -182,6 +336,8 @@ const NO_PERF: PaintPerf = { frames: 0, medianMs: 0, worstMs: 0, slow: 0 };
 /** A mini open for painting: what the view holds until `close`. */
 interface Opened {
   mesh: IndexedMesh;
+  /** The group map (#139), the live truth, and how each group was made. */
+  groups: PaintGroups;
   bvh: TriangleBvh;
   adjacency: TriangleAdjacency;
   regions: PaintRegions | null;
@@ -190,6 +346,32 @@ interface Opened {
   uniforms: ReturnType<typeof createLookUniforms>;
 }
 
+/** A keyframe of the view (#139): the passes' targets and the groups as they were. */
+interface ViewKeyframe extends Keyframe {
+  groups: Uint8Array;
+  made: GroupOrigin[];
+}
+
+/** The groups' colours (#139), linear, for the material's uniform. */
+const groupColours = (): THREE.Vector3[] =>
+  GROUP_COLOURS.map((hex) => {
+    const { r, g, b } = new THREE.Color(hex);
+    return new THREE.Vector3(r, g, b);
+  });
+
+/** The tint's uniform (#138): the mask's colour, linear, and its strength, 0 while hidden. */
+const tintOf = (shown: boolean): THREE.Vector4 => {
+  const { r, g, b } = new THREE.Color(MASK_TINT);
+  return new THREE.Vector4(r, g, b, shown ? MASK_TINT_STRENGTH : 0);
+};
+
+/**
+ * A pointer sample on the surface: the hit's point in the coordinates the mini is drawn in (a
+ * group's offset included, #180), the pressure, and the group hit (−1 for a point given by a
+ * test). Null where the pointer missed the mini.
+ */
+type Sample = { point: Vec3; pressure: number; group: number } | null;
+
 /** The stroke on the canvas, not yet committed. */
 interface LiveStroke {
   step: PaintStroke;
@@ -197,6 +379,10 @@ interface LiveStroke {
   drawn: number;
   /** The last dab laid, for spacing the next samples; null after a miss. */
   last: number[] | null;
+  /** The offset class of the last hit (#180): a hit in another class lifts the brush, as a miss does. */
+  lastClass: string | null;
+  /** A lift stroke that found nothing to take away (#137): it draws nothing and leaves no step. */
+  refused: boolean;
   /** Frame times from the first dab on (§11.3). */
   frames: number[];
 }
@@ -207,12 +393,45 @@ class Painting implements PaintingView {
   private readonly passes: PaintPasses;
   private readonly copy: PaintCopy;
   private readonly onChange: ((state: PaintingState) => void) | null;
+  /** The subscribers (#166), each a box of its own so the same function may subscribe twice. */
+  private readonly listeners: { listener: (state: PaintingState) => void }[] = [];
+  /** The look the open mini is drawn with (#166). */
+  private look: Look = DEFAULT_LOOK;
+  /** The pick waiting for its tap (#166), and its mode. */
+  private picking: { mode: PickMode; resolve: (hex: string | null | undefined) => void } | null =
+    null;
   private readonly cursor: HTMLDivElement;
   private opened: Opened | null = null;
   private live: LiveStroke | null = null;
   /** The steps and the keyframes (§8): made at `open`. */
   private timeline: PaintHistory | null = null;
-  private readonly keyframes = new Map<number, THREE.WebGLRenderTarget>();
+  private readonly keyframes = new Map<number, ViewKeyframe>();
+  /**
+   * The engines of the steps replayed at `open` (#165), and how many of them are still the first
+   * steps of the history: a step pushed after undoing into them drops the rest.
+   */
+  private replayed: { engines: EngineRun[]; kept: number } = { engines: [], kept: 0 };
+  private lift: LiftOutcome | null = null;
+  /** The mask's tint (#138), shared by every mini this view opens. */
+  private readonly tint = { value: tintOf(MASK_SHOWN) };
+  private maskShown = MASK_SHOWN;
+  /** The groups not drawn (#139): view state, not steps. */
+  private readonly hidden = new Set<number>();
+  /** The groups pulled apart and their offsets (#180): view state, not steps. */
+  private readonly apart = new Map<number, Vec3>();
+  /** The casts a hit takes (#180), one per distinct offset; made again when the groups or the offsets change. */
+  private casts: Cast[] | null = null;
+  /** The group tools' target (#139). */
+  private target: number | 'new' = 'new';
+  private groupTint = GROUP_TINT_SHOWN;
+  /** `setShown` (#167): a hidden view draws no frame and takes no pointer. */
+  private shown = true;
+  /** The groups' tint and colours, and the group stroke's (#139), shared by every mini this view opens. */
+  private readonly groupTintUniform = {
+    value: new THREE.Vector4(GROUP_TINT_SHOWN ? GROUP_TINT_STRENGTH : 0, 0, 0, 0),
+  };
+  private readonly groupColours = { value: groupColours() };
+  private readonly strokeTint = { value: new THREE.Vector4(0, 0, 0, 0) };
   private tool: ToolId = 'flat';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
   private colour = DEFAULT_PAINT_COLOUR;
@@ -262,17 +481,86 @@ class Painting implements PaintingView {
       regions: this.opened?.regions ? ['base', 'figure'] : [],
       painting: this.live !== null,
       perf: this.perf,
+      lift: this.lift,
+      maskShown: this.maskShown,
+      groups: this.groupsState(),
+      groupTint: this.groupTint,
+      look: { ...this.look },
+      picking: this.picking !== null,
     };
+  }
+
+  /** The groups as the state shows them (#139). */
+  private groupsState(): GroupsState {
+    const groups = this.opened?.groups;
+    const list = (groups?.made ?? [{ by: 'body' as const }]).map((origin) => ({
+      origin: { ...origin },
+      triangles: 0,
+    }));
+    if (groups) for (const group of groups.of) list[group]!.triangles++;
+    return {
+      list,
+      hidden: [...this.hidden].sort((a, b) => a - b),
+      apart: this.apartList(),
+      target: this.targetGroup(),
+    };
+  }
+
+  /** The groups apart with their offsets, by group (#180): the state's and a step's record. */
+  private apartList(): { group: number; offset: Vec3 }[] {
+    return [...this.apart]
+      .sort((a, b) => a[0] - b[0])
+      .map(([group, offset]) => ({ group, offset: [offset[0], offset[1], offset[2]] }));
+  }
+
+  /** The group the group tools add to now: the target, or a new one. */
+  private targetGroup(): number {
+    const count = this.opened?.groups.made.length ?? 1;
+    return this.target === 'new' || this.target >= count ? count : this.target;
   }
 
   /** A fresh state for the consumer. */
   private emit(): void {
     this.current = this.snapshot();
     this.onChange?.(this.current);
+    for (const { listener } of [...this.listeners]) listener(this.current);
+  }
+
+  subscribe(listener: (state: PaintingState) => void): () => void {
+    const entry = { listener };
+    this.listeners.push(entry);
+    return () => {
+      const at = this.listeners.indexOf(entry);
+      if (at >= 0) this.listeners.splice(at, 1);
+    };
+  }
+
+  pickColour(mode: PickMode = PICK_MODE): Promise<string | null | undefined> {
+    this.endPick(false);
+    return new Promise((resolve) => {
+      this.picking = { mode, resolve };
+      this.host.classList.add('mt-painting-picking');
+      this.cursor.hidden = true;
+      this.emit();
+    });
+  }
+
+  cancelPick(): void {
+    this.endPick(true);
+  }
+
+  /** Ends a waiting pick without a tap: it resolves with undefined, and says so when `emit`. */
+  private endPick(emit: boolean): void {
+    const picking = this.picking;
+    if (!picking) return;
+    this.picking = null;
+    this.host.classList.remove('mt-painting-picking');
+    picking.resolve(undefined);
+    if (emit) this.emit();
   }
 
   open(mini: MiniToPaint): Promise<void> {
-    const { mesh, paint, regions } = mini;
+    const { mesh, paint, regions, mask, groups } = mini;
     if (!mesh.uvs || !mesh.normals) throw new RangeError(this.copy.cannotPaint);
     if (
       paint &&
@@ -281,8 +569,17 @@ class Painting implements PaintingView {
         paint.data.length !== PAINT_SIZE * PAINT_SIZE * 4)
     )
       throw new RangeError(`A paint is ${PAINT_SIZE} × ${PAINT_SIZE} texels, four bytes each`);
+    if (
+      mask &&
+      (mask.width !== PAINT_SIZE ||
+        mask.height !== PAINT_SIZE ||
+        mask.data.length !== PAINT_SIZE * PAINT_SIZE)
+    )
+      throw new RangeError(`A mask is ${PAINT_SIZE} × ${PAINT_SIZE} texels, a byte each`);
     if (regions && regions.base.length !== mesh.indices.length / 3)
       throw new RangeError('The regions are not this mesh’s: one byte per triangle');
+    if (groups) checkGroups(groups, mesh.indices.length / 3);
+    if (mini.steps) checkSteps(mini.steps, mini.engines ?? null, mesh.indices.length / 3, regions);
     const texture = ownTexture(mini.texture);
     if (!texture) throw new RangeError(this.copy.cannotPaint);
     const generation = ++this.generation;
@@ -303,15 +600,25 @@ class Painting implements PaintingView {
     }
     this.release();
     const { mesh } = mini;
-    const geometry = createBakedGeometry(mesh);
-    const uniforms = createLookUniforms(mini.look ?? DEFAULT_LOOK);
+    // The view's own copy of the groups (#139): the consumer's are never changed.
+    const groups: PaintGroups = mini.groups
+      ? { of: mini.groups.of.slice(), made: mini.groups.made.map((origin) => ({ ...origin })) }
+      : { of: new Uint8Array(mesh.indices.length / 3), made: [{ by: 'body' }] };
+    this.hidden.clear();
+    this.apart.clear();
+    this.casts = null;
+    this.target = 'new';
+    this.writeGroupUniform(null);
+    const geometry = createGroupedGeometry(mesh, groups.of);
+    this.look = { ...(mini.look ?? DEFAULT_LOOK) };
+    const uniforms = createLookUniforms(this.look);
     const drop = (): void => {
       this.passes.close();
       geometry.dispose();
       texture.dispose();
     };
     try {
-      await this.passes.open(geometry, mesh, texture, mini.paint ?? null);
+      await this.passes.open(geometry, mesh, texture, mini.paint ?? null, mini.mask ?? null);
     } catch (error) {
       drop();
       if (abandoned()) return;
@@ -322,12 +629,22 @@ class Painting implements PaintingView {
       drop();
       return;
     }
-    const material = createBakedMaterial(texture, uniforms, { map: this.passes.liveTexture });
+    const material = createBakedMaterial(texture, uniforms, {
+      map: this.passes.liveTexture,
+      tint: { map: this.passes.maskTexture, uniform: this.tint },
+      groups: {
+        uniform: this.passes.groupUniform,
+        colours: this.groupColours,
+        tint: this.groupTintUniform,
+        stroke: this.passes.strokeTexture,
+        strokeTint: this.strokeTint,
+      },
+    });
     const shown = new THREE.Mesh(geometry, material);
     const box = new THREE.Box3().setFromArray(mesh.positions);
-    const size = box.getSize(new THREE.Vector3());
     this.opened = {
       mesh,
+      groups,
       bvh: new TriangleBvh(mesh),
       adjacency: triangleAdjacency(mesh),
       regions: mini.regions ?? null,
@@ -336,16 +653,33 @@ class Painting implements PaintingView {
       uniforms,
     };
     this.timeline = new PaintHistory({
-      snapshot: (at) => this.keyframes.set(at, this.passes.snapshot()),
-      restore: (at) => this.passes.restore(this.keyframes.get(at)!),
-      apply: (step) => this.replay(step),
+      snapshot: (at) =>
+        this.keyframes.set(at, {
+          ...this.passes.snapshot(),
+          groups: groups.of.slice(),
+          made: groups.made.map((origin) => ({ ...origin })),
+        }),
+      restore: (at) => this.restoreKeyframe(this.keyframes.get(at)!),
+      apply: (step, index) => this.replay(step, index),
       drop: (at) => {
-        this.keyframes.get(at)?.dispose();
+        const keyframe = this.keyframes.get(at);
+        if (keyframe) disposeKeyframe(keyframe);
         this.keyframes.delete(at);
       },
     });
     this.perf = NO_PERF;
-    this.scene.show(shown, [size.x, size.y, size.z]);
+    this.lift = null;
+    try {
+      this.replaySteps(mini.steps ?? [], mini.engines ?? null);
+    } catch (error) {
+      this.release();
+      texture.dispose();
+      throw error;
+    }
+    this.scene.show(shown, {
+      min: [box.min.x, box.min.y, box.min.z],
+      max: [box.max.x, box.max.y, box.max.z],
+    });
     this.passes.warm(this.scene.strokeCamera(), TOOL_IDS);
     await this.scene.nextFrame();
     this.emit();
@@ -353,7 +687,10 @@ class Painting implements PaintingView {
 
   close(): void {
     this.generation++;
+    this.endPick(false);
     this.release();
+    // A pick ended without a mini to release still says so.
+    if (this.current.picking) this.emit();
   }
 
   /** Releases the mini that is open, if any. */
@@ -400,6 +737,7 @@ class Painting implements PaintingView {
   }
 
   setLook(look: Look): void {
+    this.look = { ...look };
     if (this.opened) updateLookUniforms(this.opened.uniforms, look);
     this.emit();
   }
@@ -412,22 +750,295 @@ class Painting implements PaintingView {
   fillRegion(region: 'base' | 'figure'): Promise<void> {
     if (!this.opened?.regions)
       return Promise.reject(new RangeError('This mini has no ready regions to fill'));
-    return this.fill({ kind: region });
+    return this.fill({ kind: region }, 'fill');
   }
 
-  /** A fill (§7): one step, its region found from its seed, applied as a replay would. */
-  private async fill(seed: FillSeed): Promise<void> {
+  maskRegion(region: 'base' | 'figure'): Promise<void> {
+    if (!this.opened?.regions)
+      return Promise.reject(new RangeError('This mini has no ready regions to mask'));
+    return this.fill({ kind: region }, 'mask-fill');
+  }
+
+  clearMask(): Promise<void> {
+    return this.changeMask('clear');
+  }
+
+  invertMask(): Promise<void> {
+    return this.changeMask('invert');
+  }
+
+  async mask(): Promise<PaintMask> {
+    this.commitLive();
+    const data = await this.passes.readMask();
+    return { width: PAINT_SIZE, height: PAINT_SIZE, data };
+  }
+
+  setMaskShown(on: boolean): void {
+    this.maskShown = on;
+    this.tint.value.w = on ? MASK_TINT_STRENGTH : 0;
+    this.emit();
+  }
+
+  groups(): PaintGroups {
+    this.commitLive();
+    const groups = this.opened?.groups;
+    if (!groups) return { of: new Uint8Array(0), made: [{ by: 'body' }] };
+    return { of: groups.of.slice(), made: groups.made.map((origin) => ({ ...origin })) };
+  }
+
+  setGroupShown(group: number, shown: boolean): void {
+    this.commitLive();
+    this.checkGroup(group);
+    if (shown) this.hidden.delete(group);
+    else this.hidden.add(group);
+    this.casts = null;
+    this.writeGroupUniform(null);
+    this.emit();
+  }
+
+  showAllGroups(): void {
+    this.commitLive();
+    this.hidden.clear();
+    this.casts = null;
+    this.writeGroupUniform(null);
+    this.emit();
+  }
+
+  setGroupTarget(group: number | 'new'): void {
+    this.commitLive();
+    if (group !== 'new') this.checkGroup(group);
+    this.target = group;
+    this.emit();
+  }
+
+  setGroupTint(on: boolean): void {
+    this.groupTint = on;
+    this.groupTintUniform.value.x = on ? GROUP_TINT_STRENGTH : 0;
+    this.emit();
+  }
+
+  pullApart(group: number, offset?: Vec3 | null): boolean {
+    this.commitLive();
+    this.checkGroup(group);
+    if (offset === undefined) {
+      const opened = this.opened;
+      offset = opened
+        ? (groupsApart(opened.mesh, opened.groups, [group], this.apartList())[0]?.offset ?? null)
+        : null;
+    }
+    if (offset !== null && (offset.length !== 3 || !offset.every(Number.isFinite)))
+      throw new RangeError('An offset is three finite numbers, mm along the mini’s axes');
+    if (offset === null || offset.every((value) => value === 0)) this.apart.delete(group);
+    else this.apart.set(group, [offset[0], offset[1], offset[2]]);
+    this.movedGroups();
+    return this.apart.has(group);
+  }
+
+  pullAllApart(): void {
+    this.commitLive();
+    const opened = this.opened;
+    if (!opened) return;
+    this.apart.clear();
+    for (const { group, offset } of groupsApart(opened.mesh, opened.groups))
+      this.apart.set(group, offset);
+    this.movedGroups();
+  }
+
+  putTogether(): void {
+    this.commitLive();
+    this.apart.clear();
+    this.movedGroups();
+  }
+
+  /** After the offsets changed (#180): the uniform, the casts, the camera's frame and the state. */
+  private movedGroups(): void {
+    this.casts = null;
+    this.writeGroupUniform(null);
+    if (this.opened) this.scene.reframe(this.drawnBox());
+    this.emit();
+  }
+
+  /**
+   * The box of the groups as they are drawn (#180): the mini's own box while nothing is apart,
+   * else over every triangle's corners moved by its group's offset.
+   */
+  private drawnBox(): SceneBox {
+    const { mesh, groups } = this.opened!;
+    const { positions, indices } = mesh;
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    if (this.apart.size === 0) {
+      for (let i = 0; i < positions.length; i += 3)
+        for (let k = 0; k < 3; k++) {
+          const value = positions[i + k]!;
+          if (value < min[k]!) min[k] = value;
+          if (value > max[k]!) max[k] = value;
+        }
+      return { min, max };
+    }
+    const none: Vec3 = [0, 0, 0];
+    for (let t = 0; t < groups.of.length; t++) {
+      const offset = this.apart.get(groups.of[t]!) ?? none;
+      for (let corner = 0; corner < 3; corner++) {
+        const v = indices[t * 3 + corner]! * 3;
+        for (let k = 0; k < 3; k++) {
+          const value = positions[v + k]! + offset[k]!;
+          if (value < min[k]!) min[k] = value;
+          if (value > max[k]!) max[k] = value;
+        }
+      }
+    }
+    return { min, max };
+  }
+
+  fillGroup(group: number): Promise<void> {
+    this.commitLive();
+    this.checkGroup(group);
+    return this.fill({ kind: 'group', group }, 'fill');
+  }
+
+  maskGroup(group: number, masked: boolean): Promise<void> {
+    this.commitLive();
+    this.checkGroup(group);
+    return this.fill({ kind: 'group', group }, masked ? 'mask-fill' : 'unmask-fill');
+  }
+
+  /**
+   * The triangles `covered` names (a byte a triangle) or lists go into group `into` (#139): a new
+   * group `{ by: 'hand' }` when it is the next one. Nothing when none is covered. True when the
+   * map changed.
+   */
+  private moveInto(covered: Uint8Array | Uint32Array, into: number, list: boolean): boolean {
+    const groups = this.opened!.groups;
+    if (!(Number.isInteger(into) && into >= 0 && into <= groups.made.length && into < MAX_GROUPS))
+      throw new RangeError(`There is no group ${into} to add to`);
+    const triangles: number[] = [];
+    if (list) for (const t of covered) triangles.push(t);
+    else for (let t = 0; t < covered.length; t++) if (covered[t]) triangles.push(t);
+    if (triangles.length === 0) return false;
+    const created = into === groups.made.length;
+    if (created) groups.made.push({ by: 'hand' });
+    let changed = created;
+    for (const t of triangles) {
+      if (groups.of[t] === into) continue;
+      groups.of[t] = into;
+      changed = true;
+    }
+    if (changed) {
+      writeGroups(this.opened!.geometry, groups.of);
+      this.casts = null;
+    }
+    return changed;
+  }
+
+  /** The group stroke's tint (#139): its coverage in the target's colour while it is on the canvas, or none. */
+  private tintStroke(into: number | null): void {
+    if (into === null) {
+      this.strokeTint.value.set(0, 0, 0, 0);
+      return;
+    }
+    const { r, g, b } = new THREE.Color(GROUP_COLOURS[into % GROUP_COLOURS.length]);
+    this.strokeTint.value.set(r, g, b, GROUP_STROKE_TINT_STRENGTH);
+  }
+
+  /** A group the mini has (#139); a consumer's number that is not one is refused. */
+  private checkGroup(group: number): void {
+    const count = this.opened?.groups.made.length ?? 1;
+    if (!Number.isInteger(group) || group < 0 || group >= count)
+      throw new RangeError(`There is no group ${group}`);
+  }
+
+  /**
+   * `uGroups` from the view's groups (null), or from a step's record (#139, #180): every group
+   * shown and at zero but the record's hidden ones and the record's offsets.
+   */
+  private writeGroupUniform(record: StepGroups | null | undefined): void {
+    const hidden = record === null ? this.hidden : new Set(record?.hidden ?? []);
+    const apart =
+      record === null
+        ? this.apart
+        : new Map((record?.apart ?? []).map(({ group, offset }) => [group, offset]));
+    const values = this.passes.groupUniform.value;
+    for (let group = 0; group < MAX_GROUPS; group++) {
+      const offset = apart.get(group);
+      values[group]!.set(
+        offset?.[0] ?? 0,
+        offset?.[1] ?? 0,
+        offset?.[2] ?? 0,
+        hidden.has(group) ? 1 : 0,
+      );
+    }
+  }
+
+  /** What a step records of the groups (#139, #180): the hidden ones and the offsets, when any is. */
+  private stepGroups(): StepGroups | undefined {
+    if (this.hidden.size === 0 && this.apart.size === 0) return undefined;
+    return { hidden: [...this.hidden].sort((a, b) => a - b), apart: this.apartList() };
+  }
+
+  /**
+   * After an undo that took away a group a step had made (#139): it is no longer hidden or apart,
+   * so the state and the next step's record name only groups the mini has. Not in
+   * `restoreKeyframe`: undo restores an older keyframe and replays steps that may make the group
+   * again.
+   */
+  private forgetGoneGroups(): void {
+    const count = this.opened?.groups.made.length ?? 1;
+    let gone = false;
+    for (const group of [...this.hidden])
+      if (group >= count) {
+        this.hidden.delete(group);
+        gone = true;
+      }
+    for (const group of [...this.apart.keys()])
+      if (group >= count) {
+        this.apart.delete(group);
+        gone = true;
+      }
+    if (gone) this.movedGroups();
+  }
+
+  /** Back to a keyframe: its targets, and the groups as they were then (#139). */
+  private restoreKeyframe(keyframe: ViewKeyframe): void {
+    this.passes.restore(keyframe);
+    const opened = this.opened;
+    if (!opened) return;
+    opened.groups.of.set(keyframe.groups);
+    opened.groups.made = keyframe.made.map((origin) => ({ ...origin }));
+    writeGroups(opened.geometry, opened.groups.of);
+    this.casts = null;
+  }
+
+  /** A fill (§7), of the paint or of the mask (#138): one step, its region found from its seed, applied as a replay would. */
+  private async fill(seed: FillSeed, tool: FillToolId): Promise<void> {
     this.commitLive();
     if (!this.opened || !this.timeline) return;
+    const groups = this.stepGroups();
     const step: PaintFill = {
       kind: 'fill',
-      tool: 'fill',
+      tool,
       colour: this.colour,
       brush: { ...this.brush },
       seed,
+      ...(isGroupTool(tool) ? { into: this.targetGroup() } : {}),
+      ...(groups ? { groups } : {}),
     };
-    this.replay(step);
-    this.timeline.push(step);
+    // A new group past the last there may be makes nothing (#139).
+    if (step.into === MAX_GROUPS) return;
+    await this.apply(step);
+  }
+
+  /** The mask cleared or inverted (#138): one step. */
+  private async changeMask(change: MaskChange['change']): Promise<void> {
+    this.commitLive();
+    if (!this.opened || !this.timeline) return;
+    await this.apply({ kind: 'mask', change });
+  }
+
+  /** A step that is not a stroke, applied as its replay and pushed. */
+  private async apply(step: PaintFill | MaskChange): Promise<void> {
+    this.replay(step, this.timeline!.applied);
+    this.record(step);
     this.emit();
     await this.scene.nextFrame();
   }
@@ -435,6 +1046,7 @@ class Painting implements PaintingView {
   async undo(): Promise<void> {
     this.commitLive();
     if (this.timeline?.undo() == null) return;
+    this.forgetGoneGroups();
     this.emit();
     await this.scene.nextFrame();
   }
@@ -456,9 +1068,69 @@ class Painting implements PaintingView {
     return (this.timeline?.record() ?? []).map((step) => structuredClone(step));
   }
 
+  engines(): EngineRun[] {
+    const applied = this.timeline?.applied ?? 0;
+    const replayed = Math.min(this.replayed.kept, applied);
+    const runs: EngineRun[] = [];
+    const add = (engine: number, steps: number): void => {
+      if (steps === 0) return;
+      const last = runs[runs.length - 1];
+      if (last?.engine === engine) last.steps += steps;
+      else runs.push({ engine, steps });
+    };
+    let left = replayed;
+    for (const run of this.replayed.engines) {
+      const steps = Math.min(run.steps, left);
+      add(run.engine, steps);
+      left -= steps;
+    }
+    add(PAINT_ENGINE_VERSION, applied - replayed);
+    return runs;
+  }
+
+  /**
+   * A step applied for the first time goes into the history. Pushed after undoing into the steps
+   * replayed at `open`, it drops those past the cursor (#165).
+   */
+  private record(step: PaintStep): void {
+    const timeline = this.timeline!;
+    this.replayed.kept = Math.min(this.replayed.kept, timeline.applied);
+    timeline.push(step);
+  }
+
+  /**
+   * The steps a paint file gives, replayed at `open` (#165): each applied as undo replays it (a
+   * lift from a keyframe pinned before it) and pushed, so the view opens at the end of them with
+   * undo back through all of them. Checked by `checkSteps` before anything was opened.
+   */
+  private replaySteps(steps: readonly PaintStep[], engines: EngineRun[] | null): void {
+    const timeline = this.timeline!;
+    this.replayed = {
+      engines: engines?.map((run) => ({ ...run })) ?? [
+        { engine: PAINT_ENGINE_VERSION, steps: steps.length },
+      ],
+      kept: steps.length,
+    };
+    steps.forEach((given, index) => {
+      const step = structuredClone(given);
+      // Every engine there is replays as this one does (PAINT_ENGINE_VERSION 1): a brush change
+      // that alters old paintings branches on `engineOf(this.replayed.engines, index)` in `replay`.
+      if (engineOf(this.replayed.engines, index) > PAINT_ENGINE_VERSION)
+        throw new RangeError('A step painted on a newer engine');
+      if (step.kind === 'stroke' && step.lifts !== undefined && !timeline.pin(step.lifts))
+        throw new RangeError(`Step ${index} lifts a step undo no longer reaches`);
+      this.replay(step, index);
+      timeline.push(step);
+    });
+  }
+
   async stroke(points: Vec3[], pressure?: number[]): Promise<void> {
     this.commitLive();
-    const hits = points.map((point, k) => ({ point, pressure: pressure?.[k] ?? MOUSE_PRESSURE }));
+    const hits: Sample[] = points.map((point, k) => ({
+      point,
+      pressure: pressure?.[k] ?? MOUSE_PRESSURE,
+      group: -1,
+    }));
     if (hits.length === 0) return;
     this.beginLive(hits[0]!);
     this.extendLive(hits.slice(1));
@@ -470,7 +1142,7 @@ class Painting implements PaintingView {
     this.commitLive();
     for (const [x, y] of path) {
       const hit = this.hitAt(x, y);
-      const sample: DabHit = hit ? { point: hit.point, pressure: MOUSE_PRESSURE } : null;
+      const sample: Sample = hit ? { ...hit, pressure: MOUSE_PRESSURE } : null;
       if (!this.live) {
         if (sample) this.beginLive(sample);
       } else this.extendLive([sample]);
@@ -495,12 +1167,22 @@ class Painting implements PaintingView {
   texelAt(x: number, y: number): { texel: [number, number]; point: Vec3; triangle: number } | null {
     const hit = this.hitAt(x, y);
     if (!hit || !this.opened) return null;
-    const [u, v] = uvAt(this.opened.mesh, hit.triangle, hit.point);
-    const texel: [number, number] = [
-      Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(u * PAINT_SIZE))),
-      Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(v * PAINT_SIZE))),
-    ];
-    return { texel, point: hit.point, triangle: hit.triangle };
+    const point = this.ownPoint(hit.point, hit.group);
+    const texel = texelOf(this.opened.mesh, hit.triangle, point);
+    return { texel, point, triangle: hit.triangle };
+  }
+
+  /** A point as drawn back in the mini's own coordinates (#180): its group's offset taken off. */
+  private ownPoint(point: Vec3, group: number): Vec3 {
+    const offset = this.apart.get(group);
+    if (!offset) return point;
+    return [point[0] - offset[0], point[1] - offset[1], point[2] - offset[2]];
+  }
+
+  /** The offset class of a group (#180): its offset's numbers, or the empty string at zero. */
+  private classOf(group: number): string {
+    const offset = this.apart.get(group);
+    return offset ? offset.join(',') : '';
   }
 
   screenOf(point: Vec3): [number, number] {
@@ -520,8 +1202,22 @@ class Painting implements PaintingView {
     if (this.opened) this.opened.material.wireframe = on;
   }
 
+  setShown(shown: boolean): void {
+    if (shown === this.shown) return;
+    this.shown = shown;
+    if (!shown) {
+      this.endPick(true);
+      this.cancelLive();
+      this.strokePointer = null;
+      this.pointers.clear();
+      this.cursor.hidden = true;
+    }
+    this.scene.setPaused(!shown);
+  }
+
   dispose(): void {
     this.close();
+    this.listeners.length = 0;
     this.passes.dispose();
     this.scene.dispose();
     this.cursor.remove();
@@ -529,20 +1225,63 @@ class Painting implements PaintingView {
     mounted.delete(this.host);
   }
 
-  /** The surface under a canvas point: the triangle and the point on it, in the mini's coordinates. */
-  private hitAt(x: number, y: number): { triangle: number; point: Vec3 } | null {
+  /**
+   * The surface under a canvas point: the triangle, its group, and the point on it in the
+   * coordinates the mini is drawn in. One cast per distinct offset (#180), the ray moved by the
+   * opposite offset and the cast kept to that offset's groups; the nearest hit wins. A hidden
+   * group is not there to hit (#139): the ray finds what lies behind it.
+   */
+  private hitAt(x: number, y: number): { triangle: number; point: Vec3; group: number } | null {
     if (!this.opened) return null;
     const { origin, direction } = this.scene.rayAt(x, y);
-    const hit = this.opened.bvh.raycast(origin, direction);
-    if (!hit) return null;
+    const { of } = this.opened.groups;
+    let best: { triangle: number; t: number } | null = null;
+    for (const { offset, accept } of this.castsOf()) {
+      const from: Vec3 = offset
+        ? [origin[0] - offset[0], origin[1] - offset[1], origin[2] - offset[2]]
+        : origin;
+      const hit = this.opened.bvh.raycast(from, direction, accept);
+      if (hit && (!best || hit.t < best.t)) best = hit;
+    }
+    if (!best) return null;
+    const { triangle, t } = best;
     return {
-      triangle: hit.triangle,
+      triangle,
+      group: of[triangle]!,
       point: [
-        origin[0] + direction[0] * hit.t,
-        origin[1] + direction[1] * hit.t,
-        origin[2] + direction[2] * hit.t,
+        origin[0] + direction[0] * t,
+        origin[1] + direction[1] * t,
+        origin[2] + direction[2] * t,
       ],
     };
+  }
+
+  /**
+   * The casts a hit takes (#180): with nothing apart, one over every shown group; else one for the
+   * groups at zero and one per distinct offset, each kept to its groups.
+   */
+  private castsOf(): Cast[] {
+    if (this.casts) return this.casts;
+    const { of } = this.opened!.groups;
+    const hidden = this.hidden;
+    const shown = (t: number): boolean => !hidden.has(of[t]!);
+    if (this.apart.size === 0) {
+      this.casts = [{ offset: null, accept: hidden.size === 0 ? undefined : shown }];
+      return this.casts;
+    }
+    const classes = new Map<string, { offset: Vec3 | null; groups: Set<number> }>();
+    classes.set('', { offset: null, groups: new Set() });
+    for (let group = 0; group < this.opened!.groups.made.length; group++) {
+      const key = this.classOf(group);
+      let entry = classes.get(key);
+      if (!entry) classes.set(key, (entry = { offset: this.apart.get(group)!, groups: new Set() }));
+      entry.groups.add(group);
+    }
+    this.casts = [...classes.values()].map(({ offset, groups }) => ({
+      offset,
+      accept: (t: number) => groups.has(of[t]!) && shown(t),
+    }));
+    return this.casts;
   }
 
   /**
@@ -551,13 +1290,22 @@ class Painting implements PaintingView {
    * finger can take over the pinch the moment it cancels the stroke (one finger alone does not
    * orbit).
    */
-  private beginLive(first: NonNullable<DabHit>, touch = false): void {
+  private beginLive(first: NonNullable<Sample>, touch = false): void {
     if (!this.opened) return;
     const tool = this.tool;
-    if (tool === 'fill') throw new RangeError('The fill tool fills; it does not stroke');
+    if (isFillTool(tool)) throw new RangeError('A fill tool fills; it does not stroke');
+    // A lift finds its step before anything is drawn: making its keyframe may replay steps. It
+    // looks under the start in the mini's own coordinates, where the paint is (#180).
+    const lift = tool === 'lift' ? this.findLift(this.ownPoint(first.point, first.group)) : null;
+    const lifted = lift && 'lifted' in lift ? lift.lifted : null;
     const camera = this.scene.strokeCamera();
     this.passes.beginStroke(camera);
+    if (lifted !== null) this.passes.lift(this.keyframes.get(lifted)!, lifted);
     this.scene.controls.enabled = touch;
+    const groups = this.stepGroups();
+    // The group brush (#139): its target recorded; a new group past the last there may be is refused.
+    const into = isGroupTool(tool) ? this.targetGroup() : null;
+    this.tintStroke(into);
     this.live = {
       step: {
         kind: 'stroke',
@@ -566,17 +1314,45 @@ class Painting implements PaintingView {
         brush: { ...this.brush },
         camera,
         dabs: [],
+        ...(lifted !== null ? { lifts: lifted } : {}),
+        ...(into !== null ? { into } : {}),
+        ...(groups ? { groups } : {}),
       },
       drawn: 0,
       last: null,
+      lastClass: null,
+      refused: (lift !== null && lifted === null) || into === MAX_GROUPS,
       frames: [],
     };
     this.extendLive([first]);
     this.emit();
   }
 
-  /** More pointer samples: dabs spaced along them; a miss lifts the brush. */
-  private extendLive(hits: readonly DabHit[]): void {
+  /**
+   * The step a lift stroke starting at `point` takes away (#137, design note
+   * `docs/design/lift-eraser.md` §2): the newest step that changed the texel there, by the stamp
+   * map, with a keyframe of the paint before it pinned in the history. Or why there is none.
+   */
+  private findLift(point: Vec3): LiftOutcome {
+    const opened = this.opened!;
+    const timeline = this.timeline!;
+    const hit: SurfaceHit = { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 };
+    opened.bvh.closest(hit, point[0], point[1], point[2], LIFT_REACH_MM ** 2);
+    const stamp =
+      hit.triangle < 0 ? null : this.passes.readStamp(...texelOf(opened.mesh, hit.triangle, point));
+    const index = stamp ? stampedStep(stamp, timeline.applied) : null;
+    if (index === null) this.lift = { refused: 'nothing-painted' };
+    else if (!timeline.pin(index)) this.lift = { refused: 'too-long-ago' };
+    else this.lift = { lifted: index };
+    return this.lift;
+  }
+
+  /**
+   * More pointer samples: dabs spaced along them; a miss lifts the brush, and so does a hit on a
+   * group drawn at another offset than the last hit's (#180): no dabs are laid across the gap
+   * between groups pulled apart. With nothing apart every hit is in one class.
+   */
+  private extendLive(hits: readonly Sample[]): void {
     const live = this.live;
     if (!live) return;
     const spacing = DAB_SPACING * live.step.brush.sizeMm;
@@ -585,9 +1361,14 @@ class Painting implements PaintingView {
     for (const hit of hits) {
       if (!hit) {
         live.last = null;
+        live.lastClass = null;
         continue;
       }
-      const dabs = spaceDabs([hit], spacing, live.last, even);
+      const cls = hit.group < 0 ? (live.lastClass ?? '') : this.classOf(hit.group);
+      if (live.lastClass !== null && cls !== live.lastClass) live.last = null;
+      live.lastClass = cls;
+      const dab: DabHit = { point: hit.point, pressure: hit.pressure };
+      const dabs = spaceDabs([dab], spacing, live.last, even);
       for (const value of dabs) live.step.dabs.push(value);
       live.last = live.step.dabs.slice(-4);
     }
@@ -596,7 +1377,7 @@ class Painting implements PaintingView {
   /** The dabs laid since the last frame into the stroke layer, and the stroke onto the paint. */
   private drawLive(): void {
     const live = this.live;
-    if (!live) return;
+    if (!live || live.refused) return;
     const count = live.step.dabs.length / 4;
     if (live.drawn >= count) return;
     const { step } = live;
@@ -612,10 +1393,20 @@ class Painting implements PaintingView {
     this.drawLive();
     this.live = null;
     this.scene.controls.enabled = true;
-    if (live.step.dabs.length === 0) this.passes.cancel();
-    else {
-      this.passes.commit();
-      this.timeline?.push(live.step);
+    this.tintStroke(null);
+    const group = isGroupTool(live.step.tool);
+    // A group stroke (#139) is a step where it covered a triangle: those go into its target.
+    const moved =
+      group && live.step.dabs.length > 0 && !live.refused && this.timeline
+        ? this.moveInto(this.passes.readCover(), live.step.into!, false)
+        : false;
+    if (live.step.dabs.length === 0 || live.refused || !this.timeline || (group && !moved)) {
+      this.passes.cancel();
+      // A lift that leaves no step leaves no keyframe pinned for it.
+      this.timeline?.prune();
+    } else {
+      this.passes.commit(this.timeline.applied, live.step.tool);
+      this.record(live.step);
     }
     this.perf = perfOf(live.frames);
     this.emit();
@@ -623,25 +1414,65 @@ class Painting implements PaintingView {
 
   /**
    * A step applied again, exactly as the first time (§8): a stroke renders its depth map from its
-   * own camera at its own viewport and draws all its dabs; the result is committed.
+   * own camera at its own viewport and draws all its dabs (a lift toward the keyframe the history
+   * keeps for it, #137); a picked fill floods up to the mask as it is now (#138); the result is
+   * committed as step `index`.
    */
-  private replay(step: PaintStep): void {
+  private replay(step: PaintStep, index: number): void {
     const opened = this.opened;
     if (!opened) return;
+    if (step.kind === 'mask') {
+      this.passes.changeMask(step.change);
+      this.passes.commitMask();
+      return;
+    }
+    // The groups hidden when the step was made (#139), whatever is hidden now; put back after.
+    this.writeGroupUniform(step.groups);
+    try {
+      this.replayDrawn(step, index, opened);
+    } finally {
+      this.writeGroupUniform(null);
+    }
+  }
+
+  /** A stroke or a fill replayed, with `uGroups` as its record says. */
+  private replayDrawn(step: PaintStroke | PaintFill, index: number, opened: Opened): void {
     if (step.kind === 'stroke') {
       this.passes.beginStroke(step.camera);
+      const beneath = step.lifts === undefined ? undefined : this.keyframes.get(step.lifts);
+      if (beneath) this.passes.lift(beneath, step.lifts!);
       this.passes.drawDabs(step.dabs, 0, step.brush, step.tool);
+      // The group brush (#139): what its dabs cover at the triangles' middles, read as live.
+      if (isGroupTool(step.tool)) {
+        this.moveInto(this.passes.readCover(), step.into!, false);
+        this.passes.commit(index, step.tool);
+        return;
+      }
     } else {
-      const triangles = floodRegion(opened.mesh, step.seed, {
+      const { seed } = step;
+      const picked = seed.kind === 'picked';
+      const group = isGroupTool(step.tool);
+      const triangles = floodRegion(opened.mesh, seed, {
         tolerance: step.brush.tolerance,
         regions: opened.regions,
         adjacency: opened.adjacency,
+        cut: picked ? this.passes.readCut() : null,
+        groupOf: opened.groups.of,
+        hidden: picked ? hiddenTriangles(opened.groups.of, step.groups) : null,
+        // The groups apart when the fill was made (#180): a flood never crosses between offsets.
+        apart: picked ? apartClasses(opened.groups.of, step.groups) : null,
+        // The group fill (#139): all that is connected within the group it starts in.
+        ...(group && picked ? { folds: false, within: opened.groups.of[seed.triangle] } : {}),
       });
+      if (group) {
+        this.moveInto(triangles, step.into!, true);
+        return;
+      }
       this.passes.clearStroke();
-      this.passes.drawRegion(opened.mesh, triangles);
+      this.passes.drawRegion(triangles);
     }
     this.passes.composite(step.tool, parseHexColour(step.colour), step.brush);
-    this.passes.commit();
+    this.passes.commit(index, step.tool);
   }
 
   /** The stroke on the canvas is dropped (a second finger arrived, the pointer was cancelled): no step. */
@@ -650,7 +1481,9 @@ class Painting implements PaintingView {
     this.live = null;
     this.strokePointer = null;
     this.scene.controls.enabled = true;
+    this.tintStroke(null);
     this.passes.cancel();
+    this.timeline?.prune();
     this.emit();
   }
 
@@ -666,14 +1499,30 @@ class Painting implements PaintingView {
       const rect = canvas.getBoundingClientRect();
       return [event.clientX - rect.left, event.clientY - rect.top];
     };
-    const sample = (event: PointerEvent): DabHit => {
+    const sample = (event: PointerEvent): Sample => {
       const hit = this.hitAt(...at(event));
-      return hit ? { point: hit.point, pressure: pressureOf(event) } : null;
+      return hit ? { ...hit, pressure: pressureOf(event) } : null;
     };
     // Before the controls' own listener, so a cancelled stroke gives the pinch back at once.
     canvas.addEventListener(
       'pointerdown',
       (event) => {
+        // A hidden view takes no pointer (#167).
+        if (!this.shown) {
+          event.stopImmediatePropagation();
+          return;
+        }
+        // A pick takes this tap (#166): no stroke, no orbit, and the pointer is not counted.
+        if (this.picking && this.opened && event.button === 0 && this.pointers.size === 0) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          const { mode, resolve } = this.picking;
+          this.picking = null;
+          this.host.classList.remove('mt-painting-picking');
+          this.emit();
+          void this.colourAt(...at(event), mode).then(resolve, () => resolve(null));
+          return;
+        }
         this.pointers.add(event.pointerId);
         if (this.pointers.size > 1) {
           if (this.strokePointer !== null) this.cancelLive();
@@ -682,18 +1531,15 @@ class Painting implements PaintingView {
         if (!this.opened || this.scene.isNavigating || event.button !== 0) return;
         const hit = this.hitAt(...at(event));
         if (!hit) return;
-        if (this.tool === 'fill') {
-          void this.fillAt(hit.triangle, hit.point);
+        if (isFillTool(this.tool)) {
+          void this.fillAt(this.tool, hit.triangle, hit.point);
           return;
         }
         this.commitLive();
         this.strokePointer = event.pointerId;
         // The stroke goes on, and ends, though the pointer leaves the canvas.
         canvas.setPointerCapture?.(event.pointerId);
-        this.beginLive(
-          { point: hit.point, pressure: pressureOf(event) },
-          event.pointerType === 'touch',
-        );
+        this.beginLive({ ...hit, pressure: pressureOf(event) }, event.pointerType === 'touch');
       },
       { capture: true },
     );
@@ -719,7 +1565,10 @@ class Painting implements PaintingView {
 
   /** The cursor ring (§9): the brush's size at the surface under the pointer; not on touch, off the mini or with the fill tool. */
   private moveCursor(event: PointerEvent, [x, y]: [number, number]): void {
-    const hit = event.pointerType === 'touch' || this.tool === 'fill' ? null : this.hitAt(x, y);
+    const hit =
+      event.pointerType === 'touch' || isFillTool(this.tool) || this.picking
+        ? null
+        : this.hitAt(x, y);
     this.cursor.hidden = hit === null;
     if (!hit) return;
     const size = Math.max(CURSOR_MIN_PX, this.brush.sizeMm * this.scene.pixelsPerMm(hit.point));
@@ -730,10 +1579,92 @@ class Painting implements PaintingView {
     style.height = `${size}px`;
   }
 
-  /** A tap with the fill tool (§9): the region the flood finds from the triangle under it. */
-  private fillAt(triangle: number, point: Vec3): Promise<void> {
-    return this.fill({ kind: 'picked', triangle, point });
+  /** A tap with a fill tool (§9): the region the flood finds from the triangle under it. */
+  private fillAt(tool: FillToolId, triangle: number, point: Vec3): Promise<void> {
+    return this.fill({ kind: 'picked', triangle, point }, tool);
   }
+}
+
+/** One cast of a hit (#180): the offset the ray is moved against (null at zero) and the triangles it may hit. */
+interface Cast {
+  offset: Vec3 | null;
+  accept: ((triangle: number) => boolean) | undefined;
+}
+
+/**
+ * A byte a triangle, the class of its group's offset in a record (#180): 0 for a group at zero, k
+ * for the k-th distinct offset, in the record's order; null when nothing was apart.
+ */
+function apartClasses(of: Uint8Array, record: StepGroups | undefined): Uint8Array | null {
+  if (!record || record.apart.length === 0) return null;
+  const classOf = new Map<number, number>();
+  const classes = new Map<string, number>();
+  for (const { group, offset } of record.apart) {
+    const key = offset.join(',');
+    let cls = classes.get(key);
+    if (cls === undefined) classes.set(key, (cls = classes.size + 1));
+    classOf.set(group, cls);
+  }
+  const out = new Uint8Array(of.length);
+  for (let t = 0; t < of.length; t++) out[t] = classOf.get(of[t]!) ?? 0;
+  return out;
+}
+
+/** A byte a triangle, 1 where its group is among a record's hidden ones (#139); null when none is. */
+function hiddenTriangles(of: Uint8Array, record: StepGroups | undefined): Uint8Array | null {
+  if (!record || record.hidden.length === 0) return null;
+  const hidden = new Set(record.hidden);
+  const out = new Uint8Array(of.length);
+  for (let t = 0; t < of.length; t++) if (hidden.has(of[t]!)) out[t] = 1;
+  return out;
+}
+
+/** Refuses groups that are not a mesh's of `triangles` (#139). */
+function checkGroups(groups: PaintGroups, triangles: number): void {
+  if (groups.of.length !== triangles)
+    throw new RangeError('The groups are not this mesh’s: one byte per triangle');
+  const count = groups.made.length;
+  if (count < 1 || count > MAX_GROUPS)
+    throw new RangeError(`A mini has 1 to ${MAX_GROUPS} groups, not ${count}`);
+  for (const group of groups.of)
+    if (group >= count) throw new RangeError(`The groups name a group ${group} they do not have`);
+}
+
+/**
+ * Refuses steps that cannot be this mesh's (#165), before anything is opened: a fill of a
+ * triangle it does not have, of a ready region it has none of, a group past the last there may
+ * be, a lift of a step that is not before it, and engine runs that do not cover the steps or name
+ * a newer engine. The shape of each step is `readPaintFile`'s to check.
+ */
+function checkSteps(
+  steps: readonly PaintStep[],
+  engines: readonly EngineRun[] | null,
+  triangles: number,
+  regions: PaintRegions | null | undefined,
+): void {
+  if (engines) {
+    if (engines.reduce((sum, run) => sum + run.steps, 0) !== steps.length)
+      throw new RangeError('The engine runs do not cover the steps');
+    if (engines.some((run) => run.engine > PAINT_ENGINE_VERSION))
+      throw new RangeError('Steps painted on a newer engine');
+  }
+  steps.forEach((step, index) => {
+    const wrong = (what: string): never => {
+      throw new RangeError(`Step ${index} is not this mini’s: ${what}`);
+    };
+    if (step.kind === 'mask') return;
+    if (step.into !== undefined && step.into >= MAX_GROUPS) wrong('a group past the last');
+    for (const group of step.groups?.hidden ?? []) if (group >= MAX_GROUPS) wrong('a group');
+    for (const { group } of step.groups?.apart ?? []) if (group >= MAX_GROUPS) wrong('a group');
+    if (step.kind === 'stroke') {
+      if (step.lifts !== undefined && step.lifts >= index) wrong('a lift of a later step');
+      return;
+    }
+    const { seed } = step;
+    if (seed.kind === 'picked' && seed.triangle >= triangles) wrong('a triangle it does not have');
+    if ((seed.kind === 'base' || seed.kind === 'figure') && !regions) wrong('no ready regions');
+    if (seed.kind === 'group' && seed.group >= MAX_GROUPS) wrong('a group');
+  });
 }
 
 /** sRGB bytes as `#rrggbb`. */
@@ -756,6 +1687,15 @@ function ownTexture(texture: THREE.Texture): THREE.Texture | null {
     return createDetailTexture(data, width);
   }
   return null;
+}
+
+/** The texel under a point on triangle t. */
+function texelOf(mesh: IndexedMesh, t: number, point: Vec3): [number, number] {
+  const [u, v] = uvAt(mesh, t, point);
+  return [
+    Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(u * PAINT_SIZE))),
+    Math.min(PAINT_SIZE - 1, Math.max(0, Math.floor(v * PAINT_SIZE))),
+  ];
 }
 
 /** The texture coordinates of a point on triangle t. */

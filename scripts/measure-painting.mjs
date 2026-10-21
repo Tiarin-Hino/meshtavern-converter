@@ -2,9 +2,13 @@
 // in real Chrome with the GPU on: the time of `open`, the engine's frame counter for strokes of the
 // largest brush across the whole canvas with every brush that strokes (the flat brush also at the
 // default size; the hobby brushes since #128, the airbrush sprayed from above; the dry brush also
-// at 2 mm since #133, whose stroke measures its reference under the first dab), the intervals
-// between frames, and the GPU process's memory with the view open against without. One fresh
-// browser per mini.
+// at 2 mm since #133, whose stroke measures its reference under the first dab; the lift since #137,
+// over the strokes of the others; the mask's brush and eraser since #138, first, so the brushes
+// after them paint over the mask's soft edges; since #139 the flat brush with the largest group
+// but the body hidden, and the group brush, which reads back its cover at each commit; since #180
+// the flat brush with every group pulled apart, which casts once per offset at each sample), the
+// intervals between frames, and the GPU process's memory with the view open against without. One
+// fresh browser per mini.
 // Usage, after `npm run build`:
 //   node scripts/measure-painting.mjs                     the generated figure and large-01 with its base
 //   node scripts/measure-painting.mjs corpus/x/a.stl …    other minis (a base file beside one is added)
@@ -22,10 +26,16 @@ const MB = 1024 ** 2;
 const VIEWPORT = { width: 1920, height: 1080 };
 /** Strokes per brush: the counter's figures of each. */
 const STROKES = 3;
+/** Short strokes painted after the runs, so the replay at open and undo past the window are measured (#165). */
+const SHORT_STROKES = 80;
 /** Pointer samples a stroke across the canvas has: one a frame, as a pointer at 60 Hz. */
 const SAMPLES = 120;
 /** The brushes measured: each tool that strokes at the largest size, the flat brush and the dry brush also at the default. */
 const RUNS = [
+  // First: the mask's brush, then its eraser over the same paths, which leaves the mask's soft
+  // edges for the brushes after them to paint over (#138).
+  { tool: 'mask', sizeMm: 16 },
+  { tool: 'unmask', sizeMm: 16 },
   { tool: 'flat', sizeMm: 16 },
   { tool: 'flat', sizeMm: 2 },
   { tool: 'wash', sizeMm: 16 },
@@ -33,6 +43,14 @@ const RUNS = [
   { tool: 'dry', sizeMm: 16 },
   { tool: 'dry', sizeMm: 2 },
   { tool: 'airbrush', sizeMm: 16, direction: [0, 1, 0] },
+  // The groups (#139): with the largest group but the body hidden, and the group brush, each
+  // stroke a new group.
+  { tool: 'flat', sizeMm: 16, hide: true },
+  { tool: 'group', sizeMm: 16 },
+  // Every group pulled apart (#180): the hit casts once per offset, the camera frames the groups as drawn.
+  { tool: 'flat', sizeMm: 16, apart: true },
+  // Last, over what the others painted: each takes away the newest step under its start (#137).
+  { tool: 'lift', sizeMm: 16 },
 ];
 
 /** The generated figure on its base (src/regression/shapes.ts), as an STL in a temporary folder. */
@@ -142,12 +160,25 @@ try {
       );
       console.log(`open: ${openMs.toFixed(0)} ms`);
 
-      for (const { tool, sizeMm, direction = null } of RUNS) {
+      const { groups, hideable } = await page.evaluate(() => {
+        const { list } = window.__mt.painting.view().state.groups;
+        let largest = -1;
+        for (let k = 1; k < list.length; k++)
+          if (largest < 0 || list[k].triangles > list[largest].triangles) largest = k;
+        return { groups: list.length, hideable: largest };
+      });
+      console.log(`groups: ${groups}, hidden in the runs that hide one: group ${hideable}`);
+      for (const { tool, sizeMm, direction = null, hide = false, apart = false } of RUNS) {
         const rows = [];
         for (let stroke = 0; stroke < STROKES; stroke++) {
           const result = await page.evaluate(
-            async ({ tool, sizeMm, direction, samples, stroke }) => {
+            async ({ tool, sizeMm, direction, samples, stroke, hidden, apart }) => {
               const view = window.__mt.painting.view();
+              view.showAllGroups();
+              view.putTogether();
+              if (hidden >= 0) view.setGroupShown(hidden, false);
+              if (apart) view.pullAllApart();
+              view.setGroupTarget('new');
               view.setTool(tool);
               view.setBrush({ sizeMm, hardness: 0.8, opacity: 1, direction });
               view.setColour(['#b03030', '#30b030', '#3030b0'][stroke % 3]);
@@ -169,18 +200,39 @@ try {
                 if (running) requestAnimationFrame(tick);
               };
               requestAnimationFrame(tick);
+              const strokeStart = performance.now();
               await view.strokeAt(path);
+              const strokeMs = performance.now() - strokeStart;
               running = false;
+              const groupsApart = view.state.groups.apart.length;
+              view.showAllGroups();
+              view.putTogether();
               const dabs = view.history().at(-1)?.dabs?.length ?? 0;
-              return { perf: view.state.perf, intervals: intervals.slice(1), dabs: dabs / 4 };
+              return {
+                perf: view.state.perf,
+                intervals: intervals.slice(1),
+                dabs: dabs / 4,
+                lift: tool === 'lift' ? view.state.lift : null,
+                strokeMs,
+                groupsApart,
+              };
             },
-            { tool, sizeMm, direction, samples: SAMPLES, stroke },
+            {
+              tool,
+              sizeMm,
+              direction,
+              samples: SAMPLES,
+              stroke,
+              hidden: hide ? hideable : -1,
+              apart,
+            },
           );
           rows.push(result);
         }
-        for (const [k, { perf, intervals, dabs }] of rows.entries())
+        const label = `${tool} ${sizeMm} mm${hide ? `, group ${hideable} hidden` : ''}${apart ? `, ${rows[0].groupsApart} groups apart` : ''}`;
+        for (const [k, { perf, intervals, dabs, lift, strokeMs }] of rows.entries())
           console.log(
-            `${tool} ${sizeMm} mm, stroke ${k + 1}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms`,
+            `${label}, stroke ${k + 1}${lift ? ` (${JSON.stringify(lift)})` : ''}: ${dabs} dabs · counter ${perf.frames} frames, median ${perf.medianMs.toFixed(1)} ms, worst ${perf.worstMs.toFixed(1)} ms, ${perf.slow} slow · between frames median ${median(intervals).toFixed(1)} ms, worst ${Math.max(...intervals).toFixed(1)} ms · stroke with its commit ${strokeMs.toFixed(0)} ms`,
           );
       }
       await page.waitForTimeout(1000);
@@ -188,6 +240,42 @@ try {
       const delta = (type) => ((open[type] ?? 0) - (without[type] ?? 0)) / MB;
       console.log(
         `memory, view open minus closed: GPU process ${delta('gpu-process').toFixed(0)} MB (${((open['gpu-process'] ?? 0) / MB).toFixed(0)} MB in all), page ${delta('renderer').toFixed(0)} MB`,
+      );
+      // The paint file (#165): the steps above and SHORT_STROKES more replayed at open, as a paint
+      // file opens, then every one undone: past the window, undo replays from the paint as opened.
+      const replay = await page.evaluate(async (count) => {
+        const painting = window.__mt.painting;
+        const view = painting.view();
+        view.showAllGroups();
+        view.putTogether();
+        view.setTool('flat');
+        view.setBrush({ sizeMm: 3, hardness: 0.8, opacity: 1, direction: null });
+        view.setCamera(34, 22, 1);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const canvas = document.querySelector('#paint-view canvas');
+        const { width, height } = canvas.getBoundingClientRect();
+        for (let k = 0; k < count; k++) {
+          view.setColour(`#${(k * 3).toString(16).padStart(2, '0')}4040`);
+          const y = height * (0.3 + (0.4 * (k % 10)) / 10);
+          await view.strokeAt([0.4, 0.5, 0.6].map((x) => [width * x, y]));
+        }
+        const steps = view.history();
+        const bytes = JSON.stringify(steps).length;
+        painting.close();
+        const start = performance.now();
+        await painting.open(null, null, null, { steps });
+        const openMs = performance.now() - start;
+        const undos = [];
+        for (let k = 0; k < steps.length; k++) {
+          const at = performance.now();
+          await view.undo();
+          undos.push(performance.now() - at);
+        }
+        return { steps: steps.length, bytes, openMs, undos };
+      }, SHORT_STROKES);
+      const deep = replay.undos.filter((ms) => ms > 100).length;
+      console.log(
+        `paint file: ${replay.steps} steps, ${(replay.bytes / 1024).toFixed(0)} KiB as JSON · open with them ${replay.openMs.toFixed(0)} ms · undo of every one: median ${median(replay.undos).toFixed(0)} ms, worst ${Math.max(...replay.undos).toFixed(0)} ms, ${deep} over 100 ms`,
       );
     } finally {
       await context.close();

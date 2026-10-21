@@ -20,7 +20,7 @@ npm install
 npm run dev
 ```
 
-Open the page, drop an STL (or choose one), and download the table or far level as a GLB. The team's tools from the spike (figures, stress scene, device benchmark, opening a GLB, the compressed download) appear with `?dev` in the address, for example `http://localhost:5173/?dev`.
+Open the page, drop an STL (or choose one), and download the table or far level as a GLB. **Paint this mini** opens the painter on the converted mini: the brushes, the mask and the groups of the painter's panel, with **Save paint file** (a small `.mtpaint` file of the steps, no pixels) and **Done**, after which both downloads carry the paint. Drop the paint file together with its STL files, or on its own and then the files, to go on painting later; a painting not saved yet is kept in this browser and offered back the next time the same files are dropped. Nothing is sent. The team's tools from the spike (figures, stress scene, device benchmark, opening a GLB, the compressed download) appear with `?dev` in the address, for example `http://localhost:5173/?dev`.
 
 ## Develop
 
@@ -35,7 +35,7 @@ Where it stands: usable end to end, not yet hosted. See [the Phase 0 spec](docs/
 
 ## Use it as a library
 
-The page is one consumer of the converter; the MeshTavern table application is another. `package.json` exports five entries, as TypeScript sources for a Vite project: `meshtavern-converter` (convert, refuse, size, orient, export, the painting's data and fill; no three.js), `meshtavern-converter/three` (draw a baked mini), `meshtavern-converter/questions` (the view that asks a conversion's questions, with its stylesheet `meshtavern-converter/questions.css`), `meshtavern-converter/painting` (the view in which a person paints a baked mini, with its stylesheet `meshtavern-converter/painting.css`) and `meshtavern-converter/dev` (generated meshes and STL writers, for tests and tooling). The package is not published to npm; install it from git (`"meshtavern-converter": "github:Tiarin-Hino/meshtavern-converter#<commit>"`).
+The page is one consumer of the converter; the MeshTavern table application is another. `package.json` exports six entries, as TypeScript sources for a Vite project: `meshtavern-converter` (convert, refuse, size, orient, export, the painting's data and fill, the paint file; no three.js), `meshtavern-converter/three` (draw a baked mini), `meshtavern-converter/questions` (the view that asks a conversion's questions, with its stylesheet `meshtavern-converter/questions.css`), `meshtavern-converter/painting` (the view in which a person paints a baked mini, with its stylesheet `meshtavern-converter/painting.css`), `meshtavern-converter/painting-panel` (the painter's panel that drives that view, with its stylesheet `meshtavern-converter/painting-panel.css`) and `meshtavern-converter/dev` (generated meshes and STL writers, for tests and tooling). The package is not published to npm; install it from git (`"meshtavern-converter": "github:Tiarin-Hino/meshtavern-converter#<commit>"`).
 
 ```ts
 import {
@@ -135,39 +135,53 @@ export async function addMini(files: File[]) {
 - The look is per material: `createBakedMaterial(texture, uniforms)` reads the look from the `LookUniforms` it is given. Give each mini its own (`createLookUniforms(look)`, changed later with `updateLookUniforms`) when minis look different; pass one set to every material when they all look alike, as this page does, and one `updateLookUniforms` changes them all.
 - A paint goes under the look (#125): `createBakedMaterial(texture, uniforms, { map })` takes a colour texture on the table level's texture coordinates (`result.baked.mesh`). It is laid out like the detail texture (row 0 at v = 0: `flipY` false) with its colour in sRGB (`colorSpace = SRGBColorSpace`) and straight alpha: where alpha is 1 the paint replaces the base coat, where it is 0 the base coat shows, in between the two mix; the wash still pools in the creases and the edges still catch the light. The far and close levels have no texture coordinates, so they take the paint per vertex, once: `paintAtVertices(level, result.baked.mesh, { width, height, data })` gives RGBA bytes per vertex (a vertex more than `PAINT_REACH_MM` from the table level stays bare), and `vertexColours(level, look, paint)` draws it under the same look. The texture stays the consumer's (not disposed with the material); spread a painted island's colour a few texels past its edge, as the bake does, or the smaller mipmaps mix the neighbouring islands of the atlas in at the seams.
 - `renderThumbnail(mesh, { renderer, texture, albedo, look, size })` from `meshtavern-converter/three` makes the picture for a list of minis: the table level from the viewer's angle and light, a PNG `Blob` of at most `THUMBNAIL_SIZE` (512) px on a transparent background. It is made by the consumer after the conversion, not by the worker: pass the renderer that already draws the mini (it draws into a render target and leaves the screen alone; without one a private renderer is made and released), and, for a baked mini, `result.baked.mesh` with its transcoded texture (`transcodeDetail`) and its paint, if it has one (`albedo`, as `map` above), else `result.lods[BAKED_LEVEL].mesh`.
-- A baked mini can be painted in a view of its own (#127, design note `docs/design/painting-engine.md`): `mountPainting` from `meshtavern-converter/painting` puts a canvas and a brush ring into one element; every panel (tools, sliders, palette, Undo, Redo, regions, Save) is yours, wired to the view's methods. The strokes are written into a `PAINT_SIZE` (1,024) px colour texture over the table level's unwrap, drawn through `createBakedMaterial`'s `map`, so the paint comes back as an `Albedo` that `paintAtVertices` and `renderThumbnail` take:
+- A painted mini's downloads carry the paint (#167): `encodeGlb(level, { …, paint })` takes the paint per vertex (`paintAtVertices`, RGBA bytes) and makes COLOR_0 the look over it; `encodeGlb(result.baked.mesh, { …, texture: { mimeType: 'image/png', bytes } })` stores a PNG as the material's base colour texture on TEXCOORD_0 and leaves COLOR_0 out, because glTF multiplies a vertex colour into the texture's and the look is not a multiplication. The PNG's pixels are `paintedTexture(view.surface(), look, albedo)`: the painted look per texel, opaque sRGB, the coat where the surface is not the mini's; encode them with a canvas (`putImageData`, `toBlob('image/png')`). `extras.meshtavern.paint` says `texture` or `vertex`. Without either option a file is byte for byte as before.
+- A baked mini can be painted in a view of its own (#127, design note `docs/design/painting-engine.md`): `mountPainting` from `meshtavern-converter/painting` puts a canvas and a brush ring into one element; the panel (tools, sliders, palette, Undo, Redo, regions) is `meshtavern-converter/painting-panel`'s (the next bullet), or yours, wired to the view's methods. The strokes are written into a `PAINT_SIZE` (1,024) px colour texture over the table level's unwrap, drawn through `createBakedMaterial`'s `map`, so the paint comes back as an `Albedo` that `paintAtVertices` and `renderThumbnail` take:
 
   ```ts
   import { mountPainting } from 'meshtavern-converter/painting';
   // After the theme's tokens.css, as for the questions above.
   import 'meshtavern-converter/painting.css';
-  import { regionsOf } from 'meshtavern-converter';
+  import { groupsOf, regionsOf } from 'meshtavern-converter';
 
   const view = mountPainting({
     scene: dialog.querySelector<HTMLElement>('.scene')!,
     onChange: (state) => panel.render(state), // your tools, sliders, palette, Undo, Redo
+  });
+  const regions = regionsOf(result.baked!.mesh, {
+    source: result.mesh,
+    figureTriangles: result.pair?.figureTriangles,
+    sizing: result.sizing,
+    kind: result.kind,
   });
   await view.open({
     mesh: result.baked!.mesh,
     texture, // transcodeDetail(result.baked.ktx2, renderer)
     look,
     paint: storedPaint ?? null, // the Albedo you kept, or none
-    regions: regionsOf(result.baked!.mesh, {
-      source: result.mesh,
-      figureTriangles: result.pair?.figureTriangles,
-      sizing: result.sizing,
-      kind: result.kind,
-    }),
+    mask: storedMask ?? null, // the PaintMask you kept, or none (#138)
+    regions,
+    // The PaintGroups you kept, or the automatic ones (#139): the base, the files, the shells.
+    groups:
+      storedGroups ??
+      groupsOf(result.baked!.mesh, {
+        regions,
+        source: result.mesh,
+        parts: result.pair?.parts,
+        figureTriangles: result.pair?.figureTriangles,
+      }),
   });
   view.setTool('flat');
   view.setBrush({ sizeMm: 2 });
   view.setColour('#b03030');
   // ... the person paints ...
   const albedo = await view.paint(); // 1,024² RGBA bytes: store them; paintAtVertices and renderThumbnail take them
+  const mask = await view.mask(); // 1,024² bytes, 255 masked: store them beside the paint to go on later
+  const groups = view.groups(); // a byte a triangle and how each group was made: store them too (#139)
   view.close();
   ```
 
-  `open` refuses a mesh without texture coordinates (a mini whose bake was skipped) with a `RangeError` whose message is `PAINT_COPY.cannotPaint`. The left button, a pen's tip and one finger paint; the right button and two fingers turn the mini, the middle button pans, the wheel zooms; a second finger during a stroke cancels it; `setNavigating(true)` lets one finger turn the mini instead. A stroke reaches only what was in sight of the camera it was painted from and faces it, within a sphere of the brush's size in mm and no more than `BRUSH_DEPTH_MM` (1.5 mm) behind the dab along the line of sight (so a surface in sight across a gap, the back behind a hand, stays bare), and the gutter around every island of the atlas is filled two texels deep as it is painted, so no seam shows at full size; for mipmaps spread it further, as the paint bullet above says. The tools of this build are `flat`, `fill` (a tap fills the surface up to a fold or a crease, `brush.tolerance` loosening both; `fillRegion('base' | 'figure')` fills the ready regions `regionsOf` found) and `eraser`, and the hobby brushes (#128), which read the mini's surface from the detail texture: `wash` pools in the creases and buried places, tints flat surface faintly and nearly leaves a raised edge (`opacity` is its strength); `ink` stains everything it covers, the creases most (`opacity` is its flow); `dry` catches the highest points under the brush where a stroke starts (its reference, the highest cavity under the first dab, measured on the GPU and again on every replay, #133) and anything as high along it, `opacity` its pressure, which reaches further down from them, and never paints flat surface or a crease (`toolMask`'s last parameter is the reference; `DRY_REFERENCE_MIN` is the lowest it counts as, `FLAT_CAVITY` where height is measured from); `airbrush` is soft and builds up over passes (`opacity` is its flow), and `brush.direction`, a vector in the mini's coordinates (scaled to unit length) (`[0, 1, 0]` is above), sprays only the surface that faces it: a zenithal highlight in one pass. `toolMask` gives each brush's share of a texel from the surface, and the constants it reads (`WASH_FLAT` … `AIR_DIR_SOFTNESS`) are exported beside it. Every stroke and fill is one step as plain JSON (`history()`), `undo` and `redo` go at least `UNDO_STEPS` (50) back by replaying from keyframes. A pipette is yours to draw too (#135): `colourAt(x, y, mode?)` gives the colour under a canvas point as `#rrggbb` for `setColour`, `'shown'` (the default, `PICK_MODE`) as the pixel on screen with the look's light and shading, `'painted'` as the paint's own colour in the texel there (null where that texel is bare), and null off the mini in either mode. The words are `PAINT_COPY`, replaced field by field, with a sentence or two on what each tool does (`toolHints`) for your panel and the pipette's words (`pick`); the view shows only `cannotPaint`. Every rule of the stylesheet is under `.mt-painting`; the ring takes the `--accent` role of the theme's `tokens.css`. Several views may share a document, one per element.
+  `open` refuses a mesh without texture coordinates (a mini whose bake was skipped) with a `RangeError` whose message is `PAINT_COPY.cannotPaint`. The left button, a pen's tip and one finger paint; the right button and two fingers turn the mini, the middle button pans, the wheel zooms; a second finger during a stroke cancels it; `setNavigating(true)` lets one finger turn the mini instead. A stroke reaches only what was in sight of the camera it was painted from and faces it, within a sphere of the brush's size in mm and no more than `BRUSH_DEPTH_MM` (1.5 mm) behind the dab along the line of sight (so a surface in sight across a gap, the back behind a hand, stays bare), and the gutter around every island of the atlas is filled two texels deep as it is painted, so no seam shows at full size; for mipmaps spread it further, as the paint bullet above says. The tools of this build are `flat`, `fill` (a tap fills the surface up to a fold or a crease, `brush.tolerance` loosening both; `fillRegion('base' | 'figure')` fills the ready regions `regionsOf` found), `eraser` (back to bare) and `lift` (#137: takes away the step the stroke starts on, wherever that step is still the top layer, and shows the paint beneath it; started again on the same spot it lifts the layer under that; its stroke records the step as `lifts`, and `state.lift` says which step it took, or why it took none: `nothing-painted` where no step since `open` changed the paint, `too-long-ago` where the step is older than the lift reaches (the last `UNDO_STEPS` steps), with `PAINT_COPY.lift` to say so), and the hobby brushes (#128), which read the mini's surface from the detail texture: `wash` pools in the creases and buried places, tints flat surface faintly and nearly leaves a raised edge (`opacity` is its strength); `ink` stains everything it covers, the creases most (`opacity` is its flow); `dry` catches the highest points under the brush where a stroke starts (its reference, the highest cavity under the first dab, measured on the GPU and again on every replay, #133) and anything as high along it, `opacity` its pressure, which reaches further down from them, and never paints flat surface or a crease (`toolMask`'s last parameter is the reference; `DRY_REFERENCE_MIN` is the lowest it counts as, `FLAT_CAVITY` where height is measured from); `airbrush` is soft and builds up over passes (`opacity` is its flow), and `brush.direction`, a vector in the mini's coordinates (scaled to unit length) (`[0, 1, 0]` is above), sprays only the surface that faces it: a zenithal highlight in one pass. The mask (#138) protects the surface from every tool, as liquid mask does on a real mini: where it is laid, no tool changes the paint (the lift included), and a fill treats it as a bound (a triangle whose middle the mask covers is never entered, so a band of mask two or three triangles wide across a wrist keeps a fill of the hand on the hand). It is made with `mask` (a brush that lays it, `opacity` how much), `unmask` (an eraser that takes it away) and `mask-fill` (a tap masks the surface up to a fold, a crease or the mask there; `maskRegion('base' | 'figure')` masks a ready region), and changed whole with `clearMask()` and `invertMask()` ("paint only the face"); each is one step of the history like a stroke (`MASK_TOOL_IDS`, `isMaskTool`; a `MaskChange` step for the last two). It is never in `paint()`: `mask()` gives it as a `PaintMask`, 1,024² bytes from 0 open to 255 masked, and `open` takes it back as `mask`. While a mini is open the view tints the masked surface blue (`MASK_TINT`); `setMaskShown(false)` hides the tint, and `state.maskShown` says which; `unmask-fill` (#139) takes the mask away from the surface a tap reaches. Groups (#139, design note `docs/design/paint-groups.md`) are sets of the table level's triangles, every triangle in one, group 0 the body: `groupsOf(table, { regions, source, parts, figureTriangles })` makes the automatic ones from what a conversion knows (the base from the ready regions or the base file, a group for every other file of a figure in parts, by the file under each triangle's middle, and every group's separate shells of at least `SHELL_MIN_TRIANGLES` (100) triangles, at most `MAX_GROUPS` (64)); give them to `open` as `groups` and keep what `groups()` gives (`PaintGroups`: `of`, a byte a triangle, and `made`, how each group came to be: `body`, `part`, `base`, `shell`, `hand`). `setGroupShown(k, false)` hides group k: it is drawn nowhere, takes no paint from any tool, and a tap or a stroke reaches the surface behind it, so the chest behind a shield can be painted; `showAllGroups()` brings every group back. Hiding is not a step and undo never shows a group, but each step records the groups hidden when it was made (`groups.hidden`, left out when none was), so a replay gives the same bytes whatever is hidden then. Groups are made by hand with `group` (a brush: the triangles whose middle its coverage reaches `GROUP_COVER` go into the target group, `setGroupTarget(k | 'new')`) and `group-fill` (a tap floods all that is connected within the group it starts in, up to the mask and the hidden groups, with no fold or crease bound: mask a wrist, tap the hand, and the hand is a group of its own); each is one step, `into` its target. `fillGroup(k)` and `maskGroup(k, masked)` fill or mask a group's triangles in one step (a `group` seed). `setGroupTint(true)` draws every group but 0 in its colour (`GROUP_COLOURS`), and while a group stroke is on the canvas its coverage shows in the target's colour; `state.groups` lists each group's origin and triangles, the hidden ones and the target, and `describeGroup(made, k, fileNames?)` names one for a panel ("The body", "Part 2", "Shell 2 of the body"). Groups can be pulled apart too (#180): `pullApart(k, offset)` draws group k moved by `offset` (mm along the mini's axes; without one, by the rule below for that group alone, clear of the groups already apart; it says whether the group is apart), where a tap or a stroke finds it and paints it alone (a dab on a pulled-apart arm leaves the shoulder bare, as it lies the gap away as drawn), `pullAllApart()` lays every group out as the parts question lays a figure's parts (`groupsApart`: group 0 stays, every other group moves along the line from the body by `APART_SHARE` of its largest side, at least `APART_MIN_GAP_MM`), and `putTogether()` brings them back; not steps either, but each step records the offsets at its start (`groups.apart`), so it replays to the same bytes with the groups together; a tap's point (`texelAt`) stays in the mini's own coordinates, and a fill never crosses from a group at one offset to another. `toolMask` gives each brush's share of a texel from the surface, and the constants it reads (`WASH_FLAT` … `AIR_DIR_SOFTNESS`) are exported beside it. Every stroke and fill is one step as plain JSON (`history()`), `undo` and `redo` reach back through every step since `open` by replaying from keyframes: within the last `UNDO_STEPS` (50) an undo replays at most nine steps; further back the first undo past them replays from the paint as opened (#165). A pipette is yours to draw too (#135): `colourAt(x, y, mode?)` gives the colour under a canvas point as `#rrggbb` for `setColour`, `'shown'` (the default, `PICK_MODE`) as the pixel on screen with the look's light and shading, `'painted'` as the paint's own colour in the texel there (null where that texel is bare), and null off the mini in either mode. The words are `PAINT_COPY`, replaced field by field, with a sentence or two on what each tool does (`toolHints`) for your panel and the pipette's words (`pick`), the mask's buttons (`mask`) and the groups' (`groups`); the view shows only `cannotPaint`. Every rule of the stylesheet is under `.mt-painting`; the ring takes the `--accent` role of the theme's `tokens.css`. Several views may share a document, one per element.
 
   What the view holds while a mini is open, over your own renderer's (a second WebGL context, like the question view's):
 
@@ -177,12 +191,85 @@ export async function addMini(files: File[]) {
   | `owner` (where each gutter texel's paint comes from) | RGBA8                                        |                                            4.0 MB |
   | `paint` (committed), `live` (on screen)              | RGBA8 sRGB, two                              |                                            8.0 MB |
   | `stroke` (the stroke's coverage)                     | R8, with a depth and stencil buffer          |                                            5.0 MB |
+  | `stamp` (the newest step to change each texel, #137) | RG8                                          |                                            2.0 MB |
+  | `mask` (committed), `maskLive` (on screen, #138)     | R8, two                                      |                                            2.0 MB |
   | `depth` (the stroke's camera)                        | 24-bit depth + R8, the drawing buffer's size |                           8.3 MB at 1,920 × 1,080 |
-  | keyframes for undo, at most six                      | RGBA8 sRGB                                   |                                     up to 24.0 MB |
+  | keyframes for undo, at most seven (#165)             | RGBA8 sRGB, RG8 and R8 (paint, stamp, mask)  |                                     up to 49.0 MB |
+  | a keyframe for each step lift strokes took away      | RGBA8 sRGB, RG8 and R8                       |                                     7.0 MB a step |
   | the view's copy of the detail texture                | yours (compressed or raw)                    | 1.3 MB (1,024 px) to 5.3 MB (2,048 px) compressed |
-  | the table level's geometry                           | 36 B a vertex, 12 B a triangle               |                                            1–3 MB |
+  | the view's geometry (de-indexed, with groups, #139)  | 37 B a corner, three a triangle              |                        6.7 MB at 60,000 triangles |
+  | the group map, live and in each keyframe (CPU)       | a byte a triangle                            |                              60 KB each at 60,000 |
 
-  About 36 MB, 60 MB with every keyframe, plus the context's own canvas buffers (the drawing buffer is capped at 2 device pixels per CSS pixel). Measured on the development PC with the view open on large-01: the GPU process grew by 130 MB. `state.perf` is the view's frame counter for the last stroke (`performance.now()` around each frame, `slow` over `FRAME_BUDGET_MS`); it measures the CPU's part and what the GPU makes the CPU wait for, not GPU time, which needs `EXT_disjoint_timer_query_webgl2`. `scripts/measure-painting.mjs` also measures the time between frames.
+  About 45 MB, 94 MB with every keyframe (and 7 MB more for each step lifted), plus the context's own canvas buffers (the drawing buffer is capped at 2 device pixels per CSS pixel). Measured on the development PC with the view open on large-01: the GPU process grew by 130 MB. `state.perf` is the view's frame counter for the last stroke (`performance.now()` around each frame, `slow` over `FRAME_BUDGET_MS`); it measures the CPU's part and what the GPU makes the CPU wait for, not GPU time, which needs `EXT_disjoint_timer_query_webgl2`. `scripts/measure-painting.mjs` also measures the time between frames.
+
+- The painter's panel (#166, design note `docs/design/painting-panel.md`) is the sixth entry: `mountPaintingPanel` from `meshtavern-converter/painting-panel` fills one element with the panel's sections on MeshTavern's components and drives the view from them: the history row (Undo, Redo, Turn the mini), the tools with the tool's hint, the tool's sliders with each value in its label, the colour with the pipette and the swatches (the mini's colours, then yours), the regions, the mask, the groups as rows (Hide and Pull apart beside each) and the look. It holds no state of its own: it reads `view.state` through `subscribe` (your `onChange` stays yours), so a change made by your code shows in the panel too. Your frame's header and footer stay yours: the page puts Save and Open beside it, the application its dialog's Close and Save, as `docs/design/look-and-feel/app-painting.html` draws it:
+
+  ```ts
+  import { mountPainting } from 'meshtavern-converter/painting';
+  import { mountPaintingPanel } from 'meshtavern-converter/painting-panel';
+  // After the theme's tokens.css and components.css.
+  import 'meshtavern-converter/painting.css';
+  import 'meshtavern-converter/painting-panel.css';
+
+  const view = mountPainting({ scene: dialog.querySelector<HTMLElement>('.mt-painting')!, copy });
+  const panel = mountPaintingPanel({
+    view,
+    controls: dialog.querySelector<HTMLElement>('.paint-panel .panel-body')!, // a .panel-body.flush
+    copy, // the same words as the view's
+    palette: accountColours, // your colours, after the mini's own
+    names: fileNames, // a part's group is named after its file
+  });
+  // Later: panel.setPalette(…) when your colours change; panel.dispose() before the view's.
+  ```
+
+  The view gained what a panel outside it needs: `subscribe(listener)` (after `onChange`, until the function it returns is called), `state.look` (the look the mini is drawn with, `setLook`'s after `open`) and `pickColour(mode?)`, which waits for the next tap on the canvas and resolves with `colourAt` there, painting nothing (`state.picking` while it waits, the host's class `mt-painting-picking` with a crosshair; null for a tap off the mini; `cancelPick()`, closing and a second pick end it without a tap, resolving undefined). The words are `PAINT_COPY`'s, with `panel`, `directions` and `look` for the sections, replaced field by field; `SLIDERS`, `DIRECTIONS`, `panelSwatches` and `sliderValue` are the tables and functions it writes with. Every rule of its stylesheet is under `.mt-painting-panel` and reads the theme's roles; every element a test or your code reaches has a `data-` attribute, no id, so two panels may share a document.
+
+- A painting is saved as a **paint file** (#165, design note `docs/design/painting-engine.md` §17): what made it, not its pixels. It holds the converter's version (`CONVERTER_VERSION`), the file's own (`PAINT_FILE_VERSION`), the engine each step was painted on (`engines`, `PAINT_ENGINE_VERSION`), a fingerprint of every file the mini was converted from (SHA-256, size and its role: `figure`, `part` or `base`), the conversion's choices, the look and the steps as `history()` records them; no geometry, no texture, no file names. It is JSON with the extension `PAINT_FILE_EXTENSION` (`.mtpaint`), gzip-compressed above `PAINT_FILE_GZIP_ABOVE` (1 MiB); a long session is a few hundred KiB. Everything but the view is in `meshtavern-converter`, without three.js or the DOM:
+
+  ```ts
+  import {
+    convertOptionsOf,
+    fingerprintSources,
+    matchSources,
+    paintedOnOlderEngine,
+    readPaintFile,
+    sourceRoles,
+    writePaintFile,
+  } from 'meshtavern-converter';
+  import { PAINT_COPY } from 'meshtavern-converter/painting';
+
+  // Save: fingerprint the files before `convert` takes them (it transfers their buffers).
+  const sources = await fingerprintSources(stls, sourceRoles(result.pair, stls.length));
+  const bytes = await writePaintFile({
+    sources,
+    choices: { ...result.choices, sizing }, // the sizing you converted with
+    look,
+    steps: view.history(),
+    engines: view.engines(),
+  });
+
+  // Open: refused before anything converts when the files are not the ones it names, as a
+  // ConversionProblem whose message says which file is missing or different.
+  const file = await readPaintFile(dropped); // ConversionProblem 'not-a-paint-file' or 'paint-file-newer'
+  const [stl, secondStl, ...moreStl] = await matchSources(file, droppedStls);
+  const again = await converter.convert(stl, onProgress, {
+    ...convertOptionsOf(file), // no question: the choices as the file says
+    secondStl,
+    moreStl,
+  });
+  if (paintedOnOlderEngine(file)) showLine(PAINT_COPY.olderEngine);
+  await view.open({
+    mesh,
+    texture,
+    look: file.look,
+    regions,
+    groups,
+    steps: file.steps,
+    engines: file.engines,
+  });
+  ```
+
+  `open` replays the steps over the paint, mask and groups it is given, exactly as undo replays them, and opens at the end of them with undo back through all of them; steps that cannot be the mesh's (a triangle it does not have, a ready region it has none of) are refused with a `RangeError` before anything opens. On the same engine version and device the paint, mask and groups are the same bytes as when the painting was saved (`e2e/paint-file.spec.ts`). A file painted on an older engine replays as it was painted: a brush change that would alter old paintings keeps the old behaviour for steps of an older engine (`engineOf`), and `paintedOnOlderEngine` says when to show `PAINT_COPY.olderEngine`; a file of a newer engine or file version is refused (`paint-file-newer`). A recorded painting of the generated figure (`src/regression/painting.mtpaint`) is replayed and compared in every e2e run.
 
 - Linked with `file:../meshtavern-converter` instead, Vite's dev server refuses to serve the worker from outside the project until the folder is allowed: `server: { fs: { allow: ['.', '../meshtavern-converter'] } }`.
 

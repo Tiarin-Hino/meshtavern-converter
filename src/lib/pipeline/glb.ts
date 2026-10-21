@@ -23,6 +23,12 @@ import type { Orientation } from './orient';
  * `TEXCOORD_0`, exactly as the unwrap made them, so the KTX2 detail texture baked for it can
  * be applied to the loaded file (issue #109): floats in the plain variant, normalised 16-bit
  * in the compact one. The texture itself is not in the file and no material refers to it.
+ *
+ * A painted mini (#167, design note painter-on-the-page.md §6.1) carries its paint: per vertex
+ * (`paint`), COLOR_0 is the look over the paint; as a texture (`texture`, an unwrapped mesh
+ * only), a PNG of the painted look per texel is the material's base colour texture and COLOR_0
+ * is left out, because glTF multiplies the vertex colour into the texture's and the look is in the
+ * texture already. Without either the file is byte for byte the one before.
  */
 export interface GlbOptions {
   /** Shown as the node and mesh name in other tools. */
@@ -42,9 +48,22 @@ export interface GlbOptions {
    * carries its rotation, so the table can reproduce the orientation or offer it as a choice.
    */
   orientation?: Orientation;
+  /**
+   * The paint per vertex (#167): RGBA bytes, four a vertex, the colour in sRGB, as
+   * `paintAtVertices` gives them. COLOR_0 becomes the look over the paint.
+   */
+  paint?: Uint8Array | null;
+  /**
+   * The painted look as an image (#167): the material's base colour texture on TEXCOORD_0, the
+   * bytes stored in the binary chunk. Needs the mesh's `uvs`; COLOR_0 is left out.
+   */
+  texture?: { mimeType: 'image/png'; bytes: Uint8Array } | null;
 }
 
 const MM_TO_M = 0.001;
+/** The sampler of the painted texture (#167): linear filters, clamped to the edge. */
+const LINEAR = 9729;
+const CLAMP_TO_EDGE = 33071;
 const ROUGHNESS = 0.75;
 
 const BYTE = 5120;
@@ -165,8 +184,19 @@ function container(json: Json, bin: Uint8Array): ArrayBuffer {
 /** The glTF `asset.generator`: the product's name (#147), which glTF viewers show for the file. */
 const GENERATOR = 'PolyWash';
 
-function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Json): Json {
+/**
+ * `image`: the buffer view of the painted texture (#167), whose image, sampler and texture the
+ * file then holds, the material's base colour.
+ */
+function document(
+  options: GlbOptions,
+  mesh: IndexedMesh,
+  node: Json,
+  parts: Json,
+  image: number | null = null,
+): Json {
   const size = bounds(mesh.positions);
+  const paint = image !== null ? 'texture' : options.paint ? 'vertex' : null;
   return {
     asset: { version: '2.0', generator: GENERATOR },
     scene: 0,
@@ -177,11 +207,19 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
         name: 'Mini',
         pbrMetallicRoughness: {
           baseColorFactor: [1, 1, 1, 1],
+          ...(image !== null && { baseColorTexture: { index: 0, texCoord: 0 } }),
           metallicFactor: 0,
           roughnessFactor: ROUGHNESS,
         },
       },
     ],
+    ...(image !== null && {
+      images: [{ bufferView: image, mimeType: options.texture!.mimeType }],
+      samplers: [
+        { magFilter: LINEAR, minFilter: LINEAR, wrapS: CLAMP_TO_EDGE, wrapT: CLAMP_TO_EDGE },
+      ],
+      textures: [{ sampler: 0, source: 0 }],
+    }),
     extras: {
       units: 'Vertex data is in millimetres; the node scale converts to metres.',
       sizeMm: size.max.map((value, axis) => Number((value - size.min[axis]!).toFixed(3))),
@@ -197,6 +235,8 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
           // File coordinates → the vertex data's Y-up frame, x y z w: the vertices are
           // already turned by it.
           ...(options.orientation && { rotation: options.orientation.rotation }),
+          // How the paint is in the file (#167): the texture, the vertex colours, or none.
+          ...(paint && { paint }),
         },
       }),
     },
@@ -204,19 +244,29 @@ function document(options: GlbOptions, mesh: IndexedMesh, node: Json, parts: Jso
   };
 }
 
-/** The accessors follow in this order; texture coordinates come last, after the shading if any. */
-const primitive = (hasShading: boolean, hasUvs: boolean): Json => ({
-  attributes: {
-    POSITION: 1,
-    NORMAL: 2,
-    COLOR_0: 3,
-    ...(hasShading ? { _SHADING: 4 } : {}),
-    ...(hasUvs ? { TEXCOORD_0: hasShading ? 5 : 4 } : {}),
-  },
-  indices: 0,
-  material: 0,
-  mode: 4,
-});
+/**
+ * The accessors follow in this order, numbered as present: the indices, the position, the normal,
+ * the colour (left out under a painted texture, #167), the shading, the texture coordinates.
+ */
+function primitive(hasColour: boolean, hasShading: boolean, hasUvs: boolean): Json {
+  let next = 3;
+  const attributes: Json = { POSITION: 1, NORMAL: 2 };
+  if (hasColour) attributes.COLOR_0 = next++;
+  if (hasShading) attributes._SHADING = next++;
+  if (hasUvs) attributes.TEXCOORD_0 = next;
+  return { attributes, indices: 0, material: 0, mode: 4 };
+}
+
+/** Checks the paint options against the mesh (#167). */
+function checkPaint(mesh: IndexedMesh, options: GlbOptions): void {
+  const vertexCount = mesh.positions.length / 3;
+  if (options.paint && options.paint.length !== vertexCount * 4)
+    throw new RangeError(
+      `A paint per vertex is ${vertexCount * 4} bytes, not ${options.paint.length}`,
+    );
+  if (options.texture && !mesh.uvs)
+    throw new RangeError('A painted texture needs the mesh’s texture coordinates');
+}
 
 /** Occlusion and cavity as two unsigned bytes per vertex, padded to four. */
 function shadingBytes(mesh: IndexedMesh): Uint8Array {
@@ -229,8 +279,8 @@ function shadingBytes(mesh: IndexedMesh): Uint8Array {
   return out;
 }
 
-function colourBytes(mesh: IndexedMesh, look: Look): Uint8Array {
-  const colours = vertexColours(mesh, look);
+function colourBytes(mesh: IndexedMesh, look: Look, paint: Uint8Array | null = null): Uint8Array {
+  const colours = vertexColours(mesh, look, paint);
   const vertexCount = mesh.positions.length / 3;
   const out = new Uint8Array(vertexCount * 4);
   for (let v = 0; v < vertexCount; v++) {
@@ -246,6 +296,7 @@ function encodePlain(mesh: IndexedMesh, options: GlbOptions): ArrayBuffer {
   const vertexCount = mesh.positions.length / 3;
   const hasShading = Boolean(mesh.occlusion && mesh.cavity);
   const hasUvs = Boolean(mesh.uvs);
+  const hasColour = !options.texture;
   const bin = new Bin();
   const small = vertexCount <= 65535;
 
@@ -279,14 +330,16 @@ function encodePlain(mesh: IndexedMesh, options: GlbOptions): ArrayBuffer {
       count: vertexCount,
       type: 'VEC3',
     },
-    {
-      bufferView: view(colourBytes(mesh, options.look), ARRAY_BUFFER),
+  ];
+  if (hasColour) {
+    accessors.push({
+      bufferView: view(colourBytes(mesh, options.look, options.paint), ARRAY_BUFFER),
       componentType: UNSIGNED_BYTE,
       normalized: true,
       count: vertexCount,
       type: 'VEC4',
-    },
-  ];
+    });
+  }
   if (hasShading) {
     const shadingView = view(shadingBytes(mesh), ARRAY_BUFFER);
     (views[shadingView] as Json).byteStride = 4;
@@ -306,17 +359,24 @@ function encodePlain(mesh: IndexedMesh, options: GlbOptions): ArrayBuffer {
       type: 'VEC2',
     });
   }
+  // The painted texture's bytes (#167): a view of the binary chunk without a target.
+  let image: number | null = null;
+  if (options.texture) {
+    views.push({ buffer: 0, ...bin.add(options.texture.bytes) });
+    image = views.length - 1;
+  }
 
   const json = document(
     options,
     mesh,
     { scale: [MM_TO_M, MM_TO_M, MM_TO_M] },
     {
-      meshes: [{ name: options.name, primitives: [primitive(hasShading, hasUvs)] }],
+      meshes: [{ name: options.name, primitives: [primitive(hasColour, hasShading, hasUvs)] }],
       accessors,
       bufferViews: views,
       buffers: [{ byteLength: bin.length }],
     },
+    image,
   );
   return container(json, bin.toBytes());
 }
@@ -328,6 +388,17 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
   const mesh = reordered({ ...source, indices }, remap, vertexCount);
   const hasShading = Boolean(mesh.occlusion && mesh.cavity);
   const hasUvs = Boolean(mesh.uvs);
+  const hasColour = !options.texture;
+  // The paint per vertex follows its vertex (#167).
+  let paint: Uint8Array | null = null;
+  if (options.paint) {
+    paint = new Uint8Array(vertexCount * 4);
+    for (let old = 0; old < remap.length; old++) {
+      const target = remap[old]!;
+      if (target !== 0xffffffff)
+        paint.set(options.paint.subarray(old * 4, old * 4 + 4), target * 4);
+    }
+  }
 
   // Positions as 16-bit steps of the largest extent; the node transform undoes it.
   const { min, max } = bounds(mesh.positions);
@@ -352,7 +423,7 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
     for (let axis = 0; axis < 3; axis++) b[v * 4 + axis] = toSignedByte(normals[v * 3 + axis]!);
   }
   // View C, 4 bytes per vertex: colour.
-  const c = colourBytes(mesh, options.look);
+  const c = hasColour ? colourBytes(mesh, options.look, paint) : null;
 
   const small = vertexCount <= 65535;
   const indexBytes = asBytes(small ? Uint16Array.from(indices) : indices);
@@ -385,7 +456,7 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
   const indexView = view(indexBytes, indices.length, indexSize, 'TRIANGLES');
   const viewA = view(new Uint8Array(a), vertexCount, 8, 'ATTRIBUTES');
   const viewB = view(asBytes(b), vertexCount, 4, 'ATTRIBUTES');
-  const viewC = view(c, vertexCount, 4, 'ATTRIBUTES');
+  const viewC = c ? view(c, vertexCount, 4, 'ATTRIBUTES') : null;
 
   const accessors: Json[] = [
     {
@@ -403,14 +474,16 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
       max: qMax,
     },
     { bufferView: viewB, componentType: BYTE, normalized: true, count: vertexCount, type: 'VEC3' },
-    {
+  ];
+  if (viewC !== null) {
+    accessors.push({
       bufferView: viewC,
       componentType: UNSIGNED_BYTE,
       normalized: true,
       count: vertexCount,
       type: 'VEC4',
-    },
-  ];
+    });
+  }
   if (hasShading) {
     accessors.push({
       bufferView: view(shadingBytes(mesh), vertexCount, 4, 'ATTRIBUTES'),
@@ -433,6 +506,13 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
       type: 'VEC2',
     });
   }
+  // The painted texture's bytes (#167), stored as they are in the real buffer: an image is not
+  // vertex data for the codec.
+  let image: number | null = null;
+  if (options.texture) {
+    views.push({ buffer: 0, ...bin.add(options.texture.bytes) });
+    image = views.length - 1;
+  }
 
   const extensions = ['KHR_mesh_quantization', 'EXT_meshopt_compression'];
   const json = document(
@@ -445,7 +525,7 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
     {
       extensionsUsed: extensions,
       extensionsRequired: extensions,
-      meshes: [{ name: options.name, primitives: [primitive(hasShading, hasUvs)] }],
+      meshes: [{ name: options.name, primitives: [primitive(hasColour, hasShading, hasUvs)] }],
       accessors,
       bufferViews: views,
       buffers: [
@@ -454,6 +534,7 @@ function encodeCompact(source: IndexedMesh, options: GlbOptions): ArrayBuffer {
         { byteLength: fallbackLength, extensions: { EXT_meshopt_compression: { fallback: true } } },
       ],
     },
+    image,
   );
   return container(json, bin.toBytes());
 }
@@ -463,5 +544,6 @@ export const glbEncoderReady = (): Promise<void> => MeshoptEncoder.ready;
 
 export function encodeGlb(mesh: IndexedMesh, options: GlbOptions): ArrayBuffer {
   if (mesh.positions.length === 0) throw new Error('Cannot export an empty mesh');
+  checkPaint(mesh, options);
   return options.compact ? encodeCompact(mesh, options) : encodePlain(mesh, options);
 }

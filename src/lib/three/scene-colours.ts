@@ -120,6 +120,21 @@ export function readSceneColours(root?: Element): SceneColours {
 /** The pairs' colours: the patches in the scene, and `--pair-1` … `--pair-4` on the view's hosts for the chips. Data of the question view, not of the theme. _(proposal, #93)_ */
 export const PAIR_COLOURS = [0xf0b35e, 0x7ee0c3, 0xd78ae6, 0x8fb8f5] as const;
 
+/** The tint the painting view shows the mask with over the surface (#138): the blue of liquid mask. _(proposal)_ */
+export const MASK_TINT = 0x3a78d8;
+/** How much of the tint a fully masked texel shows over the mini. _(proposal)_ */
+export const MASK_TINT_STRENGTH = 0.45;
+
+/**
+ * The groups' colours in the painting view (#139), group k > 0 in colour k modulo their number:
+ * the pairs' four first, then four more. _(proposal)_
+ */
+export const GROUP_COLOURS = [...PAIR_COLOURS, 0xe86f6f, 0xb8d86b, 0x6fd1e8, 0xe8a0c0] as const;
+/** How much of its colour a group shows over the mini while the groups are shown. _(proposal)_ */
+export const GROUP_TINT_STRENGTH = 0.35;
+/** How much of the target group's colour a group stroke's coverage shows before its commit. _(proposal)_ */
+export const GROUP_STROKE_TINT_STRENGTH = 0.5;
+
 /** The table's light (`addTableLights`, in the viewer, the question and painting scenes and the thumbnail): the sky and the ground of the fill, and the key light. */
 export const TABLE_LIGHT_COLOURS = { sky: 0xffffff, ground: 0x30343c, key: 0xffffff } as const;
 

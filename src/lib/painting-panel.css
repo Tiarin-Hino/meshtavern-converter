@@ -1,0 +1,200 @@
+/*
+ * The painter's panel (#166, docs/design/painting-panel.md §7): every rule under
+ * .mt-painting-panel, the class mountPaintingPanel puts on the element it was given. The controls
+ * are the table application's components (components.css: .tool, .toolbar-group, .field, .btn,
+ * .segmented, .switch, .rows, .chip), so the consumer links the theme's tokens.css and
+ * components.css, then painting.css, before this sheet. It holds only what no component says
+ * (the layout of the mockup's .paint-panel, docs/design/look-and-feel/mock.css); every colour is
+ * a role of tokens.css, the swatches' own colour is data (--swatch, set on each).
+ */
+
+.mt-painting-panel [hidden] {
+  display: none !important;
+}
+
+/* No specificity: a consumer's own frame wins. */
+:where(.mt-painting-panel) {
+  color: var(--text);
+}
+
+.mt-painting-panel .toolbar-group {
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.mt-painting-panel .toolbar-group + .actions,
+.mt-painting-panel .toolbar-group + .rows,
+.mt-painting-panel .actions + .switch,
+.mt-painting-panel .rows + .actions {
+  margin-top: var(--space-2);
+}
+
+.mt-painting-panel .tool-hint,
+.mt-painting-panel .hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mt-painting-panel .hint {
+  margin-top: var(--space-1);
+}
+
+.mt-painting-panel .tool-hint:empty {
+  display: none;
+}
+
+.mt-painting-panel .switch {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.mt-painting-panel .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mt-painting-panel .field {
+  margin-bottom: var(--space-3);
+}
+
+.mt-painting-panel .field:last-child {
+  margin-bottom: 0;
+}
+
+.mt-painting-panel input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.mt-painting-panel input[type='checkbox']:not(.switch input) {
+  accent-color: var(--accent);
+}
+
+.mt-painting-panel input[type='color'] {
+  width: 2.75rem;
+  height: var(--control-height);
+  padding: 2px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+/*
+ * The theme's text face with even figures, not --font-code: the theme ships no monospace, so that
+ * one is each machine's own and the panel would read differently on each (#166).
+ */
+.mt-painting-panel [data-look-hex] {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The airbrush's three directions take the panel's width, alike. */
+.mt-painting-panel .segmented {
+  display: flex;
+}
+
+.mt-painting-panel .segmented .btn {
+  flex: 1;
+}
+
+.mt-painting-panel .swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.mt-painting-panel .swatches:not(:empty) {
+  margin-top: var(--space-2);
+}
+
+.mt-painting-panel .swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--swatch);
+  cursor: pointer;
+}
+
+.mt-painting-panel .swatch[aria-pressed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The focus ring wins over the pressed outline, as on every other control. */
+.mt-painting-panel .swatch:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.mt-painting-panel .swatch:disabled {
+  cursor: not-allowed;
+}
+
+/* The groups' rows: the section's width, the name a button that reads as the row's text. */
+.mt-painting-panel .rows {
+  margin: 0 calc(-1 * var(--space-4));
+}
+
+.mt-painting-panel .row-main {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.mt-painting-panel .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.mt-painting-panel .check {
+  margin-bottom: var(--space-3);
+}
+
+/*
+ * A touch target every control on a phone, as the question view's (questions.css): the theme
+ * raises --control-height under a coarse pointer, but the small buttons, chips, swatches and
+ * checkboxes keep their own sizes, and a narrow window on a fine pointer is a phone layout too.
+ * A swatch grows to SWATCH_TAP_REM, its gap bringing the pitch to the tap size. _(proposal)_ The
+ * tools follow --control-height by themselves: eight in a row fit a 375 px phone.
+ */
+@media (max-width: 600px), (pointer: coarse) {
+  .mt-painting-panel .btn,
+  .mt-painting-panel .chip,
+  .mt-painting-panel .check,
+  .mt-painting-panel .switch,
+  .mt-painting-panel .row-main,
+  .mt-painting-panel input[type='color'],
+  .mt-painting-panel input[type='range'] {
+    min-height: var(--tap-min);
+  }
+
+  .mt-painting-panel .btn-icon {
+    min-width: var(--tap-min);
+  }
+
+  .mt-painting-panel .swatches {
+    gap: calc(var(--tap-min) - 2.25rem);
+  }
+
+  .mt-painting-panel .swatch {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .mt-painting-panel .check input {
+    width: 20px;
+    height: 20px;
+  }
+}

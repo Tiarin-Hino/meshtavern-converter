@@ -32,3 +32,8 @@
 .mt-painting-cursor[hidden] {
   display: none;
 }
+
+/* A pickColour waits for its tap (#166): the cursor says so, and the ring is hidden. */
+.mt-painting-picking canvas {
+  cursor: crosshair;
+}

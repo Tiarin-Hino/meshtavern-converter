@@ -9,6 +9,9 @@ import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
  * size. Fixed positions make screenshots comparable. The page's viewer, the question scene and the
  * painting scene frame the same way (#127, design note `docs/design/painting-engine.md` §10.3).
  */
+/** The camera's distance at zoom 1, in the largest side of what is shown. */
+export const FRAME_DISTANCE = 2.3;
+
 export function placeCameraOnSphere(
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
@@ -18,7 +21,7 @@ export function placeCameraOnSphere(
   zoom: number,
 ): void {
   const radius = Math.max(size.x, size.y, size.z, 1);
-  const distance = (radius * 2.3) / zoom;
+  const distance = (radius * FRAME_DISTANCE) / zoom;
   const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
   const elevation = THREE.MathUtils.degToRad(elevationDeg);
   const target = new THREE.Vector3(0, size.y * (zoom > 1 ? 0.7 : 0.5), 0);
