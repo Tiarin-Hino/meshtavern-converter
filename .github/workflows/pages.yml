@@ -1,0 +1,53 @@
+name: Pages
+
+# Publishes the page on GitHub Pages (#47, PM decision 2026-10-13): every push to main builds
+# `dist/` and deploys it, so the address always shows what main holds. No secrets: the deploy
+# uses the job's own OIDC token. CI runs the checks on the same push; a PR cannot reach main
+# without them, so the deploy builds alone (`npm run build` typechecks and bundles).
+#
+# The page is served under `/<repository>/` until a custom domain (polywash.app, once the PM
+# registers it) serves it at `/`: BASE_PATH tells Vite where (`base` in vite.config.ts). With
+# the domain, set BASE_PATH to `/` and add its CNAME in the repository's Pages settings.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

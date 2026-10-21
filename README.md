@@ -9,7 +9,7 @@ An STL of a miniature in, a game-ready mini out. Everything runs in your browser
 
 Drop the STL of a miniature you printed or bought. PolyWash stands it upright (and asks you first), measures it (units, base, creature size and its footprint on a 32 mm grid), reduces it to three detail levels, gives it a primed-and-washed look and hands you GLB files for a virtual tabletop. A figure and its base in two files, or a figure in up to six parts, are put together before anything else. The page follows your system's light or dark theme, or the switch in its bar.
 
-**Open PolyWash:** the link goes here once the page is published. Until then, run it on your own computer as shown below.
+**Open PolyWash:** <https://tiarin-hino.github.io/meshtavern-converter/>, the test address on GitHub Pages until the page has its own domain. Or run it on your own computer as shown below.
 
 PolyWash is made for MeshTavern, a virtual tabletop that is still being built; the table application uses this repository as its library. What the page ships and under which licences is under Credits on the page and in [`public/theme/NOTICE.txt`](public/theme/NOTICE.txt).
 

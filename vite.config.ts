@@ -28,7 +28,16 @@ function basisTranscoder(): Plugin {
   };
 }
 
+/**
+ * Where the page is served: `/` on a dev server, in the e2e runs and on its own domain; the
+ * repository's path on GitHub Pages, which the Pages workflow sets (#47). Vite prefixes the
+ * bundle, the workers, the transcoder path and index.html's links with it; the Credits links in
+ * index.html are relative, so they follow it without a rewrite.
+ */
+const BASE_PATH = process.env.BASE_PATH || '/';
+
 export default defineConfig({
+  base: BASE_PATH,
   plugins: [basisTranscoder()],
   worker: { format: 'es' },
   test: {

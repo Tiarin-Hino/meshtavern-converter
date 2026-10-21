@@ -274,9 +274,10 @@ test('Credits in the bar opens the dialog, which its Close and the scrim close',
   await expect(dialog).toHaveAttribute('aria-modal', 'true');
   // What the page ships, the full texts beside the theme, and that it collects nothing (#145).
   await expect(dialog.locator('dt')).toContainText(['Inter', 'three.js', 'xatlas']);
+  // The link is relative, so it follows the page under GitHub Pages' path too (#47).
   await expect(dialog.getByRole('link', { name: 'NOTICE.txt' })).toHaveAttribute(
     'href',
-    '/theme/NOTICE.txt',
+    'theme/NOTICE.txt',
   );
   await expect(dialog.getByText(COPY.collectsNothing)).toBeVisible();
   const notice = await page.request.get('/theme/NOTICE.txt');
