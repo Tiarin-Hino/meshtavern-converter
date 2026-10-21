@@ -57,7 +57,6 @@ import {
   paintedTexture,
   type ShadedTexels,
   convertOptionsOf,
-  fingerprintOf,
   matchSources,
   paintedOnOlderEngine,
   paintFileOf,
@@ -633,29 +632,49 @@ interface Source {
   name: string;
   read: () => Promise<ArrayBuffer>;
   /**
-   * Its size and SHA-256 (#167, §7.4), for the paint file: started on the bytes before they go to
-   * the worker, or from `read` the first time it is asked for.
+   * Its size and SHA-256 (#167, §7.4), for the paint file: taken once, from a fresh `read`, in
+   * `digest.worker.ts`, when the painter first opens on the mini.
    */
   fingerprint?: Promise<Omit<SourceFingerprint, 'role'>>;
 }
 
 /**
- * A file's size and SHA-256, without its role (#167): the digest starts at once on `bytes`, and
- * the size is taken now, because `convert` transfers the buffer to the worker.
+ * The worker that hashes the sources (#167): a digest on the page's thread copies the file there
+ * first, and a 280 MB file stalled the page about 250 ms at the conversion's start (journal).
  */
+let digester: Worker | null = null;
+const digests = new Map<number, (fingerprint: Omit<SourceFingerprint, 'role'>) => void>();
+let digestId = 0;
+
+/** A file's size and SHA-256, without its role, hashed off the page's thread; the buffer moves there. */
 function digestOf(bytes: ArrayBuffer): Promise<Omit<SourceFingerprint, 'role'>> {
-  const size = bytes.byteLength;
-  return fingerprintOf(bytes, 'figure').then(({ sha256 }) => ({ bytes: size, sha256 }));
+  if (!digester) {
+    digester = new Worker(new URL('./digest.worker.ts', import.meta.url), { type: 'module' });
+    digester.onmessage = ({
+      data,
+    }: MessageEvent<{ id: number } & Omit<SourceFingerprint, 'role'>>) => {
+      digests.get(data.id)?.({ bytes: data.bytes, sha256: data.sha256 });
+      digests.delete(data.id);
+    };
+  }
+  const id = ++digestId;
+  return new Promise((resolve) => {
+    digests.set(id, resolve);
+    digester!.postMessage({ id, bytes }, [bytes]);
+  });
+}
+
+/** Starts the sources' fingerprints, each once (the painter's open, a save, the record). */
+function fingerprintSources(): void {
+  for (const source of sources) source.fingerprint ??= source.read().then(digestOf);
 }
 
 /** The sources' fingerprints in the conversion's order, with the roles it gave them (#167, §7.4). */
 async function sourceFingerprints(): Promise<SourceFingerprint[]> {
   const roles = sourceRoles(state.stats?.pair ?? null, sources.length);
+  fingerprintSources();
   return Promise.all(
-    sources.map(async (source, k) => {
-      source.fingerprint ??= source.read().then(digestOf);
-      return { role: roles[k]!, ...(await source.fingerprint) };
-    }),
+    sources.map(async (source, k) => ({ role: roles[k]!, ...(await source.fingerprint!) })),
   );
 }
 /** The last file, or the figure and its base file in the order given (#70). */
@@ -1749,7 +1768,7 @@ async function convertWithPaintFile(
   files: { name: string; bytes: ArrayBuffer; read: () => Promise<ArrayBuffer> }[],
   startedAt = performance.now(),
 ): Promise<void> {
-  sources = files.map(({ name, bytes, read }) => ({ name, read, fingerprint: digestOf(bytes) }));
+  sources = files.map(({ name, read }) => ({ name, read }));
   choices = choicesOf(file);
   setLook(file.look);
   pendingPaintFile = null;
@@ -1862,6 +1881,8 @@ paintFileForget.addEventListener('click', () => {
 async function openPainter(replay: PaintReplay | null = null): Promise<void> {
   if (state.busy || !state.stats || state.imported) return;
   const started = performance.now();
+  // The paint file names the files by their contents: hashed now, off the page's thread.
+  fingerprintSources();
   state.painter = true;
   showPainterStatus();
   render();
@@ -2060,7 +2081,7 @@ async function loadFiles(dropped: File[]): Promise<void> {
       startedAt,
     );
   }
-  sources = given.map(({ name, bytes, read }) => ({ name, read, fingerprint: digestOf(bytes) }));
+  sources = given.map(({ name, read }) => ({ name, read }));
   choices = noChoices();
   // New files: every question is asked (#92 design note §6.4, #93 §6.6).
   const ask = { up: true, baseUp: true, parts: true, meet: true };
@@ -2075,6 +2096,13 @@ async function offerUnsaved(buffers: ArrayBuffer[]): Promise<PaintFile | null> {
   const record = await readUnsaved();
   state.unsavedOffer = null;
   if (!record) return null;
+  // Sizes first: hashing copies the files on this thread, so only files that could match are.
+  const sizes = (list: number[]): string => [...list].sort((a, b) => a - b).join();
+  if (
+    sizes(record.file.sources.map((source) => source.bytes)) !==
+    sizes(buffers.map((buffer) => buffer.byteLength))
+  )
+    return null;
   try {
     await matchSources(record.file, buffers);
   } catch {

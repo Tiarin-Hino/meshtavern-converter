@@ -1807,6 +1807,9 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
 test('shows the colours used as swatches in the Paint tool, and a click paints with one again (#136)', async ({
   figurePage: page,
 }) => {
+  // The page's palette of this device (#167) fills as the tests before this one paint: emptied,
+  // the row shows the mini's own colours.
+  await page.evaluate(() => localStorage.removeItem('mt-palette'));
   await paintTheChest(page);
   const swatches = page.locator('#paint-panel [data-swatches] [data-swatch]');
   await page.evaluate(async () => {

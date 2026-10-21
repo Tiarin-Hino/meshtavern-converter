@@ -227,7 +227,12 @@ try {
         running = false;
         const perf = view.state.perf;
         await mt.closePainter();
-        return { painterMs, perf, intervals: intervals.slice(1) };
+        // One painted download of the table level: the painted texture and its PNG, timed.
+        await mt.exportGlb(2, false);
+        const exportMs = mt.state.paintExportMs;
+        // The paint dropped, so the exports below are the unpainted files the figures compare.
+        mt.painting.close();
+        return { painterMs, perf, intervals: intervals.slice(1), exportMs };
       }, PAINT_STROKE_SAMPLES);
       const sorted = [...painted.intervals].sort((a, b) => a - b);
       // All of it depends on the machine: under `times`, out of the comparisons.
@@ -239,6 +244,7 @@ try {
         worstFrameMs: round(painted.perf.worstMs, 1),
         medianIntervalMs: round(sorted[Math.floor(sorted.length / 2)] ?? 0, 1),
         worstIntervalMs: round(sorted.at(-1) ?? 0, 1),
+        paintedTextureMs: round(painted.exportMs ?? 0),
       };
     }
 
@@ -541,10 +547,11 @@ function paintingReport() {
         'Slow',
         'Between frames, median',
         'worst',
+        'Painted texture and PNG',
       ],
       painted.map(
         ([key, m]) =>
-          `| ${key} | ${m.times.painting.openMs} ms | ${m.times.painting.frames} | ${m.times.painting.medianFrameMs} ms | ${m.times.painting.worstFrameMs} ms | ${m.times.painting.slow} | ${m.times.painting.medianIntervalMs} ms | ${m.times.painting.worstIntervalMs} ms |`,
+          `| ${key} | ${m.times.painting.openMs} ms | ${m.times.painting.frames} | ${m.times.painting.medianFrameMs} ms | ${m.times.painting.worstFrameMs} ms | ${m.times.painting.slow} | ${m.times.painting.medianIntervalMs} ms | ${m.times.painting.worstIntervalMs} ms | ${m.times.painting.paintedTextureMs} ms |`,
       ),
     ),
   ].join('\n');
