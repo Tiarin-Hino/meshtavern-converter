@@ -635,7 +635,9 @@ test('development options switch compression off', async ({ page }) => {
 });
 
 test('runs the device benchmark and offers the result as text', async ({ page }) => {
-  test.setTimeout(180_000);
+  // The tiny benchmark runs its three scenes in software on CI; on a slow runner (the painting
+  // spec at 26 minutes against 18) it used the whole 180 s twice (#189), so it gets five minutes.
+  test.setTimeout(300_000);
   await page.goto('/?dev&settle=1');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.getByText('Benchmark this device').click();

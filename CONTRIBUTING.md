@@ -9,7 +9,7 @@ This project is built by a small team together with the Claude Code agent. Human
 - Labels: `type:*`, `area:*`, `priority:*`.
   - `ready-for-agent` — the PM has reviewed the issue; the agent (or a human) may pick it up.
   - `needs-human` — blocked on a decision or on something the agent cannot judge (usually visuals).
-  - `release-blocker` — must be done before the converter is published.
+  - `release-blocker` — must be done before the page is released on its own domain (#47); the GitHub Pages test address is not the release.
   - `cloud-ok` — can be finished in a Claude Code cloud session: no GPU, no reference device, no file from `corpus/`, no locally built WebAssembly.
 
 ## Doing work
