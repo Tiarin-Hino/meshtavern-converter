@@ -1,12 +1,14 @@
 import { expect, test, type FileChooser, type Locator, type Page } from '@playwright/test';
 import { COPY } from '../src/page/page-state';
 import { SIZE_STEP_MM } from '../src/lib/painting-panel';
+import { generateFigure } from '../src/regression/shapes';
 import {
   asking,
   converting,
   cancel,
   done,
   error,
+  file,
   open,
   painting,
   pairsStop,
@@ -350,4 +352,66 @@ test.describe('a phone', () => {
     await page.keyboard.press('Space');
     await expect(handle).toHaveAttribute('aria-expanded', 'false');
   });
+});
+
+test('the painter by keys: Paint, Save paint file, Done, and the confirm dialog (#167)', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await open(page, '/?ask=off&bake=256');
+  await page.setInputFiles('#file', file('hero.stl', generateFigure(true)));
+  await page.waitForFunction(
+    () => window.__mt.state.page === 'done' && !window.__mt.state.busy && window.__mt.state.baked,
+    undefined,
+    { timeout: 180_000 },
+  );
+  // Paint in the done panel by Enter.
+  await tabTo(page, page.locator('#paint-open'), 200);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(
+    () => window.__mt.state.page === 'painting' && window.__mt.state.painting?.open === true,
+    undefined,
+    { timeout: 120_000 },
+  );
+  await expectSwept(page, 'painter');
+  await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    view.setCamera(0, 5, 1.6);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const hit = view.texelAt(...view.screenOf([0, 14, 6]));
+    if (hit) await view.stroke([hit.point]);
+  });
+  // Save paint file by Enter: a download.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await tabTo(page, page.locator('#paint-file-save'), 300);
+  const download = page.waitForEvent('download');
+  await page.keyboard.press('Enter');
+  expect((await download).suggestedFilename()).toBe('hero.mtpaint');
+  // Done by Enter leaves the state, the focus back on Paint.
+  await tabTo(page, page.locator('#paint-done'));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__mt.state.page === 'done');
+  await expect(page.locator('#paint-open')).toBeFocused();
+
+  // An unsaved stroke, then a reconversion: the confirm dialog, no by Escape, yes by Tab and Enter.
+  await page.locator('#paint-open').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'painting');
+  await page.evaluate(async () => {
+    const view = window.__mt.painting.view();
+    const hit = view.texelAt(...view.screenOf([0, 18, 6]));
+    if (hit) await view.stroke([hit.point]);
+  });
+  await page.locator('#paint-done').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'done');
+  let sizing = page.evaluate(() => window.__mt.setSizing({ size: 'huge' }));
+  await expect(page.locator('#confirm')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await sizing;
+  await expect(page.locator('#confirm')).toBeHidden();
+  sizing = page.evaluate(() => window.__mt.setSizing({ size: 'huge' }));
+  await expect(page.locator('#confirm')).toBeVisible();
+  await tabTo(page, page.locator('#confirm-yes'), 5);
+  await page.keyboard.press('Enter');
+  await sizing;
+  expect(await page.evaluate(() => window.__mt.state.stats!.sizing.size)).toBe('huge');
 });

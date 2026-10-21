@@ -94,6 +94,26 @@ for (const frame of FRAMES) {
 }
 
 /**
+ * The painting state (#167, design note docs/design/painter-on-the-page.md §11): the page with the
+ * painter on the generated figure at the frame's size, the panel's first screen (on a phone the
+ * sheet as it opens), the canvases hidden and their frames held, in both themes.
+ */
+for (const frame of FRAMES) {
+  test.describe(frame.name, () => {
+    test.use({ viewport: frame.viewport, hasTouch: frame.phone, reducedMotion: 'reduce' });
+    test.describe.configure({ timeout: 240_000 });
+
+    test('the painting state in both themes', async ({ page }) => {
+      await open(page, '/?ask=off&bake=256');
+      await page.addStyleTag({ path: 'e2e/reference-screens.css' });
+      await painting(page);
+      await page.mouse.move(0, 0);
+      await both(page, frame.name, 'painter');
+    });
+  });
+}
+
+/**
  * The painter's panel (#166, design note docs/design/painting-panel.md §12): the ?dev Paint tool on
  * the generated figure with the panel mounted, compared as the panel alone (`#paint-panel`)
  * in both themes. A test of its own beside the five states, so their time budget holds. The page
