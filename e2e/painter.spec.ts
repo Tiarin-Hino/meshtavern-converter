@@ -129,6 +129,63 @@ test('after Done the mini carries the paint: the thumbnail and the far level', a
   );
 });
 
+/** A GLB's JSON chunk. */
+function glbJson(bytes: number[]): Record<string, unknown> & {
+  images?: unknown[];
+  textures?: unknown[];
+  materials: { pbrMetallicRoughness: { baseColorTexture?: unknown } }[];
+  meshes: { primitives: { attributes: Record<string, number> }[] }[];
+  extras: { meshtavern?: { paint?: string } };
+} {
+  const buffer = Buffer.from(bytes);
+  const length = buffer.readUInt32LE(12);
+  return JSON.parse(buffer.subarray(20, 20 + length).toString('utf8'));
+}
+
+test('the downloads carry the paint: the table level as a texture, the far level per vertex', async ({
+  page,
+}) => {
+  await open(page, '/?ask=off&bake=256');
+  await painting(page);
+  const exported = (level: number): Promise<number[]> =>
+    page.evaluate(
+      async (level) => [...new Uint8Array(await window.__mt.exportGlb(level, false))],
+      level,
+    );
+  await page.evaluate(() => window.__mt.closePainter());
+  const bareTable = await exported(2);
+  const bareFar = await exported(3);
+  // Unpainted, the table level has no texture and both carry their colours.
+  expect(glbJson(bareTable).images).toBeUndefined();
+  expect(glbJson(bareTable).extras.meshtavern?.paint).toBeUndefined();
+
+  await page.locator('#paint-open').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'painting');
+  await strokeChest(page);
+  await page.locator('#paint-done').click();
+  await page.waitForFunction(() => window.__mt.state.painted);
+
+  const table = glbJson(await exported(2));
+  expect(table.images).toHaveLength(1);
+  expect(table.textures).toHaveLength(1);
+  expect(table.materials[0]!.pbrMetallicRoughness.baseColorTexture).toEqual({
+    index: 0,
+    texCoord: 0,
+  });
+  expect(table.meshes[0]!.primitives[0]!.attributes).not.toHaveProperty('COLOR_0');
+  expect(table.meshes[0]!.primitives[0]!.attributes).toHaveProperty('TEXCOORD_0');
+  expect(table.extras.meshtavern?.paint).toBe('texture');
+  const ms = await page.evaluate(() => window.__mt.state.paintExportMs);
+  expect(ms).not.toBeNull();
+  console.log(`painted texture and PNG: ${ms!.toFixed(0)} ms`);
+
+  const far = await exported(3);
+  expect(glbJson(far).extras.meshtavern?.paint).toBe('vertex');
+  // The far level's mesh did not change; its colours did (and the extras say so).
+  expect(glbJson(far).meshes).toEqual(glbJson(bareFar).meshes);
+  expect(Buffer.from(far).equals(Buffer.from(bareFar))).toBe(false);
+});
+
 test('a hidden view draws no frame and still gives its paint (setShown)', async ({ page }) => {
   await open(page, '/?ask=off&bake=256');
   await painting(page);

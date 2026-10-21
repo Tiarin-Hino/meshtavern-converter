@@ -53,12 +53,22 @@ import {
   groupsOf,
   regionsOf,
   type PaintGroups,
+  paintAtVertices,
+  paintedTexture,
+  type ShadedTexels,
 } from '../lib';
 import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
-import { createPainter, type MiniForPainting, type PaintHooks, type PaintReplay } from './painter';
+import {
+  createPainter,
+  downloadBlob,
+  encodePng,
+  type MiniForPainting,
+  type PaintHooks,
+  type PaintReplay,
+} from './painter';
 import { PAINT_COPY, type PaintingState } from '../lib/painting';
 import { parsePageOptions } from './options';
 import {
@@ -133,6 +143,10 @@ interface AppState {
   painter: boolean;
   /** The time from Paint to the view's first frame, the last time the painter was opened (#167). */
   painterMs: number | null;
+  /** The time the last painted download took to make its texture and PNG (#167). */
+  paintExportMs: number | null;
+  /** The mini carries a paint, taken at the last Done (#167): its downloads carry it. */
+  painted: boolean;
   /** Why the last file did not become a mini, as the user reads it. */
   error: string | null;
   /** The same as a code, and what happened technically, for tests and developers. */
@@ -497,6 +511,8 @@ const noMini = (): Pick<
   | 'pair'
   | 'painter'
   | 'painterMs'
+  | 'paintExportMs'
+  | 'painted'
 > => ({
   questionMs: null,
   fileName: null,
@@ -514,6 +530,8 @@ const noMini = (): Pick<
   pair: null,
   painter: false,
   painterMs: null,
+  paintExportMs: null,
+  painted: false,
 });
 const state: AppState = {
   ...noMini(),
@@ -1357,17 +1375,46 @@ function demoStl(): ArrayBuffer {
 
 const compactBox = document.querySelector<HTMLInputElement>('#compact')!;
 
+/**
+ * A level as a GLB with the current look. A painted mini's downloads carry the paint (#167, design
+ * note §6.1): the table level as the unwrapped mesh with the painted look as its texture, the far
+ * level with the paint per vertex. Unpainted, both are the files of before, byte for byte.
+ */
 async function exportGlb(level: number, compact: boolean, unwrapped = false): Promise<ArrayBuffer> {
-  const mesh = unwrapped && level === TABLE_LEVEL && baked ? baked.mesh : levels[level];
+  const painted = miniPaint && baked ? { albedo: miniPaint, table: baked.mesh } : null;
+  const table = level === TABLE_LEVEL && (unwrapped || painted) ? baked?.mesh : undefined;
+  const mesh = table ?? levels[level];
   if (!mesh || level === 0 || !state.fileName) throw new Error('No converted level to export');
   if (compact) await glbEncoderReady();
+  const started = performance.now();
+  const texture = painted && table ? await paintedPng(painted.albedo) : null;
+  const paint =
+    painted && !table && level === levels.length - 1
+      ? paintAtVertices(mesh, painted.table, painted.albedo)
+      : null;
+  if (texture) state.paintExportMs = performance.now() - started;
   return encodeGlb(mesh, {
     name: downloadName(),
     look: state.look,
     compact,
     sizing: state.stats?.sizing,
     orientation: state.stats?.orientation,
+    paint,
+    texture: texture && { mimeType: 'image/png', bytes: texture },
   });
+}
+
+/** The surface the paint was taken from, read once per paint from the view (#167). */
+let paintSurface: { paint: Albedo; surface: Promise<ShadedTexels> } | null = null;
+
+/** The painted look per texel as a PNG (#167): `paintedTexture` over the view's surface, encoded by a canvas. */
+async function paintedPng(albedo: Albedo): Promise<Uint8Array> {
+  if (paintSurface?.paint !== albedo)
+    paintSurface = { paint: albedo, surface: paintTool.view().surface() };
+  const { data, width, height } = paintedTexture(await paintSurface.surface, state.look, albedo);
+  const png = await encodePng(data, width, height);
+  if (!png) throw new Error('The painted texture could not be encoded');
+  return new Uint8Array(await png.arrayBuffer());
 }
 
 /**
@@ -1517,6 +1564,7 @@ function showPaint(albedo: Albedo | null, redraw = true): void {
   if (albedo)
     for (let i = 3; i < albedo.data.length && !painted; i += 4) painted = albedo.data[i]! > 0;
   miniPaint = painted ? albedo : null;
+  state.painted = painted;
   viewer.setPaint(
     miniPaint && baked ? { albedo: miniPaint, table: baked.mesh, levels: levels.slice(1) } : null,
   );
@@ -1569,13 +1617,12 @@ async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
 for (const button of document.querySelectorAll<HTMLButtonElement>('#export [data-level]')) {
   button.addEventListener('click', () => {
     const level = Number(button.dataset.level);
-    void exportGlb(level, compactBox.checked).then((glb) => {
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-      link.download = `${downloadName()}-${state.stats!.lods[level - 1]!.name}.glb`;
-      link.click();
-      URL.revokeObjectURL(link.href);
-    });
+    void exportGlb(level, compactBox.checked).then((glb) =>
+      downloadBlob(
+        new Blob([glb], { type: 'model/gltf-binary' }),
+        `${downloadName()}-${state.stats!.lods[level - 1]!.name}.glb`,
+      ),
+    );
   });
 }
 
@@ -2013,6 +2060,7 @@ window.__mt = {
     },
     close: () => {
       paintTool.close();
+      showPaint(null);
       state.painter = false;
       render();
     },

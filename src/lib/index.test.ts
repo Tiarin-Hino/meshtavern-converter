@@ -100,6 +100,7 @@ describe('the library entries', () => {
       'paintAtVertices',
       'paintFileOf',
       'paintedOnOlderEngine',
+      'paintedTexture',
       'pairsAllowed',
       'presetOf',
       'readKtx2Header',
