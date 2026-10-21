@@ -25,6 +25,8 @@ The page is published on GitHub Pages, at <https://tiarin-hino.github.io/meshtav
 
 - **The build flag turned into a Windows path.** `vite build --base /meshtavern-converter/` on the development PC produced links under `/Program Files/Git/meshtavern-converter/`. **Cause:** Git Bash on Windows converts an argument that starts with `/` into a Windows path before the program sees it. **Fix:** the path is an environment variable read in `vite.config.ts`, which the workflow sets; nothing is passed on a command line.
 
+- **CI timed out twice on tests this PR does not touch.** The first run lost the phone marking test of `meet.spec.ts` and the device benchmark of `smoke.spec.ts` to their timeouts; the rerun lost the benchmark alone. **Cause:** a slow runner. The painting spec, the longest, took 18 minutes on main's passing runs the same morning and 22 to 26 minutes here, and the benchmark's result was complete when its 180 s ran out. **Fix:** the benchmark test gets 300 s, as the look-presets test got its time in #184; the marking test passed on the rerun and keeps its budget.
+
 ## Still open
 
 - The domain: `BASE_PATH` becomes `/` in `pages.yml` and the CNAME goes into the repository's Pages settings once polywash.app is registered (#47).
