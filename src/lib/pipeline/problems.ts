@@ -22,6 +22,8 @@ export type ProblemCode =
    * extra. The message says which (`matchSources` in paint-file.ts picks it from `PAINT_SOURCE_MESSAGES`); this one is the fallback.
    */
   | 'paint-file-sources'
+  /** More than one paint file dropped with the STL files (#167): a mini has one painting at a time. */
+  | 'one-paint-file'
   /** The safety net: the estimate let the file through, but memory ran out anyway. */
   | 'out-of-memory'
   /** Anything else: a bug, or damage nobody foresaw. */
@@ -56,6 +58,8 @@ export const PROBLEM_MESSAGES: Record<ProblemCode, string> = {
     'This paint file was saved by a newer version of the converter: reload the page and try again.',
   'paint-file-sources':
     'This paint file was painted on other files: drop it again with the files it was painted on.',
+  // The page's COPY.onePaintFile is the same sentence (page-state.test.ts).
+  'one-paint-file': 'Drop one paint file with the STL files.',
   'out-of-memory': TOO_LARGE,
   unexpected:
     'Something went wrong while converting this file. Try again; if it happens again, the ' +

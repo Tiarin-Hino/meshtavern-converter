@@ -21,7 +21,7 @@ import {
   STEP_LABELS,
 } from './page-state';
 import { readFileSync } from 'node:fs';
-import { BAKE_STEPS, STEPS, type Orientation, type Sizing } from '../lib';
+import { BAKE_STEPS, PROBLEM_MESSAGES, STEPS, type Orientation, type Sizing } from '../lib';
 import { QUESTION_COPY } from '../lib/questions';
 
 const idle = { busy: false, stats: null, imported: null, error: null };
@@ -59,6 +59,10 @@ describe('pageStateOf', () => {
 });
 
 describe('the painter’s sentences (#167)', () => {
+  it('refuses two paint files in the sentence of the problem', () => {
+    expect(COPY.onePaintFile).toBe(PROBLEM_MESSAGES['one-paint-file']);
+  });
+
   it('says where a save went', () => {
     expect(paintSaved('hero.mtpaint')).toBe('Saved as hero.mtpaint.');
   });
