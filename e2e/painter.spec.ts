@@ -177,7 +177,9 @@ test('the downloads carry the paint: the table level as a texture, the far level
   expect(table.extras.meshtavern?.paint).toBe('texture');
   const ms = await page.evaluate(() => window.__mt.state.paintExportMs);
   expect(ms).not.toBeNull();
-  console.log(`painted texture and PNG: ${ms!.toFixed(0)} ms`);
+  test
+    .info()
+    .annotations.push({ type: 'painted texture and PNG', description: `${ms!.toFixed(0)} ms` });
 
   const far = await exported(3);
   expect(glbJson(far).extras.meshtavern?.paint).toBe('vertex');
