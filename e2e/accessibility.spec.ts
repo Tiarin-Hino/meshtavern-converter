@@ -112,7 +112,9 @@ for (const theme of THEMES) {
       await scan(page, testInfo, `${theme}-phone-done`);
     });
 
-    test('the painting panel (the ?dev Paint tool)', async ({ page }, testInfo) => {
+    test('the painter: the panel, its footer and the confirm dialog', async ({
+      page,
+    }, testInfo) => {
       test.setTimeout(240_000);
       await open(page, '/?dev&ask=off&bake=256');
       await painting(page);
@@ -129,9 +131,19 @@ for (const theme of THEMES) {
         view.pullApart(2);
         view.setGroupTint(true);
       });
-      await expect(page.locator('#paint-controls [data-swatch]')).not.toHaveCount(0);
-      await expect(page.locator('#paint-controls')).toBeVisible();
+      await expect(page.locator('#paint-panel [data-swatch]')).not.toHaveCount(0);
+      await expect(page.locator('#paint-panel')).toBeVisible();
+      // The painting state (#167): the footer and the status line are on screen with the panel.
+      await expect(page.locator('#paint-done')).toBeVisible();
+      await expect(page.locator('#status')).toHaveText(COPY.paintingKept);
       await scan(page, testInfo, `${theme}-painting`);
+      // The confirm dialog: a reconversion over the unsaved stroke asks first.
+      await page.locator('#paint-done').click();
+      const sizing = page.evaluate(() => window.__mt.setSizing({ size: 'huge' }));
+      await expect(page.locator('#confirm')).toBeVisible();
+      await scan(page, testInfo, `${theme}-confirm`);
+      await page.keyboard.press('Escape');
+      await sizing;
     });
   });
 }

@@ -25,7 +25,7 @@
     <link rel="stylesheet" href="/theme/components.css" />
   </head>
   <!--
-    The page has five states (empty, converting, asking, done, error) set on body[data-state] by
+    The page has six states (empty, converting, asking, done, error, painting) set on body[data-state] by
     render() in main.ts; elements say in which states they show with data-in. Elements with
     data-dev are the team's tools and are removed from the page unless the address has ?dev.
     The product's wording lives in COPY in src/page/page-state.ts: data-copy names the key that
@@ -52,7 +52,7 @@
         id="file"
         class="visually-hidden"
         type="file"
-        accept=".stl"
+        accept=".stl,.mtpaint"
         multiple
         tabindex="-1"
         aria-label="STL file"
@@ -182,7 +182,8 @@
       <div id="view">
         <canvas id="viewport"></canvas>
         <div id="question-view" data-in="asking"></div>
-        <div id="paint-view" data-dev hidden></div>
+        <!-- The painting view (#167): mounted once per conversion, hidden after Done, never closed by it. -->
+        <div id="paint-view" data-in="painting"></div>
         <!-- The level chips; each one's title, the triangle count, is the browser's tooltip. -->
         <div id="levels" role="group" aria-label="Detail level" data-in="done" data-mini></div>
       </div>
@@ -200,7 +201,7 @@
           type="button"
           aria-expanded="false"
           aria-controls="panel-body"
-          data-in="done asking"
+          data-in="done asking painting"
           data-copy-label="expandPanel"
         ></button>
         <span class="card-icon" data-icon="upload" data-in="empty"></span>
@@ -218,7 +219,7 @@
         </div>
         <div id="panel-body" class="panel-body flush">
           <p id="file-name" data-in="error"></p>
-          <div id="summary" class="panel-section" data-in="empty converting done error">
+          <div id="summary" class="panel-section" data-in="empty converting done error painting">
             <p id="mini-size" data-in="done" data-mini></p>
             <!-- A problem shows as the callout: its icon, then the sentence (setStatus in main.ts). -->
             <p id="status" role="status">
@@ -227,6 +228,15 @@
             </p>
             <!-- What comes out (#145, spec L3): the empty state's third line, under its two sentences. -->
             <p id="what-you-get" data-in="empty" data-copy="whatYouGet"></p>
+            <!-- A paint file dropped alone waits for its STL files (#167): this lets it go. -->
+            <button
+              id="paint-file-forget"
+              class="btn btn-ghost btn-sm"
+              type="button"
+              data-in="empty"
+              data-copy="withoutPaintFile"
+              hidden
+            ></button>
           </div>
           <div
             id="progress"
@@ -581,30 +591,45 @@
               </div>
             </details>
           </section>
+          <!--
+            Paint (#167, design note painter-on-the-page.md §4): enters the painting state. A mini
+            without a detail texture cannot be painted: the button is disabled and the hint says why.
+          -->
+          <section
+            id="paint-section"
+            class="panel-section"
+            aria-labelledby="paint-heading"
+            data-in="done"
+            data-mini
+          >
+            <h2 id="paint-heading" class="panel-section-title" data-copy="paint"></h2>
+            <button id="paint-open" class="btn" type="button" data-icon="paintbrush">
+              <span data-copy="paintMini"></span>
+            </button>
+            <p id="paint-cannot" class="hint" hidden></p>
+          </section>
+          <!-- The painter's panel of the library (#166) mounts here, in the painting state. -->
+          <div id="paint-panel" data-in="painting"></div>
           <!-- The team's tools (?dev): on the tokens and the components' classes, not restyled (§6). -->
           <dl id="stats" class="panel-section" data-in="done" data-mini data-dev></dl>
           <figure id="dev-thumbnail-figure" class="panel-section" data-in="done" data-mini data-dev>
             <img id="dev-thumbnail" width="128" height="128" alt="Thumbnail of the table level" />
             <figcaption id="dev-kind"></figcaption>
           </figure>
-          <details id="dev-paint" class="panel-section" data-in="done" data-mini data-dev>
-            <summary>Paint (team tool, #127, #128, #135, #166)</summary>
-            <!-- The painter's panel of the library mounts here (#166); the team section is under it. -->
-            <div id="paint-controls" hidden></div>
-            <div id="paint-team" class="actions" role="group" aria-label="Team">
-              <button id="paint-open" class="btn btn-sm" type="button">Paint this mini</button>
-              <label class="field" hidden
+          <!-- The painter's team section (#127, #166): the pipette's mode, the paint as a PNG, the frames. -->
+          <div id="paint-team" class="panel-section" data-in="painting" data-dev>
+            <div class="actions" role="group" aria-label="Team">
+              <label class="field"
                 ><span class="visually-hidden">Pick</span>
                 <select id="paint-pick-mode" class="input">
                   <option value="shown">As shown</option>
                   <option value="painted">As painted</option>
                 </select></label
               >
-              <button id="paint-save" class="btn btn-sm" type="button" hidden>Save</button>
-              <button id="paint-close" class="btn btn-sm" type="button" hidden>Close</button>
+              <button id="paint-save" class="btn btn-sm" type="button">Save as PNG</button>
             </div>
             <p id="paint-perf" class="hint"></p>
-          </details>
+          </div>
           <div
             id="stress"
             class="panel-section actions"
@@ -622,9 +647,52 @@
             <button class="btn btn-sm" type="button" data-count="0">Single mini</button>
           </div>
         </div>
-        <!-- Cancel, and at a question the view's Confirm beside it (mountQuestions' footer). -->
-        <div id="panel-footer" class="panel-footer" data-in="converting asking">
-          <button id="cancel" class="btn" type="button" data-copy="cancel"></button>
+        <!--
+          Cancel, and at a question the view's Confirm beside it (mountQuestions' footer); in the
+          painting state the painter's three: Open paint file (an icon), Save paint file and Done.
+        -->
+        <div id="panel-footer" class="panel-footer" data-in="converting asking painting">
+          <button
+            id="cancel"
+            class="btn"
+            type="button"
+            data-in="converting asking"
+            data-copy="cancel"
+          ></button>
+          <button
+            id="paint-file-open"
+            class="btn btn-ghost btn-icon"
+            type="button"
+            data-in="painting"
+            data-icon="folder-open"
+            data-copy-label="openPaintFile"
+          ></button>
+          <input
+            id="paint-file-input"
+            class="visually-hidden"
+            type="file"
+            accept=".mtpaint"
+            tabindex="-1"
+            aria-label="Paint file"
+          />
+          <button
+            id="paint-file-save"
+            class="btn"
+            type="button"
+            data-in="painting"
+            data-icon="save"
+          >
+            <span data-copy="savePaintFile"></span>
+          </button>
+          <button
+            id="paint-done"
+            class="btn btn-primary"
+            type="button"
+            data-in="painting"
+            data-icon="check"
+          >
+            <span data-copy="done"></span>
+          </button>
         </div>
       </section>
       <!-- The words on the application's banner, so they read over any state in both themes (#143). -->
@@ -720,6 +788,27 @@
             data-dialog-close
             data-copy="close"
           ></button>
+        </div>
+      </div>
+    </div>
+    <!--
+      The confirm dialog (#167, src/page/confirm.ts): the offer of an unsaved painting, a
+      reconversion over unsaved steps, Open over unsaved steps. Escape is no.
+    -->
+    <div id="confirm" class="scrim" hidden>
+      <div
+        class="dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-text"
+        tabindex="-1"
+      >
+        <h2 id="confirm-title" data-copy="paint"></h2>
+        <p id="confirm-text"></p>
+        <div class="dialog-actions">
+          <button id="confirm-no" class="btn btn-ghost" type="button"></button>
+          <button id="confirm-yes" class="btn btn-primary" type="button"></button>
         </div>
       </div>
     </div>

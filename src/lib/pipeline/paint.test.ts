@@ -1,7 +1,15 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { generateFigure } from '../../regression/shapes';
 import type { IndexedMesh } from './mesh';
-import { PAINT_REACH_MM, paintAtVertices, paintWhere, type Albedo } from './paint';
+import { DEFAULT_LOOK, CAVITY_GAIN, paintFromBytes, parseHexColour, pointColour } from './look';
+import {
+  PAINT_REACH_MM,
+  paintAtVertices,
+  paintedTexture,
+  paintWhere,
+  type Albedo,
+  type ShadedTexels,
+} from './paint';
 import { BAKED_LEVEL, runPipeline, type ConversionResult } from './run';
 import { encodeBinaryStl } from './stl';
 
@@ -103,5 +111,61 @@ describe('paintWhere', () => {
     // About half of the islands, which cover well under the whole texture.
     expect(red).toBeGreaterThan(PAINT_SIZE * PAINT_SIZE * 0.1);
     expect(bare).toBeGreaterThan(red);
+  });
+});
+
+describe('paintedTexture (#167)', () => {
+  // Four texels by one: bare and owned, painted and owned, painted half and owned, not owned.
+  const surface: ShadedTexels = {
+    cavity: Float32Array.from([0.4, -0.6, 0.2, 0.9]),
+    occlusion: Float32Array.from([0.8, 0.5, 1, 0.3]),
+    owned: Uint8Array.from([1, 1, 1, 0]),
+  };
+  const albedo: Albedo = {
+    width: 4,
+    height: 1,
+    data: Uint8Array.from([0, 0, 0, 0, 200, 40, 30, 255, 30, 160, 60, 128, 255, 0, 0, 255]),
+  };
+  const toSrgb = (value: number): number =>
+    Math.round(
+      Math.max(
+        0,
+        Math.min(1, value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055),
+      ) * 255,
+    );
+  const expected = (texel: number, paint: number[] | null): number[] => [
+    ...pointColour(
+      parseHexColour(DEFAULT_LOOK.base),
+      DEFAULT_LOOK,
+      surface.occlusion[texel]!,
+      surface.cavity[texel]! / CAVITY_GAIN,
+      paint,
+    ).map(toSrgb),
+    255,
+  ];
+  const texel = (out: Albedo, k: number): number[] => [...out.data.subarray(k * 4, k * 4 + 4)];
+
+  it('is the look over the paint where the surface is owned, the coat under the look where bare', () => {
+    const out = paintedTexture(surface, DEFAULT_LOOK, albedo);
+    expect([out.width, out.height]).toEqual([4, 1]);
+    expect(texel(out, 0)).toEqual(expected(0, null));
+    expect(texel(out, 1)).toEqual(expected(1, paintFromBytes(albedo.data, 4)));
+    expect(texel(out, 2)).toEqual(expected(2, paintFromBytes(albedo.data, 8)));
+  });
+
+  it('gives an unowned texel the base coat, opaque, whatever the paint there', () => {
+    const out = paintedTexture(surface, DEFAULT_LOOK, albedo);
+    expect(texel(out, 3)).toEqual([...parseHexColour(DEFAULT_LOOK.base).map(toSrgb), 255]);
+  });
+
+  it('with the look disabled, gives the coat and the paint only', () => {
+    const out = paintedTexture(surface, { ...DEFAULT_LOOK, enabled: false }, albedo);
+    expect(texel(out, 0)).toEqual([...parseHexColour(DEFAULT_LOOK.base).map(toSrgb), 255]);
+    expect(texel(out, 1)).toEqual([200, 40, 30, 255]);
+  });
+
+  it('refuses a surface of another size', () => {
+    const wider: Albedo = { width: 8, height: 1, data: new Uint8Array(32) };
+    expect(() => paintedTexture(surface, DEFAULT_LOOK, wider)).toThrow(RangeError);
   });
 });

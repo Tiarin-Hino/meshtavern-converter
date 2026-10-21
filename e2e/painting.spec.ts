@@ -1455,7 +1455,7 @@ test('makes every hobby brush’s stroke one step, replayed to the same bytes', 
       rows.push({
         tool,
         // The ?dev panel says what the brush does (PAINT_COPY.toolHints).
-        hint: document.querySelector('#paint-controls [data-hint]')?.textContent ?? '',
+        hint: document.querySelector('#paint-panel [data-hint]')?.textContent ?? '',
         steps: view.state.steps - steps,
         changed: after !== before,
         undone,
@@ -1675,10 +1675,12 @@ test('carries the look it draws with in its state, the opened one and then setLo
     await painting.open();
     const view = painting.view();
     const opened = view.state.look;
+    const page = { ...window.__mt.state.look };
     const bone = { enabled: true, base: '#d8cdb0', occlusion: 0.8, wash: 0.75, edges: 0.3 };
     view.setLook(bone);
     const set = view.state.look;
-    return { opened, set, page: window.__mt.state.look };
+    // The page takes the view's look as its own (#167): one value.
+    return { opened, set, page, after: window.__mt.state.look };
   });
   // Opened with the page's look.
   expect(looks.opened).toEqual(looks.page);
@@ -1689,7 +1691,8 @@ test('carries the look it draws with in its state, the opened one and then setLo
     wash: 0.75,
     edges: 0.3,
   });
-  await page.evaluate(() => window.__mt.painting.view().setLook(window.__mt.state.look));
+  expect(looks.after).toEqual(looks.set);
+  await page.evaluate((look) => window.__mt.setLook(look), looks.page);
 });
 
 test('takes the next tap’s colour with pickColour and paints nothing; a pick ended without a tap gives undefined (#166)', async ({
@@ -1765,15 +1768,14 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
 }) => {
   await paintTheChest(page);
   await page.evaluate(() => {
-    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     window.__mt.painting.view().setColour('#2050a0');
   });
   const chest = await page.evaluate(() => window.__mt.painting.view().screenOf([0, 14, 6]));
   const shown = await page.evaluate((at) => window.__mt.painting.view().colourAt(...at), chest);
   const box = (await page.locator('#paint-view canvas').boundingBox())!;
   // The panel's pipette (#166): an icon button named by PAINT_COPY.pick.button.
-  const pick = page.locator('#paint-controls [data-action="pick"]');
-  const status = page.locator('#paint-controls [data-status]');
+  const pick = page.locator('#paint-panel [data-action="pick"]');
+  const status = page.locator('#paint-panel [data-status]');
   await expect(pick).toHaveAccessibleName('Pick a colour');
 
   await pick.click();
@@ -1782,7 +1784,7 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
   await page.waitForFunction(() => window.__mt.painting.view().state.colour !== '#2050a0');
   expect(await page.evaluate(() => window.__mt.painting.view().state.colour)).toBe(shown);
   await expect(pick).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#paint-controls [data-colour]')).toHaveValue(shown!);
+  await expect(page.locator('#paint-panel [data-colour]')).toHaveValue(shown!);
 
   // Off the mini: nothing to pick, said on the status line; a second press cancels without a word.
   await pick.click();
@@ -1805,10 +1807,12 @@ test('takes the colour under a tap after Pick in the Paint tool, without paintin
 test('shows the colours used as swatches in the Paint tool, and a click paints with one again (#136)', async ({
   figurePage: page,
 }) => {
+  // The page's palette of this device (#167) fills as the tests before this one paint: emptied,
+  // the row shows the mini's own colours.
+  await page.evaluate(() => localStorage.removeItem('mt-palette'));
   await paintTheChest(page);
-  const swatches = page.locator('#paint-controls [data-swatches] [data-swatch]');
+  const swatches = page.locator('#paint-panel [data-swatches] [data-swatch]');
   await page.evaluate(async () => {
-    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     const view = window.__mt.painting.view();
     const points = [-2, 0, 2].flatMap((x) => {
       const hit = view.texelAt(...view.screenOf([x, 14, 6]));
@@ -1831,14 +1835,16 @@ test('shows the colours used as swatches in the Paint tool, and a click paints w
 
   await swatches.nth(1).click();
   expect(await page.evaluate(() => window.__mt.painting.view().state.colour)).toBe('#b03030');
-  await expect(page.locator('#paint-controls [data-colour]')).toHaveValue('#b03030');
+  await expect(page.locator('#paint-panel [data-colour]')).toHaveValue('#b03030');
   await expect(swatches.nth(1)).toHaveAttribute('aria-pressed', 'true');
 
-  // Undone steps are not in the history, so their colours leave the row.
+  // Undone steps are not in the history, so their colours leave the row. The page's palette of
+  // this device keeps them (#167): set it aside to see the mini's own.
   await page.evaluate(async () => {
     const view = window.__mt.painting.view();
     await view.undo();
     await view.undo();
+    window.__mt.painting.panel().setPalette([]);
   });
   await expect(swatches).toHaveCount(1);
   await expect(swatches.first()).toHaveAttribute('data-swatch', '#b03030');
@@ -2718,11 +2724,10 @@ test('lists the groups in the Paint tool, hides one from its box, and shows them
   figurePage: page,
 }) => {
   await page.evaluate(async () => {
-    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     await window.__mt.painting.open();
   });
   // The panel's rows (#166): a row a group with its Hide (the Apart beside it pulls it apart, #180).
-  const panel = page.locator('#paint-controls');
+  const panel = page.locator('#paint-panel');
   const rows = panel.locator('[data-groups]');
   const hide = rows.locator('[data-shown]');
   const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
@@ -3090,14 +3095,13 @@ test('pulls the groups apart and puts them together from the Paint tool, one gro
   figurePage: page,
 }) => {
   await page.evaluate(async () => {
-    (document.querySelector('#dev-paint') as HTMLDetailsElement).open = true;
     await window.__mt.painting.open();
   });
   const apart = (): Promise<number[]> =>
     page.evaluate(() => window.__mt.painting.view().state.groups.apart.map((entry) => entry.group));
   const count = await page.evaluate(() => window.__mt.painting.view().state.groups.list.length);
   // An Apart a group but the body, unpressed: nothing is apart.
-  const panel = page.locator('#paint-controls');
+  const panel = page.locator('#paint-panel');
   const boxes = panel.locator('[data-groups] [data-apart]');
   const together = panel.locator('[data-action="groups-together"]');
   await expect(boxes).toHaveCount(count - 1);

@@ -18,7 +18,10 @@
 // after its base. With --up index a mini whose placement record (scripts/corpus-placements.json,
 // or out/feedback/ from `npm run feedback -- --mark`) has joints or marks is answered with the
 // record's choices: put together and placed as the PM marked it.
-// Usage: npm run corpus -- [--no-bake] [--up detected|index] [--options "?ktx=1"] [--out <folder under out/>]
+// With --paint (#167) every baked mini is also painted on the page: Paint, the time to the
+// painter's first frame, one stroke of the flat brush across the mini with the engine's frame
+// counter and the time between frames, Done; a "Painting" table against the budgets below.
+// Usage: npm run corpus -- [--no-bake] [--paint] [--up detected|index] [--options "?ktx=1"] [--out <folder under out/>]
 // Nothing from corpus/ or out/ is ever committed.
 import { Buffer } from 'node:buffer';
 import { execSync, spawn } from 'node:child_process';
@@ -52,6 +55,14 @@ const CONVERSION_TIMEOUT_MS = 600_000;
  */
 const QUESTION_BUDGET_MS = 3_000; // an ordinary mini: one figure on a base of up to 32 mm
 const QUESTION_BUDGET_LARGEST_MS = 15_000; // the largest corpus file
+/**
+ * The painter on the reference laptop (#167, design note painter-on-the-page.md §10): open within
+ * 2 s of Paint, a stroke at 30 fps or better (the median frame). _(proposal)_
+ */
+const PAINT_OPEN_BUDGET_MS = 2_000;
+const PAINT_FRAME_BUDGET_MS = 33;
+/** Samples along the measured stroke, across a third of the canvas through the mini's middle. */
+const PAINT_STROKE_SAMPLES = 48;
 const VIEWS = [
   { name: 'whole', azimuth: 25, elevation: 12, zoom: 1 },
   { name: 'close-up', azimuth: 25, elevation: 8, zoom: 2.6 },
@@ -67,6 +78,7 @@ const PLACEMENT_VIEWS = [
 const args = process.argv.slice(2);
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const bake = !args.includes('--no-bake');
+const paintPass = args.includes('--paint');
 const extra = new URLSearchParams(flag('--options') ?? '');
 if (!bake) extra.set('bake', 'off');
 const address = `http://localhost:${PORT}/?${extra}`;
@@ -183,6 +195,59 @@ try {
     mkdirSync(dirname(join(OUT, 'thumbs', `${key}.png`)), { recursive: true });
     writeFileSync(join(OUT, 'thumbs', `${key}.png`), thumbnail);
 
+    // The painter (#167, --paint): before the exports, which leave the page showing a GLB.
+    let painting = null;
+    if (paintPass && baked) {
+      const painted = await page.evaluate(async (samples) => {
+        const mt = window.__mt;
+        await mt.openPainter();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const painterMs = mt.state.painterMs;
+        const view = mt.painting.view();
+        const canvas = document.querySelector('#paint-view canvas');
+        const { width } = canvas.getBoundingClientRect();
+        const [x, y] = view.screenOf([0, mt.state.stats.sizeMm[1] / 2, 0]);
+        const path = Array.from({ length: samples }, (_, k) => [
+          x + (width / 3) * (k / (samples - 1) - 0.5),
+          y,
+        ]);
+        view.setTool('flat');
+        view.setBrush({ sizeMm: 2, hardness: 0.8, opacity: 1 });
+        view.setColour('#c03020');
+        const intervals = [];
+        let last = performance.now();
+        let running = true;
+        const tick = (now) => {
+          intervals.push(now - last);
+          last = now;
+          if (running) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+        await view.strokeAt(path);
+        running = false;
+        const perf = view.state.perf;
+        await mt.closePainter();
+        // One painted download of the table level: the painted texture and its PNG, timed.
+        await mt.exportGlb(2, false);
+        const exportMs = mt.state.paintExportMs;
+        // The paint dropped, so the exports below are the unpainted files the figures compare.
+        mt.painting.close();
+        return { painterMs, perf, intervals: intervals.slice(1), exportMs };
+      }, PAINT_STROKE_SAMPLES);
+      const sorted = [...painted.intervals].sort((a, b) => a - b);
+      // All of it depends on the machine: under `times`, out of the comparisons.
+      painting = {
+        openMs: round(painted.painterMs),
+        frames: painted.perf.frames,
+        slow: painted.perf.slow,
+        medianFrameMs: round(painted.perf.medianMs, 1),
+        worstFrameMs: round(painted.perf.worstMs, 1),
+        medianIntervalMs: round(sorted[Math.floor(sorted.length / 2)] ?? 0, 1),
+        worstIntervalMs: round(sorted.at(-1) ?? 0, 1),
+        paintedTextureMs: round(painted.exportMs ?? 0),
+      };
+    }
+
     // Exports every level, then opens each compressed file again to prove that it loads.
     const exported = await page.evaluate(async (count) => {
       const out = [];
@@ -269,6 +334,7 @@ try {
         longestFrameGapMs: round(longestFrameGapMs),
         questionMs: questionMs === null ? null : round(questionMs),
         peakBufferMb: round(stats.peakBufferBytes / 1048576),
+        ...(painting && { painting }),
       },
     });
 
@@ -460,6 +526,37 @@ const count = (values) => {
 };
 const kinds = Object.values(minis).map((mini) => mini.kind);
 
+/** The painter on every baked mini (#167, --paint): the open time and the stroke's frames against the budgets. */
+function paintingReport() {
+  const painted = converted.filter(([, m]) => m.times.painting);
+  if (painted.length === 0) return 'No mini was painted (none baked).';
+  const slowOpen = painted.filter(([, m]) => m.times.painting.openMs > PAINT_OPEN_BUDGET_MS);
+  const slowFrames = painted.filter(
+    ([, m]) => m.times.painting.medianFrameMs > PAINT_FRAME_BUDGET_MS,
+  );
+  return [
+    `${painted.length - slowOpen.length} of ${painted.length} painters opened within ${PAINT_OPEN_BUDGET_MS / 1000} s, and ${painted.length - slowFrames.length} drew the stroke at a median frame within ${PAINT_FRAME_BUDGET_MS} ms. The budgets are the reference laptop's; this run is ${results.machine.cpu}.`,
+    '',
+    table(
+      [
+        'Mini',
+        'Open',
+        'Frames',
+        'Median frame',
+        'Worst frame',
+        'Slow',
+        'Between frames, median',
+        'worst',
+        'Painted texture and PNG',
+      ],
+      painted.map(
+        ([key, m]) =>
+          `| ${key} | ${m.times.painting.openMs} ms | ${m.times.painting.frames} | ${m.times.painting.medianFrameMs} ms | ${m.times.painting.worstFrameMs} ms | ${m.times.painting.slow} | ${m.times.painting.medianIntervalMs} ms | ${m.times.painting.worstIntervalMs} ms | ${m.times.painting.paintedTextureMs} ms |`,
+      ),
+    ),
+  ].join('\n');
+}
+
 /** The size suggestions against the committed index: a mismatch is reported, not fatal. */
 function sizeReport() {
   if (!existsSync(INDEX)) return `No ${INDEX}: nothing to check the suggestions against.`;
@@ -648,7 +745,15 @@ ${sizeReport()}
 ${pairReport()}
 
 ${placementScores === null ? '' : `### Against the recorded placements (scripts/corpus-placements.json)\n\n${scoreReport(placementScores)}\n`}
-## Changes since the last run
+${
+  paintPass
+    ? `## Painting
+
+${paintingReport()}
+
+`
+    : ''
+}## Changes since the last run
 
 ${
   changes === null

@@ -43,6 +43,7 @@ body[data-state='converting'] [data-in]:not([data-in~='converting']),
 body[data-state='asking'] [data-in]:not([data-in~='asking']),
 body[data-state='done'] [data-in]:not([data-in~='done']),
 body[data-state='error'] [data-in]:not([data-in~='error']),
+body[data-state='painting'] [data-in]:not([data-in~='painting']),
 /* An opened GLB (dev) has nothing to size, adjust or export. */
 body[data-kind='glb'] [data-mini] {
   display: none !important;
@@ -131,7 +132,7 @@ a.menu-item {
   inset: 0;
 }
 
-/* The team's Paint tool (#127): the painting view over the viewport, the same box. */
+/* The painter (#127, #167): the painting view over the viewport, the same box. */
 #paint-view {
   position: absolute;
   inset: 0;
@@ -549,6 +550,25 @@ body[data-state='empty'] #panel {
   flex: none;
 }
 
+/* Paint (#167): the section's one button at the panel's width, as the mockup draws it. */
+#paint-open {
+  width: 100%;
+}
+
+/* The painter's footer: Open at the start, Save and Done at the end (§3.3). */
+#paint-file-open {
+  margin-right: auto;
+}
+
+/* The painter's panel (#166) in the painting state: its own sections, the frame's padding. */
+#paint-panel {
+  border-top: 1px solid var(--line);
+}
+
+#summary #paint-file-forget {
+  margin-top: var(--space-2);
+}
+
 /* The grab handle shows on a phone only. */
 .sheet-handle {
   display: none;
@@ -649,23 +669,6 @@ body[data-dragging] #drop-frame {
       color-mix(in srgb, var(--fixed-light) 88%, var(--fixed-dark)) 0 50%
     )
     0 0 / 16px 16px;
-}
-
-#dev-paint summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-
-/* The painter's panel (#166) to the section's edges, its own sections inside; the team's row under it. */
-#paint-controls {
-  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-#paint-team {
-  margin-top: var(--space-2);
 }
 
 #paint-team .field {
@@ -779,7 +782,8 @@ body[data-dragging] #drop-frame {
 
   /* The viewport, then the sheet under it, so the sheet never covers the mini (#41). */
   body[data-state='done'] #stage,
-  body[data-state='asking'] #stage {
+  body[data-state='asking'] #stage,
+  body[data-state='painting'] #stage {
     grid-template-rows: minmax(0, 1fr) auto;
   }
 

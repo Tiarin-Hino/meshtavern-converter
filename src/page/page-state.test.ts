@@ -14,11 +14,14 @@ import {
   describeUnits,
   describeWrongFile,
   pageStateOf,
+  paintSaved,
+  describePaintFileWaiting,
+  describeUnsavedPainting,
   COPY,
   STEP_LABELS,
 } from './page-state';
 import { readFileSync } from 'node:fs';
-import { BAKE_STEPS, STEPS, type Orientation, type Sizing } from '../lib';
+import { BAKE_STEPS, PROBLEM_MESSAGES, STEPS, type Orientation, type Sizing } from '../lib';
 import { QUESTION_COPY } from '../lib/questions';
 
 const idle = { busy: false, stats: null, imported: null, error: null };
@@ -39,9 +42,59 @@ describe('pageStateOf', () => {
     expect(pageStateOf({ ...idle, imported: { triangles: 12 } })).toBe('done');
   });
 
+  it('paints while the painter is on screen, after every state above it (#167)', () => {
+    expect(pageStateOf({ ...idle, stats: {}, painter: true })).toBe('painting');
+    expect(pageStateOf({ ...idle, stats: {}, painter: false })).toBe('done');
+    // Never on an empty page, nor over a conversion, its question or an error.
+    expect(pageStateOf({ ...idle, painter: true })).toBe('empty');
+    expect(pageStateOf({ ...idle, busy: true, stats: {}, painter: true })).toBe('converting');
+    expect(pageStateOf({ ...idle, error: 'x', stats: {}, painter: true })).toBe('error');
+    expect(pageStateOf({ ...idle, question: {}, stats: {}, painter: true })).toBe('asking');
+  });
+
   it('asks while a conversion waits at its question, though it is busy (#92)', () => {
     expect(pageStateOf({ ...idle, busy: true, question: { role: 'mini' } })).toBe('asking');
     expect(pageStateOf({ ...idle, busy: true, question: null })).toBe('converting');
+  });
+});
+
+describe('the painter’s sentences (#167)', () => {
+  it('refuses two paint files in the sentence of the problem', () => {
+    expect(COPY.onePaintFile).toBe(PROBLEM_MESSAGES['one-paint-file']);
+  });
+
+  it('says where a save went', () => {
+    expect(paintSaved('hero.mtpaint')).toBe('Saved as hero.mtpaint.');
+  });
+
+  it('names the files a waiting paint file wants by their roles', () => {
+    expect(describePaintFileWaiting([{ role: 'figure' }, { role: 'base' }])).toBe(
+      'Now drop the STL files this painting was made on: the figure and its base.',
+    );
+    expect(
+      describePaintFileWaiting([
+        { role: 'figure' },
+        { role: 'part' },
+        { role: 'part' },
+        { role: 'base' },
+      ]),
+    ).toBe('Now drop the STL files this painting was made on: the figure, 2 parts and its base.');
+    expect(describePaintFileWaiting([{ role: 'figure' }])).toBe(
+      'Now drop the STL files this painting was made on: the figure.',
+    );
+  });
+
+  it('offers an unsaved painting by its files and its day', () => {
+    const at = new Date(2026, 9, 21, 12).getTime();
+    expect(describeUnsavedPainting({ names: ['hero.stl', 'base.stl'], at }, 'en-GB')).toBe(
+      'You left a painting of hero.stl + base.stl unsaved on 21 October. Continue it?',
+    );
+  });
+
+  it('says in the painter and the Credits what stays on this device', () => {
+    expect(COPY.paintingKept).toMatch(/Nothing is sent/);
+    expect(COPY.collectsNothing).toMatch(/the colours you painted with/);
+    expect(COPY.collectsNothing).toMatch(/a painting you have not saved yet/);
   });
 });
 

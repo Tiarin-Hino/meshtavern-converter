@@ -234,6 +234,8 @@ What changes in the tests that drive the old ids (the build rewrites them, no be
 
 ### 11.1 The page (#167, for its build; nothing of this is built here)
 
+_(2026-10-21: the page's own design pass is `docs/design/painter-on-the-page.md`; where the two differ, that note stands.)_
+
 ```ts
 import { mountPainting } from 'meshtavern-converter/painting';
 import { mountPaintingPanel } from 'meshtavern-converter/painting-panel';

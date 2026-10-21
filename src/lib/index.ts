@@ -139,7 +139,13 @@ export {
   type LookPresetId,
 } from './pipeline/look';
 // Paint (issue #125): the far and close levels take the table level's paint per vertex.
-export { PAINT_REACH_MM, paintAtVertices, type Albedo } from './pipeline/paint';
+export {
+  PAINT_REACH_MM,
+  paintAtVertices,
+  paintedTexture,
+  type Albedo,
+  type ShadedTexels,
+} from './pipeline/paint';
 // The painting engine's data (issue #127): strokes and fills as plain numbers a consumer can keep,
 // and the parts that need no GPU. The view that paints is ./painting.ts.
 export {
@@ -213,6 +219,7 @@ export {
   fingerprintSources,
   sourceRoles,
   matchSources,
+  matchFingerprints,
   convertOptionsOf,
   type PaintFile,
   type PaintFileContents,

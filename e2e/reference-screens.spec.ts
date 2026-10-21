@@ -35,19 +35,29 @@ type Theme = (typeof THEMES)[number];
  * Compares the screen in `theme` with its picture. The comparison is soft: the run goes on past a
  * picture that differs, so one run reports, and writes the actual picture of, every one that does.
  */
-async function shot(page: Page, name: string, theme: Theme, mask: string[] = []) {
+async function shot(page: Page, name: string, theme: Theme, mask: string[] = [], timeout?: number) {
   await page.emulateMedia({ colorScheme: theme });
   await expect.soft(page).toHaveScreenshot(`${name}-${theme}.png`, {
     mask: mask.map((selector) => page.locator(selector)),
+    ...(timeout !== undefined && { timeout }),
   });
 }
 
 /** Compares the screen in both themes, the scenes held while the pictures are taken. */
-async function both(page: Page, frame: string, state: string) {
+async function both(page: Page, frame: string, state: string, timeout?: number) {
   await freezeFrames(page);
-  for (const theme of THEMES) await shot(page, `${frame}-${state}`, theme);
+  for (const theme of THEMES) await shot(page, `${frame}-${state}`, theme, [], timeout);
   await thawFrames(page);
 }
+
+/**
+ * How long a picture with the painter open may take (#167): in software rendering the painting
+ * view's targets are on the GPU process's queue when the picture is asked for, and a page picture
+ * then takes seconds, past the 5 s a comparison allows by default. The page pictures of the
+ * painting state and the panel's own tall pictures share it: on CI the three painter pictures
+ * timed out at 5 s with the page responsive, as the panel's had before they got this budget.
+ */
+const PAINTER_PICTURE_TIMEOUT_MS = 30_000;
 
 for (const frame of FRAMES) {
   test.describe(frame.name, () => {
@@ -94,8 +104,28 @@ for (const frame of FRAMES) {
 }
 
 /**
+ * The painting state (#167, design note docs/design/painter-on-the-page.md §11): the page with the
+ * painter on the generated figure at the frame's size, the panel's first screen (on a phone the
+ * sheet as it opens), the canvases hidden and their frames held, in both themes.
+ */
+for (const frame of FRAMES) {
+  test.describe(frame.name, () => {
+    test.use({ viewport: frame.viewport, hasTouch: frame.phone, reducedMotion: 'reduce' });
+    test.describe.configure({ timeout: 240_000 });
+
+    test('the painting state in both themes', async ({ page }) => {
+      await open(page, '/?ask=off&bake=256');
+      await page.addStyleTag({ path: 'e2e/reference-screens.css' });
+      await painting(page);
+      await page.mouse.move(0, 0);
+      await both(page, frame.name, 'painter', PAINTER_PICTURE_TIMEOUT_MS);
+    });
+  });
+}
+
+/**
  * The painter's panel (#166, design note docs/design/painting-panel.md §12): the ?dev Paint tool on
- * the generated figure with the panel mounted, compared as the panel alone (`#paint-controls`)
+ * the generated figure with the panel mounted, compared as the panel alone (`#paint-panel`)
  * in both themes. A test of its own beside the five states, so their time budget holds. The page
  * converts and opens the painting at the frame's size; then the scenes' frames are held and the
  * window is made tall enough that the whole panel is on screen at once (the panel sits in the
@@ -123,7 +153,7 @@ for (const frame of FRAMES) {
       // once the panel scrolls, and moving it away did not clear the row's hover on CI.
       await page.mouse.move(0, 0);
       await page.addStyleTag({
-        content: '#paint-controls { pointer-events: none; }',
+        content: '#paint-panel { pointer-events: none; }',
       });
       await freezeFrames(page);
       await page.setViewportSize({
@@ -133,7 +163,7 @@ for (const frame of FRAMES) {
       await page.evaluate(() => {
         // The panel's own scrolling body only: scrollIntoView would move the window too, and the
         // picture is clipped against the window.
-        const controls = document.querySelector<HTMLElement>('#paint-controls')!;
+        const controls = document.querySelector<HTMLElement>('#paint-panel')!;
         const body = document.querySelector<HTMLElement>('#panel-body')!;
         body.scrollTop += controls.getBoundingClientRect().top - body.getBoundingClientRect().top;
         window.scrollTo(0, 0);
@@ -141,7 +171,7 @@ for (const frame of FRAMES) {
       // The page clipped to the panel's box, once the box stays where it is (the sheet may still
       // be moving up on a phone), not a picture of the element: that one waits for animation
       // frames, which are held.
-      const panel = page.locator('#paint-controls');
+      const panel = page.locator('#paint-panel');
       let clip = (await panel.boundingBox())!;
       await expect
         .poll(async () => {
@@ -156,7 +186,7 @@ for (const frame of FRAMES) {
         await expect.soft(page).toHaveScreenshot(`${frame.name}-painting-${theme}.png`, {
           clip,
           // A frame 3400 px tall takes seconds a picture in software rendering.
-          timeout: 30_000,
+          timeout: PAINTER_PICTURE_TIMEOUT_MS,
         });
       }
     });

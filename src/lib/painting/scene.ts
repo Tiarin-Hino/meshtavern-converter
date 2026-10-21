@@ -40,6 +40,8 @@ export class PaintScene {
   private readonly raycaster = new THREE.Raycaster();
   private mini: THREE.Mesh | null = null;
   private running = false;
+  /** The view is hidden (#167, `setShown`): the loop stays stopped, the mini stays. */
+  private paused = false;
   private navigating = false;
   /** Called at the start of every frame, before the draw. */
   onFrame: (() => void) | null = null;
@@ -122,8 +124,21 @@ export class PaintScene {
     return new Promise((resolve) => this.frameWaiters.push(resolve));
   }
 
+  /**
+   * Stops the loop without taking the mini off (#167), or starts it again: a hidden view draws no
+   * frame. `show` while paused keeps the loop stopped.
+   */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    if (paused) {
+      this.stop();
+      for (const read of this.pixelReads.splice(0)) read(false);
+      for (const resolve of this.frameWaiters.splice(0)) resolve();
+    } else if (this.mini) this.start();
+  }
+
   private start(): void {
-    if (this.running) return;
+    if (this.running || this.paused) return;
     this.running = true;
     this.renderer.setAnimationLoop(() => this.frame());
   }

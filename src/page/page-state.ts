@@ -6,25 +6,28 @@ import {
   type CreatureSize,
   type Orientation,
   type Sizing,
+  type SourceRole,
   type UpAxis,
   type Units,
 } from '../lib';
 import { QUESTION_COPY } from '../lib/questions';
 
 /**
- * What the page says and which of its five states it is in (issue #41, design note
- * `docs/design/product-page.md`; `asking` from #92, `docs/design/up-before-reduce.md` §6). No
+ * What the page says and which of its six states it is in (issue #41, design note
+ * `docs/design/product-page.md`; `asking` from #92, `docs/design/up-before-reduce.md` §6;
+ * `painting` from #167, `docs/design/painter-on-the-page.md` §3). No
  * DOM and no three.js: the wording has unit tests, and `main.ts` only puts these strings into
  * elements. Every string is a proposal the PM may change. The words and sentences of the
  * questions are the library's (`QUESTION_COPY`, `../lib/questions`, #119): `COPY` spreads them,
  * so the page and the e2e tests read every string from one place.
  */
 
-export type PageState = 'empty' | 'converting' | 'asking' | 'done' | 'error';
+export type PageState = 'empty' | 'converting' | 'asking' | 'done' | 'error' | 'painting';
 
 /**
  * The state of the page follows from the app state; nothing sets it by hand. A conversion
- * waiting at its question is `asking`, though it is still busy.
+ * waiting at its question is `asking`, though it is still busy; the painter on screen is
+ * `painting` (#167), which the page sets only while a mini is converted.
  */
 export function pageStateOf(app: {
   busy: boolean;
@@ -32,10 +35,12 @@ export function pageStateOf(app: {
   imported: unknown | null;
   error: string | null;
   question?: unknown | null;
+  painter?: boolean;
 }): PageState {
   if (app.question != null) return 'asking';
   if (app.busy) return 'converting';
   if (app.error !== null) return 'error';
+  if (app.painter === true && app.stats !== null) return 'painting';
   if (app.stats !== null || app.imported !== null) return 'done';
   return 'empty';
 }
@@ -65,7 +70,7 @@ export const COPY = {
   chooseAnother: 'Choose another file',
   // #145: the empty state's two sentences, then what comes out (a third line).
   dropHint: `${SENTENCE} Everything runs in this tab.`,
-  whatYouGet: 'You get three detail levels, a look and two downloads.',
+  whatYouGet: 'You get three detail levels, a look, a painter and two downloads.',
   dropOverlay: 'Drop to convert',
   errorHeading: 'This file did not become a mini',
   cancel: 'Cancel',
@@ -88,10 +93,56 @@ export const COPY = {
   credits: 'Credits',
   // #145: the credits dialog's last line (spec L3).
   collectsNothing:
-    'This page collects nothing and sends nothing. It stores only your own choices, such as the theme, on this device.',
+    'This page collects nothing and sends nothing. It stores only your own choices on this device: the theme, the colours you painted with, and a painting you have not saved yet.',
   meshTavern: 'MeshTavern',
   expandPanel: 'Expand the panel',
+  // #167: the painter on the page (design note painter-on-the-page.md §9).
+  paint: 'Paint',
+  paintMini: 'Paint this mini',
+  savePaintFile: 'Save paint file',
+  openPaintFile: 'Open paint file',
+  done: 'Done',
+  paintingKept: 'Kept in this browser until you save it as a paint file. Nothing is sent.',
+  onePaintFile: 'Drop one paint file with the STL files.',
+  withoutPaintFile: 'Convert without it',
+  continuePainting: 'Continue painting',
+  convertAfresh: 'Convert afresh',
+  paintingLost:
+    'Converting again clears the painting on this mini. Save the paint file first, or go on without it.',
+  convertAgain: 'Convert again',
+  keepPainting: 'Keep the painting',
+  replacePainting: 'Opening this paint file replaces the painting on this mini.',
+  openIt: 'Open it',
 } as const;
+
+/** "Saved as hero.mtpaint." (#167): the status line after Save paint file. */
+export function paintSaved(name: string): string {
+  return `Saved as ${name}.`;
+}
+
+/**
+ * "Now drop the STL files this painting was made on: the figure and its base." (#167): the line
+ * while a paint file waits for its files, from the roles it lists.
+ */
+export function describePaintFileWaiting(sources: readonly { role: SourceRole }[]): string {
+  const parts = sources.filter((source) => source.role === 'part').length;
+  const base = sources.some((source) => source.role === 'base');
+  const figure =
+    parts === 0 ? 'the figure' : `the figure, ${parts} ${parts === 1 ? 'part' : 'parts'}`;
+  return `Now drop the STL files this painting was made on: ${figure}${base ? ' and its base' : ''}.`;
+}
+
+/**
+ * "You left a painting of hero.stl + base.stl unsaved on 21 October. Continue it?" (#167): the
+ * offer of the unsaved painting, the day in the person's locale.
+ */
+export function describeUnsavedPainting(
+  record: { names: readonly string[]; at: number },
+  locale?: string,
+): string {
+  const day = new Date(record.at).toLocaleDateString(locale, { day: 'numeric', month: 'long' });
+  return `You left a painting of ${record.names.join(' + ')} unsaved on ${day}. Continue it?`;
+}
 
 /**
  * Where the bar's MeshTavern link goes (spec L2: its words and target are the PM's). A placeholder

@@ -1,8 +1,7 @@
 import './style.css';
 // The question view's stylesheet (#119): a consumer imports it once, as the page does.
 import '../lib/questions.css';
-// The painting view's and the painter's panel's stylesheets (#127, #166), for the team's Paint
-// tool under ?dev.
+// The painting view's and the painter's panel's stylesheets (#127, #166), for the painter (#167).
 import '../lib/painting.css';
 import '../lib/painting-panel.css';
 import {
@@ -54,18 +53,36 @@ import {
   groupsOf,
   regionsOf,
   type PaintGroups,
+  paintAtVertices,
+  paintedTexture,
+  type ShadedTexels,
+  convertOptionsOf,
+  matchFingerprints,
+  paintedOnOlderEngine,
+  paintFileOf,
+  readPaintFile,
+  recentColours,
+  sourceRoles,
+  writePaintFile,
+  PAINT_FILE_EXTENSION,
+  PAINT_FILE_TYPE,
+  type PaintChoices,
+  type PaintFile,
+  type SourceFingerprint,
 } from '../lib';
 import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import {
-  createPaintTool,
+  createPainter,
+  downloadBlob,
+  encodePng,
   type MiniForPainting,
   type PaintHooks,
   type PaintReplay,
-} from './paint-tool';
-import type { PaintingState } from '../lib/painting';
+} from './painter';
+import { PAINT_COPY, type PaintingState } from '../lib/painting';
 import { parsePageOptions } from './options';
 import {
   describePairWarning,
@@ -94,6 +111,9 @@ import {
   describeTooManyFiles,
   describeUnits,
   describeWrongFile,
+  describePaintFileWaiting,
+  describeUnsavedPainting,
+  paintSaved,
   LEVEL_LABELS,
   MESHTAVERN_URL,
   pageStateOf,
@@ -101,6 +121,17 @@ import {
 } from './page-state';
 import { ICONS, type IconName } from './icons';
 import { createDialog } from './dialog';
+import { createConfirm } from './confirm';
+import {
+  forgetUnsaved,
+  readPalette,
+  readUnsaved,
+  warnWith,
+  withColour,
+  writePalette,
+  writeUnsaved,
+  type UnsavedPainting,
+} from './storage';
 import { createMenu } from './menu';
 import { Viewer, type BakedMini, type Perf } from './viewer';
 
@@ -133,8 +164,29 @@ interface AppState {
   stats: ConversionStats | null;
   /** Character or prop, as the last conversion guessed or was told (#99). */
   kind: KindGuess | null;
-  /** The team's Paint tool under ?dev (#127): the painting view's state, null before it was opened. */
+  /** The painter (#127, #167): the painting view's state, null before it was first opened. */
   painting: PaintingState | null;
+  /** The painter is on screen: Paint was pressed and Done not yet (#167). Never true while busy. */
+  painter: boolean;
+  /** The time from Paint to the view's first frame, the last time the painter was opened (#167). */
+  painterMs: number | null;
+  /** The time the last painted download took to make its texture and PNG (#167). */
+  paintExportMs: number | null;
+  /** The mini carries a paint, taken at the last Done (#167): its downloads carry it. */
+  painted: boolean;
+  /** What the page knows of the paint file on this mini (#167, design note §7). */
+  paintFile: {
+    /** A paint file dropped alone, waiting for its STL files: its sources; null when none waits. */
+    pending: SourceFingerprint[] | null;
+    /** The painting on screen replays steps of an older engine (PAINT_COPY.olderEngine). */
+    olderEngine: boolean;
+    /** The name the last Save paint file wrote, for the status line; null before one. */
+    savedAs: string | null;
+  };
+  /** The confirm dialog's question on screen (#167, §8.3); null when none is. */
+  confirm: string | null;
+  /** The unsaved painting the last drop offered back (#167, §8.4); null when none was. */
+  unsavedOffer: UnsavedPainting | null;
   /** Why the last file did not become a mini, as the user reads it. */
   error: string | null;
   /** The same as a code, and what happened technically, for tests and developers. */
@@ -217,9 +269,9 @@ declare global {
     __mt: {
       state: AppState;
       /**
-       * The team's Paint tool (#127, under ?dev): opens the painting view on the converted mini,
-       * with the test paint `paint` (#125's) and a mask (#138) to continue from, and gives the
-       * view for the tests.
+       * The painter (#127, #167): opens the painting view on the converted mini and enters the
+       * painting state, with the test paint `paint` (#125's) and a mask (#138) to continue from,
+       * and gives the view for the tests; `close` closes the view and leaves the state.
        */
       painting: Omit<PaintHooks, 'open'> & {
         /** `groups` (#139): the groups to open with; left out, the page's automatic ones (`groupsOf`). */
@@ -231,6 +283,24 @@ declare global {
         ) => Promise<void>;
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
+      };
+      /** Paint (#167): enters the painting state, opening the view on the mini unless it is open. */
+      openPainter: () => Promise<void>;
+      /** Done (#167): back to the done state, the view kept open and hidden. */
+      closePainter: () => Promise<void>;
+      /** The paint on the mini after Done (#167), null when it has none. */
+      paint: () => Promise<Albedo | null>;
+      /** Save paint file (#167): what the button writes, as bytes; the download happens too. */
+      savePaintFile: () => Promise<Uint8Array>;
+      /** What Open paint file and a paint file dropped alone do (#167). */
+      openPaintFile: (bytes: ArrayBuffer, name?: string) => Promise<void>;
+      /** Answers the confirm dialog on screen (#167), as its yes or no button does. */
+      confirm: (answer: boolean) => void;
+      /** What the page keeps on this device (#167, §8.5). */
+      storage: {
+        unsaved: () => Promise<UnsavedPainting | null>;
+        forget: () => Promise<void>;
+        palette: () => string[];
       };
       loadDemo: () => Promise<void>;
       /** Converts a generated sheet of `quadsPerSide`² × 2 triangles; 1000 gives a 100 MB STL. */
@@ -447,6 +517,15 @@ const sizingInputs = {
   scaleFit: document.querySelector<HTMLButtonElement>('#scale-fit')!,
 };
 
+/** Paint (#167): the done panel's section. */
+const paintOpen = document.querySelector<HTMLButtonElement>('#paint-open')!;
+const paintCannot = document.querySelector<HTMLElement>('#paint-cannot')!;
+/** The painter's footer (#167) and the empty state's way out of a waiting paint file. */
+const paintFileSave = document.querySelector<HTMLButtonElement>('#paint-file-save')!;
+const paintFileInput = document.querySelector<HTMLInputElement>('#paint-file-input')!;
+const paintFileForget = document.querySelector<HTMLButtonElement>('#paint-file-forget')!;
+paintCannot.textContent = PAINT_COPY.cannotPaint;
+
 const viewer = new Viewer(canvas);
 /**
  * The questions a conversion asks (#92, #93, #119): the library's question view, mounted where they
@@ -486,6 +565,10 @@ const noMini = (): Pick<
   | 'showingBaked'
   | 'orientation'
   | 'pair'
+  | 'painter'
+  | 'painterMs'
+  | 'paintExportMs'
+  | 'painted'
 > => ({
   questionMs: null,
   fileName: null,
@@ -501,6 +584,10 @@ const noMini = (): Pick<
   showingBaked: false,
   orientation: { turn: null, turnDeg: 0 },
   pair: null,
+  painter: false,
+  painterMs: null,
+  paintExportMs: null,
+  painted: false,
 });
 const state: AppState = {
   ...noMini(),
@@ -515,6 +602,9 @@ const state: AppState = {
   error: null,
   errorCode: null,
   errorDetail: null,
+  paintFile: { pending: null, olderEngine: false, savedAs: null },
+  confirm: null,
+  unsavedOffer: null,
   framesWhileConverting: 0,
   longestFrameGapMs: 0,
   longestFrameGapDuring: null,
@@ -541,6 +631,51 @@ let levels: IndexedMesh[] = [];
 interface Source {
   name: string;
   read: () => Promise<ArrayBuffer>;
+  /**
+   * Its size and SHA-256 (#167, §7.4), for the paint file: taken once, from a fresh `read`, in
+   * `digest.worker.ts`, when the painter first opens on the mini.
+   */
+  fingerprint?: Promise<Omit<SourceFingerprint, 'role'>>;
+}
+
+/**
+ * The worker that hashes the sources (#167): a digest on the page's thread copies the file there
+ * first, and a 280 MB file stalled the page about 250 ms at the conversion's start (journal).
+ */
+let digester: Worker | null = null;
+const digests = new Map<number, (fingerprint: Omit<SourceFingerprint, 'role'>) => void>();
+let digestId = 0;
+
+/** A file's size and SHA-256, without its role, hashed off the page's thread; the buffer moves there. */
+function digestOf(bytes: ArrayBuffer): Promise<Omit<SourceFingerprint, 'role'>> {
+  if (!digester) {
+    digester = new Worker(new URL('./digest.worker.ts', import.meta.url), { type: 'module' });
+    digester.onmessage = ({
+      data,
+    }: MessageEvent<{ id: number } & Omit<SourceFingerprint, 'role'>>) => {
+      digests.get(data.id)?.({ bytes: data.bytes, sha256: data.sha256 });
+      digests.delete(data.id);
+    };
+  }
+  const id = ++digestId;
+  return new Promise((resolve) => {
+    digests.set(id, resolve);
+    digester!.postMessage({ id, bytes }, [bytes]);
+  });
+}
+
+/** Starts the sources' fingerprints, each once (the painter's open, a save, the record). */
+function fingerprintSources(): void {
+  for (const source of sources) source.fingerprint ??= source.read().then(digestOf);
+}
+
+/** The sources' fingerprints in the conversion's order, with the roles it gave them (#167, §7.4). */
+async function sourceFingerprints(): Promise<SourceFingerprint[]> {
+  const roles = sourceRoles(state.stats?.pair ?? null, sources.length);
+  fingerprintSources();
+  return Promise.all(
+    sources.map(async (source, k) => ({ role: roles[k]!, ...(await source.fingerprint!) })),
+  );
 }
 /** The last file, or the figure and its base file in the order given (#70). */
 let sources: Source[] = [];
@@ -604,6 +739,8 @@ function figureSource(): Source | undefined {
  */
 async function reconvert(ask: AskOptions | null = null): Promise<void> {
   if (sources.length === 0 || state.busy) return;
+  // Over unsaved steps in the painter, the person says whether to lose them (#167, §8.3).
+  if (!(await paintingMayGo())) return;
   const [stl, ...others] = await Promise.all(sources.map((source) => source.read()));
   // The files as given: the roles may have changed with them (a base added or removed).
   await convert(stl!, sourcesName(), others, ask);
@@ -618,8 +755,9 @@ let importedName: string | null = null;
 function render(): void {
   state.page = pageStateOf(state);
   document.body.dataset.state = state.page;
-  // The application's centred card, or its panel frame when done and at a question (#144).
-  const framed = state.page === 'done' || state.page === 'asking';
+  // The application's centred card, or its panel frame when done, at a question (#144) and
+  // painting (#167).
+  const framed = state.page === 'done' || state.page === 'asking' || state.page === 'painting';
   panel.classList.toggle('card', !framed);
   panel.classList.toggle('panel', framed);
   // In the card Cancel is the one button; in the panel's footer it stands beside Confirm.
@@ -633,13 +771,18 @@ function render(): void {
       ? COPY.dropHeading
       : state.page === 'error'
         ? COPY.errorHeading
-        : state.page === 'done'
+        : state.page === 'done' || state.page === 'painting'
           ? (importedName ?? name.replace(/\.stl(?=$| \+ )/gi, ''))
           : name;
   fileNameLine.textContent = name;
   sourceSelect.value = state.preset ?? '';
   chooseAgain.textContent = state.page === 'error' ? COPY.chooseAnother : COPY.chooseFile;
   chooseButton.disabled = state.busy;
+  // Paint (#167): a mini without a detail texture cannot be painted, and the hint says why.
+  paintOpen.disabled = baked === null;
+  paintCannot.hidden = baked !== null;
+  paintFileForget.hidden = state.paintFile.pending === null;
+  paintFileSave.disabled = (state.painting?.steps ?? 0) === 0;
 }
 
 /** Writes the status line; a problem shows as the application's error callout, with its icon. */
@@ -892,7 +1035,11 @@ const presetButtons = LOOK_PRESETS.map((preset) => {
 });
 document.querySelector<HTMLElement>('#look-presets')!.append(...presetButtons);
 
-function setLook(changes: Partial<Look>): void {
+/**
+ * The look is one value (#167, design note §5): the page's, shown in Adjust, the viewer and the
+ * painter. `toView` false when the painter's panel changed it: the view has it already.
+ */
+function setLook(changes: Partial<Look>, toView = true): void {
   Object.assign(state.look, changes);
   lookInputs.enabled.checked = state.look.enabled;
   lookInputs.base.value = state.look.base;
@@ -908,7 +1055,16 @@ function setLook(changes: Partial<Look>): void {
     button.setAttribute('aria-pressed', String(button.dataset.preset === state.lookPreset));
   }
   viewer.setLook(state.look);
+  if (toView && paintTool.isOpen()) paintTool.view().setLook(state.look);
 }
+
+/** The same five values: the look the view shows is the page's. */
+const sameLook = (a: Look, b: Look): boolean =>
+  a.enabled === b.enabled &&
+  a.base === b.base &&
+  a.occlusion === b.occlusion &&
+  a.wash === b.wash &&
+  a.edges === b.edges;
 
 function setLookPreset(id: LookPresetId): void {
   const preset = LOOK_PRESETS.find((candidate) => candidate.id === id);
@@ -927,7 +1083,6 @@ for (const input of Object.values(lookInputs)) {
     }),
   );
 }
-setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
   if (sources.length === 0 || state.busy) return;
@@ -1160,7 +1315,17 @@ async function convert(
       })
     : undefined;
   questionStartedAt = asks ? startedAt : null;
+  // The steps belong to the surface that was converted: a conversion closes the painter (#167),
+  // the last second's steps kept first.
+  void flushUnsaved();
+  paintTool.close();
+  showPaint(null, false);
+  unsaved = false;
+  painterProblem = null;
+  state.paintFile.olderEngine = false;
+  state.paintFile.savedAs = null;
   Object.assign(state, {
+    painter: false,
     busy: true,
     preset: choices.preset?.id ?? null,
     question: null,
@@ -1324,17 +1489,46 @@ function demoStl(): ArrayBuffer {
 
 const compactBox = document.querySelector<HTMLInputElement>('#compact')!;
 
+/**
+ * A level as a GLB with the current look. A painted mini's downloads carry the paint (#167, design
+ * note §6.1): the table level as the unwrapped mesh with the painted look as its texture, the far
+ * level with the paint per vertex. Unpainted, both are the files of before, byte for byte.
+ */
 async function exportGlb(level: number, compact: boolean, unwrapped = false): Promise<ArrayBuffer> {
-  const mesh = unwrapped && level === TABLE_LEVEL && baked ? baked.mesh : levels[level];
+  const painted = miniPaint && baked ? { albedo: miniPaint, table: baked.mesh } : null;
+  const table = level === TABLE_LEVEL && (unwrapped || painted) ? baked?.mesh : undefined;
+  const mesh = table ?? levels[level];
   if (!mesh || level === 0 || !state.fileName) throw new Error('No converted level to export');
   if (compact) await glbEncoderReady();
+  const started = performance.now();
+  const texture = painted && table ? await paintedPng(painted.albedo) : null;
+  const paint =
+    painted && !table && level === levels.length - 1
+      ? paintAtVertices(mesh, painted.table, painted.albedo)
+      : null;
+  if (texture) state.paintExportMs = performance.now() - started;
   return encodeGlb(mesh, {
     name: downloadName(),
     look: state.look,
     compact,
     sizing: state.stats?.sizing,
     orientation: state.stats?.orientation,
+    paint,
+    texture: texture && { mimeType: 'image/png', bytes: texture },
   });
+}
+
+/** The surface the paint was taken from, read once per paint from the view (#167). */
+let paintSurface: { paint: Albedo; surface: Promise<ShadedTexels> } | null = null;
+
+/** The painted look per texel as a PNG (#167): `paintedTexture` over the view's surface, encoded by a canvas. */
+async function paintedPng(albedo: Albedo): Promise<Uint8Array> {
+  if (paintSurface?.paint !== albedo)
+    paintSurface = { paint: albedo, surface: paintTool.view().surface() };
+  const { data, width, height } = paintedTexture(await paintSurface.surface, state.look, albedo);
+  const png = await encodePng(data, width, height);
+  if (!png) throw new Error('The painted texture could not be encoded');
+  return new Uint8Array(await png.arrayBuffer());
 }
 
 /**
@@ -1350,19 +1544,20 @@ async function thumbnail(size?: number, paint?: TestPaint): Promise<ArrayBuffer>
       ? createDetailTexture(baked.texture, baked.resolution)
       : null;
   const texture: Texture | null = made ?? (baked?.texture as Texture | undefined) ?? null;
-  const albedo = paint && baked ? testPaintTexture(baked.mesh, paint) : null;
+  const tested = paint && baked ? testPaintTexture(baked.mesh, paint) : null;
   try {
     const png = await renderThumbnail(mesh, {
       size,
       look: state.look,
       texture,
-      albedo,
+      // The test paint, else the mini's own after Done (#167).
+      albedo: tested ?? (baked ? viewer.paintTexture : null),
       renderer: viewer.webglRenderer,
     });
     return await png.arrayBuffer();
   } finally {
     made?.dispose();
-    albedo?.dispose();
+    tested?.dispose();
   }
 }
 
@@ -1412,6 +1607,7 @@ function miniForPainting(): MiniForPainting | null {
     mesh: baked.mesh,
     texture: made ?? (baked.texture as Texture),
     look: state.look,
+    names: sources.map((source) => source.name),
     regions,
     // The automatic groups (#139): the base, the files and the shells.
     groups: groupsOf(baked.mesh, {
@@ -1424,13 +1620,341 @@ function miniForPainting(): MiniForPainting | null {
   };
 }
 
-const paintTool = createPaintTool(
+const paintTool = createPainter(
   document.querySelector<HTMLElement>('#paint-view')!,
+  document.querySelector<HTMLElement>('#paint-panel')!,
   miniForPainting,
+  readPalette,
   (painting) => {
+    const before = state.painting;
     state.painting = painting;
+    // The panel's Look section changed the view's look: the page takes it (§5).
+    if (painting?.open && !sameLook(painting.look, state.look)) setLook(painting.look, false);
+    if (!painting?.open || replaying) return render();
+    if (painting.steps !== before?.steps || painting.undone !== before?.undone) {
+      paintingChanged(painting.steps > (before?.steps ?? 0));
+    }
+    render();
   },
 );
+
+/** The view's steps are a paint file's being replayed at open: not the person's changes. */
+let replaying = false;
+/** The painting changed since it was opened or last saved (#167, §7.3). */
+let unsaved = false;
+/** A refused paint file on the painter's status line, until the next change (§9.2). */
+let painterProblem: string | null = null;
+/** How long after the last step the unsaved record is written (#167, §8.2). _(proposal)_ */
+const UNSAVED_WRITE_DELAY_MS = 1000;
+let unsavedTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * A step was painted, undone or redone (#167): the painting is unsaved, the status line goes back
+ * to what stays on the device, the record is written a second later, and a committed step's colour
+ * joins the palette.
+ */
+function paintingChanged(committed: boolean): void {
+  unsaved = true;
+  painterProblem = null;
+  state.paintFile.savedAs = null;
+  showPainterStatus();
+  if (unsavedTimer !== null) clearTimeout(unsavedTimer);
+  unsavedTimer = setTimeout(() => {
+    unsavedTimer = null;
+    void keepUnsaved();
+  }, UNSAVED_WRITE_DELAY_MS);
+  if (!committed) return;
+  const [colour] = recentColours(paintTool.view().history(), 1);
+  if (!colour) return;
+  writePalette(withColour(readPalette(), colour));
+  paintTool.panel().setPalette(readPalette());
+}
+
+/** Writes the unsaved painting to this device (§8.2): the paint file's contents, no pixels. */
+async function keepUnsaved(): Promise<void> {
+  if (!unsaved || !paintTool.isOpen()) return;
+  const names = sources.map((source) => source.name);
+  const file = await paintFileNow();
+  await writeUnsaved({ file, names, at: Date.now() });
+}
+
+/**
+ * Writes the record now if a write is waiting (§8.2): before anything closes the view (a
+ * conversion, Close), so a stroke in the last second is kept, and before a drop reads it.
+ */
+function flushUnsaved(): Promise<void> {
+  if (unsavedTimer === null) return Promise.resolve();
+  clearTimeout(unsavedTimer);
+  unsavedTimer = null;
+  return keepUnsaved();
+}
+
+/**
+ * The painting as a paint file now (#167, §7.1): everything read before the first await, so a
+ * view closed or a mini replaced meanwhile does not change what it holds.
+ */
+function paintFileNow(): Promise<PaintFile> {
+  const view = paintTool.view();
+  const contents = {
+    choices: paintChoices(),
+    look: { ...state.look },
+    steps: view.history(),
+    engines: view.engines(),
+  };
+  return sourceFingerprints().then((fingerprints) =>
+    paintFileOf({ ...contents, sources: fingerprints }),
+  );
+}
+
+/** The conversion's choices as a paint file keeps them: the result's, and the sizing chosen. */
+function paintChoices(): PaintChoices {
+  const sizing = choices.sizing;
+  return {
+    ...structuredClone(state.stats!.choices),
+    ...(Object.keys(sizing).length > 0 && { sizing: structuredClone(sizing) }),
+  };
+}
+
+/**
+ * The painter's one status line (§9.2), the first that applies: a refused paint file, the older
+ * engine, the save, else what stays on this device.
+ */
+function showPainterStatus(): void {
+  if (!state.painter) return;
+  if (painterProblem !== null) return setStatus(painterProblem, true);
+  if (state.paintFile.olderEngine) return setStatus(PAINT_COPY.olderEngine);
+  if (state.paintFile.savedAs !== null) return setStatus(paintSaved(state.paintFile.savedAs));
+  setStatus(COPY.paintingKept);
+}
+
+/** Save paint file (#167, §7.1): the download, the line, and the record forgotten. */
+async function savePaintFile(): Promise<Uint8Array> {
+  const bytes = await writePaintFile(await paintFileNow());
+  const name = `${downloadName()}${PAINT_FILE_EXTENSION}`;
+  downloadBlob(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: PAINT_FILE_TYPE }), name);
+  unsaved = false;
+  if (unsavedTimer !== null) clearTimeout(unsavedTimer);
+  unsavedTimer = null;
+  painterProblem = null;
+  state.paintFile.savedAs = name;
+  showPainterStatus();
+  await forgetUnsaved();
+  return bytes;
+}
+
+/** The confirm dialog (#167, §8.3). */
+const confirmDialog = createConfirm(document.querySelector<HTMLElement>('#confirm')!, (text) => {
+  state.confirm = text;
+});
+
+/**
+ * Before a conversion of the mini on screen (Adjust): with unsaved steps in the painter, asks
+ * whether to convert again and lose them (§8.3). No puts Adjust's controls back.
+ */
+async function paintingMayGo(): Promise<boolean> {
+  if (!paintTool.isOpen() || !unsaved) return true;
+  const yes = await confirmDialog.ask(COPY.paintingLost, COPY.convertAgain, COPY.keepPainting);
+  if (!yes && state.stats) {
+    showSizing(state.stats.sizing);
+    showUp(state.stats.up);
+    render();
+  }
+  return yes;
+}
+
+/** The page's choices from a paint file's (#167, §7.5), so Adjust shows them and keeps them. */
+function choicesOf(file: PaintFile): Choices {
+  const options = convertOptionsOf(file);
+  return {
+    orientation: options.orientation ?? {},
+    baseOrientation: options.baseOrientation ?? {},
+    sizing: options.sizing ?? {},
+    pairing: options.pairing ?? {},
+    placement: options.placement ?? {},
+    parts: options.parts ?? { joints: [] },
+    // A preset the converter no longer has falls back to none.
+    preset: options.preset ? (findSourcePreset(options.preset.id) ?? null) : null,
+  };
+}
+
+/**
+ * A paint file with its STL files (#167, §7.2 way 1, and the offer's Continue): the files convert
+ * in the paint file's order with its choices and look, without a question, and the painter opens
+ * at the end of its steps.
+ */
+async function convertWithPaintFile(
+  file: PaintFile,
+  files: (Source & { bytes: ArrayBuffer })[],
+  startedAt = performance.now(),
+): Promise<void> {
+  // Their fingerprints, if taken to match them, stay with them.
+  sources = files.map(({ name, read, fingerprint }) => ({ name, read, fingerprint }));
+  choices = choicesOf(file);
+  setLook(file.look);
+  pendingPaintFile = null;
+  state.paintFile.pending = null;
+  const [first, ...others] = files.map(({ bytes }) => bytes);
+  await convert(first!, files.map(({ name }) => name).join(' + '), others, null, startedAt);
+  if (!state.stats || state.error !== null) return;
+  await replayOnMini(file);
+}
+
+/** Opens the painter on the mini on screen at the end of a paint file's steps (§7.2). */
+async function replayOnMini(file: PaintFile): Promise<void> {
+  setLook(file.look);
+  replaying = true;
+  try {
+    await openPainter({ steps: file.steps, engines: file.engines });
+  } finally {
+    replaying = false;
+  }
+  unsaved = false;
+  painterProblem = null;
+  state.paintFile.olderEngine = paintedOnOlderEngine(file);
+  state.paintFile.savedAs = null;
+  showPainterStatus();
+  render();
+}
+
+/** A paint file dropped alone, waiting for the STL files it names (§7.2 way 2). */
+let pendingPaintFile: PaintFile | null = null;
+
+/**
+ * Open paint file, or a paint file dropped alone (#167, §7.2): for the mini on screen it replays
+ * there (way 3), with no mini it waits for its files (way 2).
+ */
+async function openPaintFile(bytes: ArrayBuffer, name = 'paint file'): Promise<void> {
+  if (state.busy) return;
+  const onMini = state.stats !== null && !state.imported && state.error === null;
+  let file: PaintFile;
+  try {
+    file = await readPaintFile(bytes);
+  } catch (error) {
+    if (onMini) return refusePaintFile(error);
+    state.fileName = name;
+    return showProblem(name, error);
+  }
+  if (onMini) return openPaintFileOnMini(file);
+  pendingPaintFile = file;
+  Object.assign(state, { error: null, errorCode: null, errorDetail: null, fileName: null });
+  state.paintFile.pending = file.sources;
+  setStatus(describePaintFileWaiting(file.sources));
+  render();
+}
+
+/** A paint file refused on the mini on screen: its sentence on the status line, the mini as it is. */
+function refusePaintFile(error: unknown): void {
+  const problem = toProblem(error);
+  painterProblem = problem.message;
+  setStatus(problem.message, true);
+}
+
+/**
+ * A paint file for the mini on screen (§7.2 way 3): its files must be this mini's; then, over
+ * unsaved steps after asking, it replays here, or converts again first when its choices are not
+ * the ones this mini was converted with.
+ */
+async function openPaintFileOnMini(file: PaintFile): Promise<void> {
+  let order: number[];
+  try {
+    order = matchFingerprints(file, await sourceFingerprints());
+  } catch (error) {
+    return refusePaintFile(error);
+  }
+  if (paintTool.isOpen() && unsaved) {
+    const yes = await confirmDialog.ask(COPY.replacePainting, COPY.openIt, COPY.keepPainting);
+    if (!yes) return;
+  }
+  await forgetUnsaved();
+  const same =
+    JSON.stringify(convertOptionsOf(file)) ===
+    JSON.stringify(convertOptionsOf({ choices: paintChoices() }));
+  if (same) return replayOnMini(file);
+  const files = await Promise.all(
+    order.map(async (k) => {
+      const source = sources[k]!;
+      return { ...source, bytes: await source.read() };
+    }),
+  );
+  await convertWithPaintFile(file, files);
+}
+
+paintFileSave.addEventListener('click', () => void savePaintFile());
+document.querySelector('#paint-file-open')!.addEventListener('click', () => paintFileInput.click());
+paintFileInput.addEventListener('change', () => {
+  const file = paintFileInput.files?.[0];
+  paintFileInput.value = '';
+  if (file) void file.arrayBuffer().then((bytes) => openPaintFile(bytes, file.name));
+});
+paintFileForget.addEventListener('click', () => {
+  pendingPaintFile = null;
+  state.paintFile.pending = null;
+  setStatus(COPY.dropHint);
+  render();
+  chooseAgain.focus();
+});
+
+/**
+ * Paint (#167, design note §3.2): the painting state, the view opened on the mini unless it is
+ * open on it already (after a Done), so the session goes on with its undo. `replay` opens it
+ * afresh with a paint file's steps. `painterMs` runs from here to the view's first frame.
+ */
+async function openPainter(replay: PaintReplay | null = null): Promise<void> {
+  if (state.busy || !state.stats || state.imported) return;
+  const started = performance.now();
+  // The paint file names the files by their contents: hashed now, off the page's thread.
+  fingerprintSources();
+  state.painter = true;
+  showPainterStatus();
+  render();
+  try {
+    if (replay || !paintTool.isOpen()) await paintTool.open(null, null, null, replay);
+    else paintTool.show(true);
+  } catch (error) {
+    state.painter = false;
+    render();
+    throw error;
+  }
+  requestAnimationFrame(() => (state.painterMs = performance.now() - started));
+}
+
+/**
+ * Done (#167): back to the done panel; the view stays open, hidden, its frame loop stopped. The
+ * paint is taken once into the mini (§6): the viewer draws it, the downloads carry it.
+ */
+async function closePainter(): Promise<void> {
+  if (!state.painter) return;
+  paintTool.show(false);
+  state.painter = false;
+  painterProblem = null;
+  if (state.stats) setStatus(describeReady(state.stats));
+  render();
+  paintOpen.focus();
+  showPaint(await paintTool.view().paint());
+}
+
+/** The mini's paint after Done (#167); null while unpainted, so the downloads stay as before. */
+let miniPaint: Albedo | null = null;
+
+/**
+ * Takes the paint into the mini, or drops it (null, or a paint without a painted texel), and
+ * shows the level on screen again with it unless `redraw` is false (the mini is leaving).
+ */
+function showPaint(albedo: Albedo | null, redraw = true): void {
+  let painted = false;
+  if (albedo)
+    for (let i = 3; i < albedo.data.length && !painted; i += 4) painted = albedo.data[i]! > 0;
+  miniPaint = painted ? albedo : null;
+  state.painted = painted;
+  viewer.setPaint(
+    miniPaint && baked ? { albedo: miniPaint, table: baked.mesh, levels: levels.slice(1) } : null,
+  );
+  if (redraw && state.stats && !state.painter)
+    showLevel(state.shownLevel, false, state.showingBaked || state.shownLevel !== TABLE_LEVEL);
+}
+
+paintOpen.addEventListener('click', () => void openPainter());
+document.querySelector('#paint-done')!.addEventListener('click', () => void closePainter());
 
 const devThumbnail = document.querySelector<HTMLImageElement>('#dev-thumbnail');
 const devKind = document.querySelector<HTMLElement>('#dev-kind');
@@ -1474,13 +1998,12 @@ async function loadGlb(glb: ArrayBuffer, name = 'file.glb'): Promise<void> {
 for (const button of document.querySelectorAll<HTMLButtonElement>('#export [data-level]')) {
   button.addEventListener('click', () => {
     const level = Number(button.dataset.level);
-    void exportGlb(level, compactBox.checked).then((glb) => {
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-      link.download = `${downloadName()}-${state.stats!.lods[level - 1]!.name}.glb`;
-      link.click();
-      URL.revokeObjectURL(link.href);
-    });
+    void exportGlb(level, compactBox.checked).then((glb) =>
+      downloadBlob(
+        new Blob([glb], { type: 'model/gltf-binary' }),
+        `${downloadName()}-${state.stats!.lods[level - 1]!.name}.glb`,
+      ),
+    );
   });
 }
 
@@ -1502,17 +2025,39 @@ function showProblem(fileName: string, error: unknown): void {
  * base file (#70); more are refused. A single file never joins the mini on screen by itself:
  * a base is added with the Base section's button, so converting the next mini stays one drop.
  */
-async function loadFiles(files: File[]): Promise<void> {
-  if (files.length === 0 || state.busy) return;
+async function loadFiles(dropped: File[]): Promise<void> {
+  if (dropped.length === 0 || state.busy) return;
   // The time to the question counts from here: reading the files from disk is part of it.
   const startedAt = performance.now();
-  setStatus('');
   const refuse = (fileName: string, error: string, errorCode: ProblemCode): void => {
     // The error card, like the refusals below, so the page state matches what is on screen.
     Object.assign(state, { fileName, error, errorCode, errorDetail: null });
     setStatus(error, true);
     render();
   };
+  // A paint file (#167, §7.2): alone it opens or waits; with STL files they convert as it says.
+  const isPaintFile = (file: File): boolean =>
+    file.name.toLowerCase().endsWith(PAINT_FILE_EXTENSION);
+  const paintFiles = dropped.filter(isPaintFile);
+  const files = dropped.filter((file) => !isPaintFile(file));
+  if (paintFiles.length > 1)
+    return refuse(
+      paintFiles.map((file) => file.name).join(' + '),
+      COPY.onePaintFile,
+      'one-paint-file',
+    );
+  if (paintFiles.length === 1 && files.length === 0)
+    return openPaintFile(await paintFiles[0]!.arrayBuffer(), paintFiles[0]!.name);
+  setStatus('');
+  let paintFile: PaintFile | null = null;
+  if (paintFiles.length === 1) {
+    try {
+      paintFile = await readPaintFile(await paintFiles[0]!.arrayBuffer());
+    } catch (error) {
+      state.fileName = paintFiles[0]!.name;
+      return showProblem(paintFiles[0]!.name, error);
+    }
+  }
   const names = files.map((file) => file.name).join(' + ');
   if (files.length > MAX_PARTS)
     return refuse(names, describeTooManyFiles(MAX_PARTS), 'too-many-files');
@@ -1535,11 +2080,72 @@ async function loadFiles(files: File[]): Promise<void> {
       return showProblem(file.name, error);
     }
   }
-  sources = files.map((file) => ({ name: file.name, read: () => file.arrayBuffer() }));
+  const given: (Source & { bytes: ArrayBuffer })[] = files.map((file, k) => ({
+    name: file.name,
+    bytes: buffers[k]!,
+    read: () => file.arrayBuffer(),
+  }));
+  /** The drop's fingerprints, taken once and only when a painting is to be matched, off this thread. */
+  const fingerprints = (): Promise<Omit<SourceFingerprint, 'role'>[]> =>
+    Promise.all(given.map((source) => (source.fingerprint ??= source.read().then(digestOf))));
+  // A stroke of the last second is in the record before the offer reads it.
+  await flushUnsaved();
+  // Dropped with the files, or waiting for them; else an unsaved painting of these files offered.
+  const painting = paintFile ?? pendingPaintFile ?? (await offerUnsaved(buffers, fingerprints));
+  if (painting) {
+    let order: number[];
+    try {
+      order = matchFingerprints(painting, await fingerprints());
+    } catch (error) {
+      // A waiting paint file keeps waiting: a wrong drop costs one more drop, not the paint file.
+      state.fileName = names;
+      return showProblem(names, error);
+    }
+    return convertWithPaintFile(
+      painting,
+      order.map((k) => given[k]!),
+      startedAt,
+    );
+  }
+  sources = given.map(({ name, read }) => ({ name, read }));
   choices = noChoices();
   // New files: every question is asked (#92 design note §6.4, #93 §6.6).
   const ask = { up: true, baseUp: true, parts: true, meet: true };
   await convert(buffers[0]!, names, buffers.slice(1), ask, startedAt);
+}
+
+/**
+ * The offer on a drop (#167, §8.4): an unsaved painting of these very files is offered back. Yes
+ * gives its paint file, which converts and replays as a dropped one would; no forgets it.
+ */
+async function offerUnsaved(
+  buffers: ArrayBuffer[],
+  fingerprints: () => Promise<Omit<SourceFingerprint, 'role'>[]>,
+): Promise<PaintFile | null> {
+  const record = await readUnsaved();
+  state.unsavedOffer = null;
+  if (!record) return null;
+  // Sizes first: only files that could match are read again and hashed.
+  const sizes = (list: number[]): string => [...list].sort((a, b) => a - b).join();
+  if (
+    sizes(record.file.sources.map((source) => source.bytes)) !==
+    sizes(buffers.map((buffer) => buffer.byteLength))
+  )
+    return null;
+  try {
+    matchFingerprints(record.file, await fingerprints());
+  } catch {
+    return null;
+  }
+  state.unsavedOffer = record;
+  const yes = await confirmDialog.ask(
+    describeUnsavedPainting(record),
+    COPY.continuePainting,
+    COPY.convertAfresh,
+  );
+  if (yes) return record.file;
+  await forgetUnsaved();
+  return null;
 }
 
 /** The figure's sources, the body first: every file that is not the base. */
@@ -1843,7 +2449,9 @@ for (const button of [chooseButton, chooseAgain]) {
  */
 function closeMini(): void {
   if (state.busy || state.page !== 'done') return;
+  void flushUnsaved();
   paintTool.close();
+  showPaint(null, false);
   if (state.orientation.turn) showTurn(null);
   if (state.pair) showPlacement(null);
   turnByHand.checked = false;
@@ -1899,18 +2507,40 @@ window.__mt = {
   state,
   painting: {
     ...paintTool,
-    open: (paint, mask, groups, replay) =>
-      paintTool.open(
-        paint && baked ? testPaintAlbedo(baked.mesh, paint) : null,
-        mask,
-        groups,
-        replay,
-      ),
+    open: async (paint, mask, groups, replay) => {
+      state.painter = true;
+      render();
+      try {
+        await paintTool.open(
+          paint && baked ? testPaintAlbedo(baked.mesh, paint) : null,
+          mask,
+          groups,
+          replay,
+        );
+      } catch (error) {
+        state.painter = false;
+        render();
+        throw error;
+      }
+    },
+    close: () => {
+      paintTool.close();
+      showPaint(null);
+      state.painter = false;
+      render();
+    },
     testPaint: (paint) => {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);
     },
   },
+  openPainter: () => openPainter(),
+  closePainter,
+  paint: () => Promise.resolve(miniPaint),
+  savePaintFile,
+  openPaintFile,
+  confirm: (answer) => confirmDialog.answer(answer),
+  storage: { unsaved: readUnsaved, forget: forgetUnsaved, palette: readPalette },
   loadDemo: () => {
     sources = [{ name: 'demo.stl', read: async () => demoStl() }];
     choices = noChoices();
@@ -2057,10 +2687,13 @@ disclosures.orient.open = !matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).ma
 if (!pageOptions.dev) {
   for (const element of document.querySelectorAll('[data-dev]')) element.remove();
 } else {
-  fileInput.accept = '.stl,.glb';
+  warnWith((message) => console.warn(message));
+  fileInput.accept = '.stl,.mtpaint,.glb';
 }
 if (pageOptions.problems.length > 0) {
   setStatus(`Check the address: ${pageOptions.problems.join('; ')}.`, true);
 }
+// Adjust's look controls show the start-up look, once the painter they also reach exists.
+setLook({});
 render();
 state.ready = true;

@@ -14,6 +14,8 @@ The controls that already exist keep their behaviour and their test ids: the six
 
 ## 2. The four states
 
+**As built (2026-10-21, #167, design note `docs/design/painter-on-the-page.md`):** the page has six states: `asking` since #92 and `painting` since #167, while the painter is on screen (`pageStateOf` takes `painter`, after the question, busy and the error, before done). Its frame is the panel's, with the painter's panel in `#paint-panel` and a footer of Open paint file, Save paint file and Done.
+
 ```ts
 // src/page-state.ts
 export type PageState = 'empty' | 'converting' | 'done' | 'error';
