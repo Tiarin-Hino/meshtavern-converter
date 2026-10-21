@@ -13,57 +13,127 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  # A PR that changes only the docs and the files that steer the agents and the reviews (DOCS_ONLY)
+  # gets the format check alone. The jobs still run, because `ci` is a required check and a
+  # workflow that does not start never reports. Every other PR and every push to main get the
+  # whole run, so main's run is the net behind this list. README.md is code here: tests read it.
+  scope:
     runs-on: ubuntu-latest
-    # The e2e run alone takes 11–20 minutes since the painting spec (#127), depending on the
-    # runner; 25 minutes in all cut off a run that passed (#156). It had grown to 28.5 minutes on
-    # main by #175; with the mask's tests (#138) it takes about 31, and 35 in all cut it off.
-    # Main's runs took 37–42 minutes in all by #165, and with the painter's panel's tests (#166)
-    # a run passed 45 and was cut off.
-    timeout-minutes: 60
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
     steps:
       - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
         with:
-          fetch-depth: 2 # a PR's merge commit and the base it merges into, for the scope step
-      # A PR that changes only the docs and the files that steer the agents and the reviews (DOCS_ONLY)
-      # gets the format check alone. The job still runs, because `ci` is a required check and a
-      # workflow that does not start never reports. Every other PR and every push to main get the
-      # whole run, so main's run is the net behind this list. README.md is code here: tests read it.
+          fetch-depth: 2 # a PR's merge commit and the base it merges into
       - name: Scope
         id: scope
-        if: github.event_name == 'pull_request'
         env:
           DOCS_ONLY: '^(docs/|\.claude/|CLAUDE\.md$|CONTRIBUTING\.md$|\.mcp\.json$|\.github/([^/]+|ISSUE_TEMPLATE/.+|workflows/(pr-review|claude)\.yml)$)'
         run: |
+          if [ "${{ github.event_name }}" != pull_request ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           changed=$(git diff --name-only --no-renames HEAD^1 HEAD)
           printf '%s\n' "$changed"
           if printf '%s\n' "$changed" | grep -Eqv "$DOCS_ONLY"; then code=true; else code=false; fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - if: steps.scope.outputs.code != 'false'
+      - if: needs.scope.outputs.code != 'false'
         run: npm run check
-      - if: steps.scope.outputs.code == 'false'
+      - if: needs.scope.outputs.code == 'false'
         run: npm run format:check
-      - if: steps.scope.outputs.code != 'false'
-        run: npx playwright install --with-deps chromium
-      - if: steps.scope.outputs.code != 'false'
-        run: npm run e2e
+
+  # The e2e tests in three shards of two workers each. In one job they took 34 minutes on main by
+  # #167, the painting spec alone 18 of them on one worker, alone for the last half of the run. Playwright shards by test
+  # count, file by file, so a file's tests stay on one runner: keep a spec file under ~6 minutes.
+  e2e:
+    needs: scope
+    if: needs.scope.outputs.code != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --shard=${{ matrix.shard }}/3 --reporter=github,blob
       - uses: actions/upload-artifact@v7
-        if: ${{ !cancelled() && steps.scope.outputs.code != 'false' }}
+        if: ${{ !cancelled() }}
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: reference-screens-actual-${{ matrix.shard }}
+          path: test-results/reference-screens-*/*-actual.png
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # One HTML report of the three shards, and the reference pictures that differ, by name, so the
+  # Linux set can be taken from CI's own Chromium (#146, docs/guides/reference-screenshots.md,
+  # `npm run shots:take`).
+  report:
+    needs: e2e
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: blob-report-*
+          path: all-blob-reports
+          merge-multiple: true
+      - run: npx playwright merge-reports --reporter html ./all-blob-reports
+      - uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report
           retention-days: 14
-      # The reference pictures that differ, by name, so the Linux set can be taken from CI's own
-      # Chromium (#146, docs/guides/reference-screenshots.md, `npm run shots:take`).
+      - uses: actions/download-artifact@v8
+        continue-on-error: true # none when no picture differs
+        with:
+          pattern: reference-screens-actual-*
+          path: reference-screens-actual
+          merge-multiple: true
       - uses: actions/upload-artifact@v7
-        if: ${{ failure() && steps.scope.outputs.code != 'false' }}
         with:
           name: reference-screens-actual
-          path: test-results/reference-screens-*/*-actual.png
+          path: reference-screens-actual
           if-no-files-found: ignore
           retention-days: 14
+
+  # The required check: green when the check and every shard passed (or were skipped for a
+  # docs-only PR).
+  ci:
+    needs: [scope, check, e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "scope=${{ needs.scope.result }} check=${{ needs.check.result }} e2e=${{ needs.e2e.result }}"
+          [ "${{ needs.scope.result }}" = success ] && [ "${{ needs.check.result }}" = success ] \
+            && { [ "${{ needs.e2e.result }}" = success ] || [ "${{ needs.e2e.result }}" = skipped ]; }

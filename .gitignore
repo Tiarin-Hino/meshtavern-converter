@@ -1,6 +1,8 @@
 node_modules
 dist
 playwright-report
+blob-report
+all-blob-reports
 test-results
 .env*
 .claude/settings.local.json
