@@ -232,3 +232,19 @@ test('an unsaved painting comes back on the next drop of the same file, and so d
   expect(await page.evaluate(() => window.__mt.state.painting!.steps)).toBe(0);
   await expect(page.locator('#paint-panel [data-swatch="#c03020"]')).toHaveCount(1);
 });
+
+test('a stroke followed at once by Close is kept on this device (the record is written before the view closes)', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await page.goto('/?ask=off&bake=256');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await strokeOnFigure(page);
+  // Done and Close inside the second the record waits for.
+  await page.locator('#paint-done').click();
+  await page.locator('#close').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'empty');
+  await expect
+    .poll(() => page.evaluate(async () => (await window.__mt.storage.unsaved())?.file.steps.length))
+    .toBe(1);
+});

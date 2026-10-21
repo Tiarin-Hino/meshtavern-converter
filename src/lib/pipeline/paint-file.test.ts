@@ -10,6 +10,7 @@ import {
   fingerprintOf,
   fingerprintSources,
   matchSources,
+  matchFingerprints,
   paintedOnOlderEngine,
   paintFileOf,
   PAINT_ENGINE_VERSION,
@@ -273,6 +274,15 @@ describe('the paint file’s sources (#165)', () => {
     const file = await named([figure, 'figure'], [base, 'base']);
     expect(await matchSources(file, [base, figure])).toEqual([figure, base]);
     expect(await matchSources(file, [figure, base])).toEqual([figure, base]);
+  });
+
+  it('matches files fingerprinted elsewhere the same way, by index (#167)', async () => {
+    const file = await named([figure, 'figure'], [base, 'base']);
+    const given = await fingerprintSources([base, figure], ['base', 'figure']);
+    expect(matchFingerprints(file, given)).toEqual([1, 0]);
+    expect(() => matchFingerprints(file, given.slice(0, 1))).toThrow(
+      PAINT_SOURCE_MESSAGES.missing.figure,
+    );
   });
 
   it('refuses before anything converts, saying which file is missing, different or not the mini’s', async () => {

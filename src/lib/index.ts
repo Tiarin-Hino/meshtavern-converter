@@ -219,6 +219,7 @@ export {
   fingerprintSources,
   sourceRoles,
   matchSources,
+  matchFingerprints,
   convertOptionsOf,
   type PaintFile,
   type PaintFileContents,

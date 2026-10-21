@@ -57,7 +57,7 @@ import {
   paintedTexture,
   type ShadedTexels,
   convertOptionsOf,
-  matchSources,
+  matchFingerprints,
   paintedOnOlderEngine,
   paintFileOf,
   readPaintFile,
@@ -1315,7 +1315,9 @@ async function convert(
       })
     : undefined;
   questionStartedAt = asks ? startedAt : null;
-  // The steps belong to the surface that was converted: a conversion closes the painter (#167).
+  // The steps belong to the surface that was converted: a conversion closes the painter (#167),
+  // the last second's steps kept first.
+  void flushUnsaved();
   paintTool.close();
   showPaint(null, false);
   unsaved = false;
@@ -1671,20 +1673,37 @@ function paintingChanged(committed: boolean): void {
 /** Writes the unsaved painting to this device (§8.2): the paint file's contents, no pixels. */
 async function keepUnsaved(): Promise<void> {
   if (!unsaved || !paintTool.isOpen()) return;
+  const names = sources.map((source) => source.name);
   const file = await paintFileNow();
-  await writeUnsaved({ file, names: sources.map((source) => source.name), at: Date.now() });
+  await writeUnsaved({ file, names, at: Date.now() });
 }
 
-/** The painting as a paint file now (#167, §7.1). */
-async function paintFileNow(): Promise<PaintFile> {
+/**
+ * Writes the record now if a write is waiting (§8.2): before anything closes the view (a
+ * conversion, Close), so a stroke in the last second is kept, and before a drop reads it.
+ */
+function flushUnsaved(): Promise<void> {
+  if (unsavedTimer === null) return Promise.resolve();
+  clearTimeout(unsavedTimer);
+  unsavedTimer = null;
+  return keepUnsaved();
+}
+
+/**
+ * The painting as a paint file now (#167, §7.1): everything read before the first await, so a
+ * view closed or a mini replaced meanwhile does not change what it holds.
+ */
+function paintFileNow(): Promise<PaintFile> {
   const view = paintTool.view();
-  return paintFileOf({
-    sources: await sourceFingerprints(),
+  const contents = {
     choices: paintChoices(),
     look: { ...state.look },
     steps: view.history(),
     engines: view.engines(),
-  });
+  };
+  return sourceFingerprints().then((fingerprints) =>
+    paintFileOf({ ...contents, sources: fingerprints }),
+  );
 }
 
 /** The conversion's choices as a paint file keeps them: the result's, and the sizing chosen. */
@@ -1765,10 +1784,11 @@ function choicesOf(file: PaintFile): Choices {
  */
 async function convertWithPaintFile(
   file: PaintFile,
-  files: { name: string; bytes: ArrayBuffer; read: () => Promise<ArrayBuffer> }[],
+  files: (Source & { bytes: ArrayBuffer })[],
   startedAt = performance.now(),
 ): Promise<void> {
-  sources = files.map(({ name, read }) => ({ name, read }));
+  // Their fingerprints, if taken to match them, stay with them.
+  sources = files.map(({ name, read, fingerprint }) => ({ name, read, fingerprint }));
   choices = choicesOf(file);
   setLook(file.look);
   pendingPaintFile = null;
@@ -1835,10 +1855,9 @@ function refusePaintFile(error: unknown): void {
  * the ones this mini was converted with.
  */
 async function openPaintFileOnMini(file: PaintFile): Promise<void> {
-  const buffers = await Promise.all(sources.map((source) => source.read()));
-  let ordered: ArrayBuffer[];
+  let order: number[];
   try {
-    ordered = await matchSources(file, buffers);
+    order = matchFingerprints(file, await sourceFingerprints());
   } catch (error) {
     return refusePaintFile(error);
   }
@@ -1851,10 +1870,12 @@ async function openPaintFileOnMini(file: PaintFile): Promise<void> {
     JSON.stringify(convertOptionsOf(file)) ===
     JSON.stringify(convertOptionsOf({ choices: paintChoices() }));
   if (same) return replayOnMini(file);
-  const files = ordered.map((bytes) => {
-    const source = sources[buffers.indexOf(bytes)]!;
-    return { name: source.name, bytes, read: source.read };
-  });
+  const files = await Promise.all(
+    order.map(async (k) => {
+      const source = sources[k]!;
+      return { ...source, bytes: await source.read() };
+    }),
+  );
   await convertWithPaintFile(file, files);
 }
 
@@ -2059,17 +2080,22 @@ async function loadFiles(dropped: File[]): Promise<void> {
       return showProblem(file.name, error);
     }
   }
-  const given = files.map((file, k) => ({
+  const given: (Source & { bytes: ArrayBuffer })[] = files.map((file, k) => ({
     name: file.name,
     bytes: buffers[k]!,
     read: () => file.arrayBuffer(),
   }));
+  /** The drop's fingerprints, taken once and only when a painting is to be matched, off this thread. */
+  const fingerprints = (): Promise<Omit<SourceFingerprint, 'role'>[]> =>
+    Promise.all(given.map((source) => (source.fingerprint ??= source.read().then(digestOf))));
+  // A stroke of the last second is in the record before the offer reads it.
+  await flushUnsaved();
   // Dropped with the files, or waiting for them; else an unsaved painting of these files offered.
-  const painting = paintFile ?? pendingPaintFile ?? (await offerUnsaved(buffers));
+  const painting = paintFile ?? pendingPaintFile ?? (await offerUnsaved(buffers, fingerprints));
   if (painting) {
-    let ordered: ArrayBuffer[];
+    let order: number[];
     try {
-      ordered = await matchSources(painting, buffers);
+      order = matchFingerprints(painting, await fingerprints());
     } catch (error) {
       // A waiting paint file keeps waiting: a wrong drop costs one more drop, not the paint file.
       state.fileName = names;
@@ -2077,7 +2103,7 @@ async function loadFiles(dropped: File[]): Promise<void> {
     }
     return convertWithPaintFile(
       painting,
-      ordered.map((bytes) => given[buffers.indexOf(bytes)]!),
+      order.map((k) => given[k]!),
       startedAt,
     );
   }
@@ -2092,11 +2118,14 @@ async function loadFiles(dropped: File[]): Promise<void> {
  * The offer on a drop (#167, §8.4): an unsaved painting of these very files is offered back. Yes
  * gives its paint file, which converts and replays as a dropped one would; no forgets it.
  */
-async function offerUnsaved(buffers: ArrayBuffer[]): Promise<PaintFile | null> {
+async function offerUnsaved(
+  buffers: ArrayBuffer[],
+  fingerprints: () => Promise<Omit<SourceFingerprint, 'role'>[]>,
+): Promise<PaintFile | null> {
   const record = await readUnsaved();
   state.unsavedOffer = null;
   if (!record) return null;
-  // Sizes first: hashing copies the files on this thread, so only files that could match are.
+  // Sizes first: only files that could match are read again and hashed.
   const sizes = (list: number[]): string => [...list].sort((a, b) => a - b).join();
   if (
     sizes(record.file.sources.map((source) => source.bytes)) !==
@@ -2104,7 +2133,7 @@ async function offerUnsaved(buffers: ArrayBuffer[]): Promise<PaintFile | null> {
   )
     return null;
   try {
-    await matchSources(record.file, buffers);
+    matchFingerprints(record.file, await fingerprints());
   } catch {
     return null;
   }
@@ -2420,6 +2449,7 @@ for (const button of [chooseButton, chooseAgain]) {
  */
 function closeMini(): void {
   if (state.busy || state.page !== 'done') return;
+  void flushUnsaved();
   paintTool.close();
   showPaint(null, false);
   if (state.orientation.turn) showTurn(null);

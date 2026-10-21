@@ -86,8 +86,6 @@ export interface Painter extends PaintHooks {
   isOpen: () => boolean;
   /** Shows the view or hides it, its frame loop stopped (#167, `PaintingView.setShown`). */
   show: (shown: boolean) => void;
-  /** The view, open or not, made at the first open; null before. */
-  mounted: () => PaintingView | null;
 }
 
 interface Team {
@@ -216,7 +214,6 @@ export function createPainter(
     },
     isOpen: () => view?.state.open === true,
     show: (shown) => view?.setShown(shown),
-    mounted: () => view,
   };
 }
 

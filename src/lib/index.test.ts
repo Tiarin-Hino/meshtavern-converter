@@ -94,6 +94,7 @@ describe('the library entries', () => {
       'isFillTool',
       'isGroupTool',
       'isMaskTool',
+      'matchFingerprints',
       'matchSources',
       'memoryBudgetBytes',
       'multiply',

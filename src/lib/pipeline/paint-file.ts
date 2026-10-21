@@ -227,13 +227,25 @@ export async function matchSources<T extends ArrayBuffer | Uint8Array>(
   file: Pick<PaintFile, 'sources'>,
   stls: readonly T[],
 ): Promise<T[]> {
-  const given = await Promise.all(stls.map(digestOf));
+  const order = matchFingerprints(file, await Promise.all(stls.map(digestOf)));
+  return order.map((k) => stls[k]!);
+}
+
+/**
+ * `matchSources` for files already fingerprinted (#167: the page hashes them off its thread): for
+ * each file the paint file names, in its order, the index into `given` of the file with its
+ * contents. Refused as `matchSources` refuses.
+ */
+export function matchFingerprints(
+  file: Pick<PaintFile, 'sources'>,
+  given: readonly Omit<SourceFingerprint, 'role'>[],
+): number[] {
   const free = new Set(given.map((_, k) => k));
-  const ordered: (T | undefined)[] = file.sources.map((source) => {
+  const ordered: (number | undefined)[] = file.sources.map((source) => {
     for (const k of free)
       if (given[k]!.sha256 === source.sha256 && given[k]!.bytes === source.bytes) {
         free.delete(k);
-        return stls[k]!;
+        return k;
       }
     return undefined;
   });
@@ -259,7 +271,7 @@ export async function matchSources<T extends ArrayBuffer | Uint8Array>(
       `${free.size} file(s) not named`,
       PAINT_SOURCE_MESSAGES.extra,
     );
-  return ordered as T[];
+  return ordered as number[];
 }
 
 /**
