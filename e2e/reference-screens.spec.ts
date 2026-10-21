@@ -35,19 +35,28 @@ type Theme = (typeof THEMES)[number];
  * Compares the screen in `theme` with its picture. The comparison is soft: the run goes on past a
  * picture that differs, so one run reports, and writes the actual picture of, every one that does.
  */
-async function shot(page: Page, name: string, theme: Theme, mask: string[] = []) {
+async function shot(page: Page, name: string, theme: Theme, mask: string[] = [], timeout?: number) {
   await page.emulateMedia({ colorScheme: theme });
   await expect.soft(page).toHaveScreenshot(`${name}-${theme}.png`, {
     mask: mask.map((selector) => page.locator(selector)),
+    ...(timeout !== undefined && { timeout }),
   });
 }
 
 /** Compares the screen in both themes, the scenes held while the pictures are taken. */
-async function both(page: Page, frame: string, state: string) {
+async function both(page: Page, frame: string, state: string, timeout?: number) {
   await freezeFrames(page);
-  for (const theme of THEMES) await shot(page, `${frame}-${state}`, theme);
+  for (const theme of THEMES) await shot(page, `${frame}-${state}`, theme, [], timeout);
   await thawFrames(page);
 }
+
+/**
+ * How long a picture with the painter open may take (#167): in software rendering the painting
+ * view's targets are on the GPU process's queue when the picture is asked for, and a page picture
+ * then takes seconds, past the 5 s a comparison allows by default; the panel's pictures below
+ * found the same. On CI the three painter pictures timed out at 5 s with the page responsive.
+ */
+const PAINTER_PICTURE_TIMEOUT_MS = 30_000;
 
 for (const frame of FRAMES) {
   test.describe(frame.name, () => {
@@ -108,7 +117,7 @@ for (const frame of FRAMES) {
       await page.addStyleTag({ path: 'e2e/reference-screens.css' });
       await painting(page);
       await page.mouse.move(0, 0);
-      await both(page, frame.name, 'painter');
+      await both(page, frame.name, 'painter', PAINTER_PICTURE_TIMEOUT_MS);
     });
   });
 }
