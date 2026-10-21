@@ -60,6 +60,30 @@ test('Paint enters the painter, Done goes back, Paint again goes on with its und
   ).toEqual([0, 1]);
 });
 
+test('the look is one value: the panel, Adjust and the viewer show the same', async ({ page }) => {
+  await open(page, '/?ask=off&bake=256');
+  await painting(page);
+  // A chip in the panel's Look section is the page's look.
+  await page.locator('#paint-panel [data-preset="bone"]').click();
+  expect(await page.evaluate(() => window.__mt.state.lookPreset)).toBe('bone');
+  await expect(page.locator('#look .summary-hint')).toHaveText('Bone');
+  // The page's preset reaches the view and its panel, hidden or shown.
+  await page.locator('#paint-done').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'done');
+  const preset = await page.evaluate(() => {
+    const other = window.__mt.state.lookPreset === 'bone' ? 'steel' : 'bone';
+    window.__mt.setLookPreset(other as never);
+    return other;
+  });
+  const look = await page.evaluate(() => window.__mt.state.look);
+  expect(await page.evaluate(() => window.__mt.painting.view().state.look)).toEqual(look);
+  await page.locator('#paint-open').click();
+  await expect(page.locator(`#paint-panel [data-preset="${preset}"]`)).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+});
+
 test('a hidden view draws no frame and still gives its paint (setShown)', async ({ page }) => {
   await open(page, '/?ask=off&bake=256');
   await painting(page);

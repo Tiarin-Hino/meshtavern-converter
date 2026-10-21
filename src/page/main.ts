@@ -907,7 +907,11 @@ const presetButtons = LOOK_PRESETS.map((preset) => {
 });
 document.querySelector<HTMLElement>('#look-presets')!.append(...presetButtons);
 
-function setLook(changes: Partial<Look>): void {
+/**
+ * The look is one value (#167, design note §5): the page's, shown in Adjust, the viewer and the
+ * painter. `toView` false when the painter's panel changed it: the view has it already.
+ */
+function setLook(changes: Partial<Look>, toView = true): void {
   Object.assign(state.look, changes);
   lookInputs.enabled.checked = state.look.enabled;
   lookInputs.base.value = state.look.base;
@@ -923,7 +927,16 @@ function setLook(changes: Partial<Look>): void {
     button.setAttribute('aria-pressed', String(button.dataset.preset === state.lookPreset));
   }
   viewer.setLook(state.look);
+  if (toView && paintTool.isOpen()) paintTool.view().setLook(state.look);
 }
+
+/** The same five values: the look the view shows is the page's. */
+const sameLook = (a: Look, b: Look): boolean =>
+  a.enabled === b.enabled &&
+  a.base === b.base &&
+  a.occlusion === b.occlusion &&
+  a.wash === b.wash &&
+  a.edges === b.edges;
 
 function setLookPreset(id: LookPresetId): void {
   const preset = LOOK_PRESETS.find((candidate) => candidate.id === id);
@@ -942,7 +955,6 @@ for (const input of Object.values(lookInputs)) {
     }),
   );
 }
-setLook({});
 
 async function setUp(up: UpAxis): Promise<void> {
   if (sources.length === 0 || state.busy) return;
@@ -1450,6 +1462,8 @@ const paintTool = createPainter(
   () => [],
   (painting) => {
     state.painting = painting;
+    // The panel's Look section changed the view's look: the page takes it (§5).
+    if (painting?.open && !sameLook(painting.look, state.look)) setLook(painting.look, false);
   },
 );
 
@@ -2132,5 +2146,7 @@ if (!pageOptions.dev) {
 if (pageOptions.problems.length > 0) {
   setStatus(`Check the address: ${pageOptions.problems.join('; ')}.`, true);
 }
+// Adjust's look controls show the start-up look, once the painter they also reach exists.
+setLook({});
 render();
 state.ready = true;
