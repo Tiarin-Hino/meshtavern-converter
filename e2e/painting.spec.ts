@@ -1675,10 +1675,12 @@ test('carries the look it draws with in its state, the opened one and then setLo
     await painting.open();
     const view = painting.view();
     const opened = view.state.look;
+    const page = { ...window.__mt.state.look };
     const bone = { enabled: true, base: '#d8cdb0', occlusion: 0.8, wash: 0.75, edges: 0.3 };
     view.setLook(bone);
     const set = view.state.look;
-    return { opened, set, page: window.__mt.state.look };
+    // The page takes the view's look as its own (#167): one value.
+    return { opened, set, page, after: window.__mt.state.look };
   });
   // Opened with the page's look.
   expect(looks.opened).toEqual(looks.page);
@@ -1689,7 +1691,8 @@ test('carries the look it draws with in its state, the opened one and then setLo
     wash: 0.75,
     edges: 0.3,
   });
-  await page.evaluate(() => window.__mt.painting.view().setLook(window.__mt.state.look));
+  expect(looks.after).toEqual(looks.set);
+  await page.evaluate((look) => window.__mt.setLook(look), looks.page);
 });
 
 test('takes the next tap’s colour with pickColour and paints nothing; a pick ended without a tap gives undefined (#166)', async ({
@@ -1832,11 +1835,13 @@ test('shows the colours used as swatches in the Paint tool, and a click paints w
   await expect(page.locator('#paint-panel [data-colour]')).toHaveValue('#b03030');
   await expect(swatches.nth(1)).toHaveAttribute('aria-pressed', 'true');
 
-  // Undone steps are not in the history, so their colours leave the row.
+  // Undone steps are not in the history, so their colours leave the row. The page's palette of
+  // this device keeps them (#167): set it aside to see the mini's own.
   await page.evaluate(async () => {
     const view = window.__mt.painting.view();
     await view.undo();
     await view.undo();
+    window.__mt.painting.panel().setPalette([]);
   });
   await expect(swatches).toHaveCount(1);
   await expect(swatches.first()).toHaveAttribute('data-swatch', '#b03030');
