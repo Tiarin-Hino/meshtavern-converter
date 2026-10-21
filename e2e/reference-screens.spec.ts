@@ -95,7 +95,7 @@ for (const frame of FRAMES) {
 
 /**
  * The painter's panel (#166, design note docs/design/painting-panel.md §12): the ?dev Paint tool on
- * the generated figure with the panel mounted, compared as the panel alone (`#paint-controls`)
+ * the generated figure with the panel mounted, compared as the panel alone (`#paint-panel`)
  * in both themes. A test of its own beside the five states, so their time budget holds. The page
  * converts and opens the painting at the frame's size; then the scenes' frames are held and the
  * window is made tall enough that the whole panel is on screen at once (the panel sits in the
@@ -123,7 +123,7 @@ for (const frame of FRAMES) {
       // once the panel scrolls, and moving it away did not clear the row's hover on CI.
       await page.mouse.move(0, 0);
       await page.addStyleTag({
-        content: '#paint-controls { pointer-events: none; }',
+        content: '#paint-panel { pointer-events: none; }',
       });
       await freezeFrames(page);
       await page.setViewportSize({
@@ -133,7 +133,7 @@ for (const frame of FRAMES) {
       await page.evaluate(() => {
         // The panel's own scrolling body only: scrollIntoView would move the window too, and the
         // picture is clipped against the window.
-        const controls = document.querySelector<HTMLElement>('#paint-controls')!;
+        const controls = document.querySelector<HTMLElement>('#paint-panel')!;
         const body = document.querySelector<HTMLElement>('#panel-body')!;
         body.scrollTop += controls.getBoundingClientRect().top - body.getBoundingClientRect().top;
         window.scrollTo(0, 0);
@@ -141,7 +141,7 @@ for (const frame of FRAMES) {
       // The page clipped to the panel's box, once the box stays where it is (the sheet may still
       // be moving up on a phone), not a picture of the element: that one waits for animation
       // frames, which are held.
-      const panel = page.locator('#paint-controls');
+      const panel = page.locator('#paint-panel');
       let clip = (await panel.boundingBox())!;
       await expect
         .poll(async () => {

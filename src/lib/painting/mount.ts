@@ -310,6 +310,12 @@ export interface PaintingView {
   surface(): Promise<PaintSurface>;
   setCamera(azimuthDeg: number, elevationDeg: number, zoom: number): void;
   setWireframe(on: boolean): void;
+  /**
+   * Shows the view or hides it (#167): hidden, its frame loop is stopped and pointer input is
+   * ignored, and everything else works as before (`paint`, `surface`, `history`, `setLook`, `open`).
+   * Not a step, not in the state; a view is shown until this says otherwise.
+   */
+  setShown(shown: boolean): void;
   dispose(): void;
 }
 
@@ -418,6 +424,8 @@ class Painting implements PaintingView {
   /** The group tools' target (#139). */
   private target: number | 'new' = 'new';
   private groupTint = GROUP_TINT_SHOWN;
+  /** `setShown` (#167): a hidden view draws no frame and takes no pointer. */
+  private shown = true;
   /** The groups' tint and colours, and the group stroke's (#139), shared by every mini this view opens. */
   private readonly groupTintUniform = {
     value: new THREE.Vector4(GROUP_TINT_SHOWN ? GROUP_TINT_STRENGTH : 0, 0, 0, 0),
@@ -1194,6 +1202,19 @@ class Painting implements PaintingView {
     if (this.opened) this.opened.material.wireframe = on;
   }
 
+  setShown(shown: boolean): void {
+    if (shown === this.shown) return;
+    this.shown = shown;
+    if (!shown) {
+      this.endPick(true);
+      this.cancelLive();
+      this.strokePointer = null;
+      this.pointers.clear();
+      this.cursor.hidden = true;
+    }
+    this.scene.setPaused(!shown);
+  }
+
   dispose(): void {
     this.close();
     this.listeners.length = 0;
@@ -1486,6 +1507,11 @@ class Painting implements PaintingView {
     canvas.addEventListener(
       'pointerdown',
       (event) => {
+        // A hidden view takes no pointer (#167).
+        if (!this.shown) {
+          event.stopImmediatePropagation();
+          return;
+        }
         // A pick takes this tap (#166): no stroke, no orbit, and the pointer is not counted.
         if (this.picking && this.opened && event.button === 0 && this.pointers.size === 0) {
           event.stopImmediatePropagation();

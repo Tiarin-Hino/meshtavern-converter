@@ -69,6 +69,9 @@ export const ICON_SETS = {
     'loader-circle',
     'shapes',
     'grip-horizontal',
+    // The painter on the page (#167): its footer's Open and Save.
+    'folder-open',
+    'save',
   ],
   // What the painter's panel draws (#166, design note painting-panel.md §7): the history row,
   // the paint tools, the pipette, the mask's and the groups' tools and the groups' rows.

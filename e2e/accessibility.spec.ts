@@ -129,8 +129,8 @@ for (const theme of THEMES) {
         view.pullApart(2);
         view.setGroupTint(true);
       });
-      await expect(page.locator('#paint-controls [data-swatch]')).not.toHaveCount(0);
-      await expect(page.locator('#paint-controls')).toBeVisible();
+      await expect(page.locator('#paint-panel [data-swatch]')).not.toHaveCount(0);
+      await expect(page.locator('#paint-panel')).toBeVisible();
       await scan(page, testInfo, `${theme}-painting`);
     });
   });

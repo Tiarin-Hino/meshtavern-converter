@@ -1,8 +1,7 @@
 import './style.css';
 // The question view's stylesheet (#119): a consumer imports it once, as the page does.
 import '../lib/questions.css';
-// The painting view's and the painter's panel's stylesheets (#127, #166), for the team's Paint
-// tool under ?dev.
+// The painting view's and the painter's panel's stylesheets (#127, #166), for the painter (#167).
 import '../lib/painting.css';
 import '../lib/painting-panel.css';
 import {
@@ -59,13 +58,8 @@ import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
 import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
-import {
-  createPaintTool,
-  type MiniForPainting,
-  type PaintHooks,
-  type PaintReplay,
-} from './paint-tool';
-import type { PaintingState } from '../lib/painting';
+import { createPainter, type MiniForPainting, type PaintHooks, type PaintReplay } from './painter';
+import { PAINT_COPY, type PaintingState } from '../lib/painting';
 import { parsePageOptions } from './options';
 import {
   describePairWarning,
@@ -133,8 +127,12 @@ interface AppState {
   stats: ConversionStats | null;
   /** Character or prop, as the last conversion guessed or was told (#99). */
   kind: KindGuess | null;
-  /** The team's Paint tool under ?dev (#127): the painting view's state, null before it was opened. */
+  /** The painter (#127, #167): the painting view's state, null before it was first opened. */
   painting: PaintingState | null;
+  /** The painter is on screen: Paint was pressed and Done not yet (#167). Never true while busy. */
+  painter: boolean;
+  /** The time from Paint to the view's first frame, the last time the painter was opened (#167). */
+  painterMs: number | null;
   /** Why the last file did not become a mini, as the user reads it. */
   error: string | null;
   /** The same as a code, and what happened technically, for tests and developers. */
@@ -217,9 +215,9 @@ declare global {
     __mt: {
       state: AppState;
       /**
-       * The team's Paint tool (#127, under ?dev): opens the painting view on the converted mini,
-       * with the test paint `paint` (#125's) and a mask (#138) to continue from, and gives the
-       * view for the tests.
+       * The painter (#127, #167): opens the painting view on the converted mini and enters the
+       * painting state, with the test paint `paint` (#125's) and a mask (#138) to continue from,
+       * and gives the view for the tests; `close` closes the view and leaves the state.
        */
       painting: Omit<PaintHooks, 'open'> & {
         /** `groups` (#139): the groups to open with; left out, the page's automatic ones (`groupsOf`). */
@@ -232,6 +230,10 @@ declare global {
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
       };
+      /** Paint (#167): enters the painting state, opening the view on the mini unless it is open. */
+      openPainter: () => Promise<void>;
+      /** Done (#167): back to the done state, the view kept open and hidden. */
+      closePainter: () => Promise<void>;
       loadDemo: () => Promise<void>;
       /** Converts a generated sheet of `quadsPerSide`² × 2 triangles; 1000 gives a 100 MB STL. */
       loadGenerated: (quadsPerSide: number, sizing?: SizingOptions) => Promise<void>;
@@ -447,6 +449,11 @@ const sizingInputs = {
   scaleFit: document.querySelector<HTMLButtonElement>('#scale-fit')!,
 };
 
+/** Paint (#167): the done panel's section. */
+const paintOpen = document.querySelector<HTMLButtonElement>('#paint-open')!;
+const paintCannot = document.querySelector<HTMLElement>('#paint-cannot')!;
+paintCannot.textContent = PAINT_COPY.cannotPaint;
+
 const viewer = new Viewer(canvas);
 /**
  * The questions a conversion asks (#92, #93, #119): the library's question view, mounted where they
@@ -486,6 +493,8 @@ const noMini = (): Pick<
   | 'showingBaked'
   | 'orientation'
   | 'pair'
+  | 'painter'
+  | 'painterMs'
 > => ({
   questionMs: null,
   fileName: null,
@@ -501,6 +510,8 @@ const noMini = (): Pick<
   showingBaked: false,
   orientation: { turn: null, turnDeg: 0 },
   pair: null,
+  painter: false,
+  painterMs: null,
 });
 const state: AppState = {
   ...noMini(),
@@ -618,8 +629,9 @@ let importedName: string | null = null;
 function render(): void {
   state.page = pageStateOf(state);
   document.body.dataset.state = state.page;
-  // The application's centred card, or its panel frame when done and at a question (#144).
-  const framed = state.page === 'done' || state.page === 'asking';
+  // The application's centred card, or its panel frame when done, at a question (#144) and
+  // painting (#167).
+  const framed = state.page === 'done' || state.page === 'asking' || state.page === 'painting';
   panel.classList.toggle('card', !framed);
   panel.classList.toggle('panel', framed);
   // In the card Cancel is the one button; in the panel's footer it stands beside Confirm.
@@ -633,13 +645,16 @@ function render(): void {
       ? COPY.dropHeading
       : state.page === 'error'
         ? COPY.errorHeading
-        : state.page === 'done'
+        : state.page === 'done' || state.page === 'painting'
           ? (importedName ?? name.replace(/\.stl(?=$| \+ )/gi, ''))
           : name;
   fileNameLine.textContent = name;
   sourceSelect.value = state.preset ?? '';
   chooseAgain.textContent = state.page === 'error' ? COPY.chooseAnother : COPY.chooseFile;
   chooseButton.disabled = state.busy;
+  // Paint (#167): a mini without a detail texture cannot be painted, and the hint says why.
+  paintOpen.disabled = baked === null;
+  paintCannot.hidden = baked !== null;
 }
 
 /** Writes the status line; a problem shows as the application's error callout, with its icon. */
@@ -1160,7 +1175,10 @@ async function convert(
       })
     : undefined;
   questionStartedAt = asks ? startedAt : null;
+  // The steps belong to the surface that was converted: a conversion closes the painter (#167).
+  paintTool.close();
   Object.assign(state, {
+    painter: false,
     busy: true,
     preset: choices.preset?.id ?? null,
     question: null,
@@ -1412,6 +1430,7 @@ function miniForPainting(): MiniForPainting | null {
     mesh: baked.mesh,
     texture: made ?? (baked.texture as Texture),
     look: state.look,
+    names: sources.map((source) => source.name),
     regions,
     // The automatic groups (#139): the base, the files and the shells.
     groups: groupsOf(baked.mesh, {
@@ -1424,13 +1443,48 @@ function miniForPainting(): MiniForPainting | null {
   };
 }
 
-const paintTool = createPaintTool(
+const paintTool = createPainter(
   document.querySelector<HTMLElement>('#paint-view')!,
+  document.querySelector<HTMLElement>('#paint-panel')!,
   miniForPainting,
+  () => [],
   (painting) => {
     state.painting = painting;
   },
 );
+
+/**
+ * Paint (#167, design note §3.2): the painting state, the view opened on the mini unless it is
+ * open on it already (after a Done), so the session goes on with its undo. `replay` opens it
+ * afresh with a paint file's steps. `painterMs` runs from here to the view's first frame.
+ */
+async function openPainter(replay: PaintReplay | null = null): Promise<void> {
+  if (state.busy || !state.stats || state.imported) return;
+  const started = performance.now();
+  state.painter = true;
+  render();
+  try {
+    if (replay || !paintTool.isOpen()) await paintTool.open(null, null, null, replay);
+    else paintTool.show(true);
+  } catch (error) {
+    state.painter = false;
+    render();
+    throw error;
+  }
+  requestAnimationFrame(() => (state.painterMs = performance.now() - started));
+}
+
+/** Done (#167): back to the done panel; the view stays open, hidden, its frame loop stopped. */
+async function closePainter(): Promise<void> {
+  if (!state.painter) return;
+  paintTool.show(false);
+  state.painter = false;
+  render();
+  paintOpen.focus();
+}
+
+paintOpen.addEventListener('click', () => void openPainter());
+document.querySelector('#paint-done')!.addEventListener('click', () => void closePainter());
 
 const devThumbnail = document.querySelector<HTMLImageElement>('#dev-thumbnail');
 const devKind = document.querySelector<HTMLElement>('#dev-kind');
@@ -1899,18 +1953,34 @@ window.__mt = {
   state,
   painting: {
     ...paintTool,
-    open: (paint, mask, groups, replay) =>
-      paintTool.open(
-        paint && baked ? testPaintAlbedo(baked.mesh, paint) : null,
-        mask,
-        groups,
-        replay,
-      ),
+    open: async (paint, mask, groups, replay) => {
+      state.painter = true;
+      render();
+      try {
+        await paintTool.open(
+          paint && baked ? testPaintAlbedo(baked.mesh, paint) : null,
+          mask,
+          groups,
+          replay,
+        );
+      } catch (error) {
+        state.painter = false;
+        render();
+        throw error;
+      }
+    },
+    close: () => {
+      paintTool.close();
+      state.painter = false;
+      render();
+    },
     testPaint: (paint) => {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);
     },
   },
+  openPainter: () => openPainter(),
+  closePainter,
   loadDemo: () => {
     sources = [{ name: 'demo.stl', read: async () => demoStl() }];
     choices = noChoices();
@@ -2057,7 +2127,7 @@ disclosures.orient.open = !matchMedia(`(max-width: ${PHONE_MAX_WIDTH_PX}px)`).ma
 if (!pageOptions.dev) {
   for (const element of document.querySelectorAll('[data-dev]')) element.remove();
 } else {
-  fileInput.accept = '.stl,.glb';
+  fileInput.accept = '.stl,.mtpaint,.glb';
 }
 if (pageOptions.problems.length > 0) {
   setStatus(`Check the address: ${pageOptions.problems.join('; ')}.`, true);

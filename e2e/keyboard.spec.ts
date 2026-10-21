@@ -280,7 +280,7 @@ test('the painting panel: Tab reaches every control, and the tools, a slider, a 
   });
   await expectSwept(page, 'painting panel');
 
-  const panel = page.locator('#paint-controls');
+  const panel = page.locator('#paint-panel');
   const state = () => page.evaluate(() => window.__mt.painting.view().state);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 

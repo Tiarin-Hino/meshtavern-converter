@@ -168,9 +168,10 @@ export async function thawFrames(page: Page): Promise<void> {
 }
 
 /**
- * The `?dev` Paint tool open on the generated figure (#166: the painter's panel), converted without
- * the question and baked small (`bake=256`) to keep it short in software rendering. The caller
- * opened the page at `/?dev&ask=off&bake=256`.
+ * The painting state on the generated figure (#167: Paint in the done panel, the painter's panel of
+ * #166), converted without the question and baked small (`bake=256`) to keep it short in software
+ * rendering. The caller opened the page at `/?ask=off&bake=256`, with `&dev` where a test needs the
+ * team section.
  */
 export async function painting(page: Page): Promise<void> {
   await page.setInputFiles('#file', file('hero.stl', generateFigure(true)));
@@ -179,9 +180,12 @@ export async function painting(page: Page): Promise<void> {
     undefined,
     { timeout: 180_000 },
   );
-  await page.locator('#dev-paint > summary').click();
   await page.locator('#paint-open').click();
-  await page.waitForFunction(() => window.__mt.state.painting?.open === true, undefined, {
-    timeout: 180_000,
-  });
+  await page.waitForFunction(
+    () => window.__mt.state.page === 'painting' && window.__mt.state.painting?.open === true,
+    undefined,
+    {
+      timeout: 180_000,
+    },
+  );
 }
