@@ -121,6 +121,8 @@ Three ways in, one path:
 
 In every way the olderEngine line is set from the file and shown while it is open (§9.2). A paint file's `converter` is never checked.
 
+**As built (2026-10-21, #167):** way 3 replays at once only when the file's choices are the ones the mini on screen was converted with; when they differ, the matched files convert again with the file's choices first (`convertWithPaintFile`), because steps replayed onto a surface converted another way would paint the wrong places (`openPaintFileOnMini` in `main.ts`). Matching is by fingerprints (`matchFingerprints` in `paint-file.ts`, which `matchSources` uses), not by re-hashing on the page's thread.
+
 ### 7.3 Unsaved steps
 
 The page keeps `savedSteps: number | null`, the count of `view.history()` at the last Save paint file on this view (null before one); the painting is unsaved while `view.state.steps !== savedSteps`, which Save's disabled state, the confirms of §8.3 and the record of §8.2 read. The hook `state.painting.steps` already gives the count.
@@ -128,6 +130,8 @@ The page keeps `savedSteps: number | null`, the count of `view.history()` at the
 ### 7.4 The sources' fingerprints
 
 `Source` gains `fingerprint: Promise<{ bytes: number; sha256: string }>`, started in `loadFiles` on the buffers before they go to the worker (`fingerprintOf(buffer, 'figure')` without its role; `convert` transfers the buffers) and for `loadDemo`, `loadGenerated` and `addBase` from what `read()` gives; the roles are put on after the conversion from `sourceRoles(result.pair, sources.length)`. `sourceFingerprints(): Promise<SourceFingerprint[]>` is what Save, the record and the match of way 3 use. A SHA-256 of a 100 MB file is about a quarter of a second on the development PC and runs while the file converts.
+
+**As built (2026-10-21, #167):** the fingerprint is taken once per source, from a fresh `read()`, in `src/page/digest.worker.ts`, when the painter first opens, at a save or a record before that, or when a drop must be matched against a paint file or the unsaved record (`digestOf`, `fingerprintSources` in `main.ts`). Started in `loadFiles` on the buffers, as above, it stalled the page 273–328 ms at the start of large-01's conversion against 55 ms on `main`, because `crypto.subtle.digest` copies its input on the calling thread; now 54–55 ms (journal `2026-10-21-painter-on-the-page.md`).
 
 ### 7.5 A paint file's choices on the page
 
@@ -223,6 +227,8 @@ and three sentence functions, unit-tested: `paintSaved(name)` ("Saved as hero.mt
 | `PAINT_OPEN_BUDGET_MS`     | 2,000                     | `scripts/corpus.mjs`  |
 | `PAINT_FRAME_BUDGET_MS`    | 33 (30 fps)               | `scripts/corpus.mjs`  |
 
+**As built (2026-10-21, #167):** `UNSAVED_WRITE_DELAY_MS` is in `src/page/main.ts`; a waiting write is flushed before a conversion or Close closes the view and before a drop reads the record (`flushUnsaved`).
+
 ## 11. The quality bar (#146, spec L4)
 
 - **`states.ts`**: `painting(page)` becomes the product path (`#paint-open` in the done panel; the caller opens `/?ask=off&bake=256`, with `&dev` only where a test needs the team section), and the three specs that call it follow. `paintEveryKind` of `e2e/paint-file.spec.ts` moves to `e2e/painting-steps.ts`, shared with the promise test.
@@ -296,3 +302,5 @@ The PM paints two of their minis on the page, on the development PC and on the l
 | `scripts/corpus.mjs`                                                                                                                                                                   | `--paint` (§12)                                                                                                                               |
 | `README.md`, `CLAUDE.md`, `docs/design/product-page.md`, `look-and-feel.md`, `painting-engine.md`, `painting-panel.md`                                                                 | §13 step 9                                                                                                                                    |
 | `docs/journal/2026-10-<dd>-painter-on-the-page.md`                                                                                                                                     | the journal entry, written by the build                                                                                                       |
+
+**As built (2026-10-21, #167):** `painter.ts` holds the view, the panel and the `?dev` team section (`createPainter`, `encodePng`, `downloadBlob`); the record's writes, the palette, Save, Open and the offer are in `main.ts` (`keepUnsaved`, `flushUnsaved`, `savePaintFile`, `openPaintFile`, `openPaintFileOnMini`, `offerUnsaved`); the hashing worker is `src/page/digest.worker.ts`; `matchFingerprints` joined `paint-file.ts` and `index.ts`.
