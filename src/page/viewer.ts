@@ -5,7 +5,9 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   DEFAULT_LOOK,
+  paintAtVertices,
   vertexColours,
+  type Albedo,
   type Look,
   type IndexedMesh,
   type Rotation,
@@ -109,6 +111,18 @@ export class Viewer {
   private onMove: ((moveMm: [number, number]) => void) | null = null;
   private look: Look = { ...DEFAULT_LOOK };
   private readonly lookUniforms = createLookUniforms(DEFAULT_LOOK);
+  /**
+   * The mini's paint after the painter's Done (#167, design note painter-on-the-page.md §6): the
+   * texture the baked table level draws under the look, and the levels that take it per vertex
+   * (sampled once each through the table level, `paintAtVertices`). Null when unpainted.
+   */
+  private paint: {
+    texture: THREE.DataTexture;
+    albedo: Albedo;
+    table: IndexedMesh;
+    levels: ReadonlySet<IndexedMesh>;
+    perVertex: Map<IndexedMesh, Uint8Array>;
+  } | null = null;
   // The colour comes from the vertices (see look.ts), so the material itself stays white.
   private readonly material = new THREE.MeshStandardMaterial({
     color: new THREE.Color(1, 1, 1),
@@ -154,6 +168,50 @@ export class Viewer {
       this.frameIndex = (this.frameIndex + 1) % PERF_WINDOW;
       this.lastFrame = now;
     });
+  }
+
+  /**
+   * The mini's paint (#167): `albedo` on the unwrapped `table` level, drawn under the look by the
+   * baked table level and, per vertex, by the meshes in `levels`; null drops it. Takes effect on
+   * what is shown next: the page shows the level again.
+   */
+  setPaint(
+    paint: { albedo: Albedo; table: IndexedMesh; levels: readonly IndexedMesh[] } | null,
+  ): void {
+    this.paint?.texture.dispose();
+    this.paint = null;
+    if (!paint) return;
+    const { albedo } = paint;
+    const texture = new THREE.DataTexture(albedo.data, albedo.width, albedo.height);
+    // As the painting view draws it: sRGB, rows as the detail texture's, no mipmaps to mix islands.
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    this.paint = {
+      texture,
+      albedo,
+      table: paint.table,
+      levels: new Set(paint.levels),
+      perVertex: new Map(),
+    };
+  }
+
+  /** The paint's texture (#167), for the thumbnail; null when unpainted. */
+  get paintTexture(): THREE.Texture | null {
+    return this.paint?.texture ?? null;
+  }
+
+  /** A level's paint per vertex, sampled once; null when unpainted or the level takes none. */
+  private paintOf(mesh: IndexedMesh): Uint8Array | null {
+    const paint = this.paint;
+    if (!paint?.levels.has(mesh)) return null;
+    let bytes = paint.perVertex.get(mesh);
+    if (!bytes) {
+      bytes = paintAtVertices(mesh, paint.table, paint.albedo);
+      paint.perVertex.set(mesh, bytes);
+    }
+    return bytes;
   }
 
   /** Shows a mesh. With `reframe` false the camera stays put, so versions of one mini can be compared. */
@@ -333,7 +391,8 @@ export class Viewer {
     const spacing = footprintSquares * GRID_SQUARE_MM;
     this.stressSpacingMm = spacing;
     const bakedTemplates = baked.map((entry) => entry && createBakedGeometry(entry.mesh));
-    const templateSets = sets.map((lods) => lods.map((lod) => this.toGeometry(lod)));
+    // The stress scene's pool is the team's: it takes no paint.
+    const templateSets = sets.map((lods) => lods.map((lod) => this.toGeometry(lod, false)));
     const side = Math.ceil(Math.sqrt(count));
     // Footprints start on grid lines, so a mini stands centred in its squares.
     const cell = (column: number): number =>
@@ -449,7 +508,9 @@ export class Viewer {
         : own
           ? ownCopy(source)
           : source;
-    const material = createBakedMaterial(texture, this.lookUniforms);
+    // The single mini draws the paint under the look (#167); the stress scene's copies do not.
+    const map = !own && this.paint?.table === mini.mesh ? this.paint.texture : null;
+    const material = createBakedMaterial(texture, this.lookUniforms, { map });
     material.wireframe = this.material.wireframe;
     this.bakedMaterials.push(material);
     this.textureBytes += detailTextureBytes(mini);
@@ -467,7 +528,7 @@ export class Viewer {
       if (!geometry || !source) return;
       geometry.setAttribute(
         'color',
-        new THREE.BufferAttribute(vertexColours(source, this.look), 3),
+        new THREE.BufferAttribute(vertexColours(source, this.look, this.paintOf(source)), 3),
       );
     };
     this.mesh?.traverse(recolour);
@@ -498,13 +559,18 @@ export class Viewer {
     placeCameraOnSphere(this.camera, this.controls, this.size, azimuthDeg, elevationDeg, zoom);
   }
 
-  private toGeometry(mesh: IndexedMesh): THREE.BufferGeometry {
+  /** `painted`: the level takes the mini's paint per vertex when it has one (#167). */
+  private toGeometry(mesh: IndexedMesh, painted = true): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     if (mesh.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
     else geometry.computeVertexNormals();
-    geometry.setAttribute('color', new THREE.BufferAttribute(vertexColours(mesh, this.look), 3));
+    const paint = painted ? this.paintOf(mesh) : null;
+    geometry.setAttribute(
+      'color',
+      new THREE.BufferAttribute(vertexColours(mesh, this.look, paint), 3),
+    );
     geometry.userData.source = mesh;
     return geometry;
   }

@@ -84,6 +84,51 @@ test('the look is one value: the panel, Adjust and the viewer show the same', as
   );
 });
 
+/** Pixels of a PNG whose red stands clear of its green: the paint's red under the look. */
+async function redPixels(page: Page, png: Buffer | ArrayBuffer | null = null): Promise<number> {
+  const bytes = png ? [...new Uint8Array(png)] : null;
+  return page.evaluate(async (bytes) => {
+    const buffer = bytes ? new Uint8Array(bytes).buffer : await window.__mt.thumbnail(256);
+    const bitmap = await createImageBitmap(new Blob([buffer], { type: 'image/png' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    let red = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i]! - data[i + 1]! > 60) red++;
+    return red;
+  }, bytes);
+}
+
+test('after Done the mini carries the paint: the thumbnail and the far level', async ({ page }) => {
+  await open(page, '/?ask=off&bake=256');
+  await painting(page);
+  await page.evaluate(() => window.__mt.closePainter());
+  // Nothing painted: Done leaves the mini as it was.
+  expect(await page.evaluate(() => window.__mt.paint())).toBeNull();
+  const bareThumbnail = await redPixels(page);
+  await page.evaluate(() => {
+    window.__mt.showLevel(3);
+    window.__mt.setCamera(0, 10, 1);
+  });
+  await page.waitForTimeout(300);
+  const bareFar = await redPixels(page, await page.locator('#viewport').screenshot());
+
+  // Red all over (#125's test paint), then Done.
+  await page.evaluate(() => window.__mt.painting.open('all'));
+  await page.evaluate(() => window.__mt.closePainter());
+  expect(await page.evaluate(async () => (await window.__mt.paint()) !== null)).toBe(true);
+  expect(await redPixels(page)).toBeGreaterThan(bareThumbnail + 1000);
+  await page.evaluate(() => {
+    window.__mt.showLevel(3);
+    window.__mt.setCamera(0, 10, 1);
+  });
+  await page.waitForTimeout(300);
+  expect(await redPixels(page, await page.locator('#viewport').screenshot())).toBeGreaterThan(
+    bareFar + 1000,
+  );
+});
+
 test('a hidden view draws no frame and still gives its paint (setShown)', async ({ page }) => {
   await open(page, '/?ask=off&bake=256');
   await painting(page);

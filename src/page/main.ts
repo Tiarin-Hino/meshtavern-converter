@@ -234,6 +234,8 @@ declare global {
       openPainter: () => Promise<void>;
       /** Done (#167): back to the done state, the view kept open and hidden. */
       closePainter: () => Promise<void>;
+      /** The paint on the mini after Done (#167), null when it has none. */
+      paint: () => Promise<Albedo | null>;
       loadDemo: () => Promise<void>;
       /** Converts a generated sheet of `quadsPerSide`² × 2 triangles; 1000 gives a 100 MB STL. */
       loadGenerated: (quadsPerSide: number, sizing?: SizingOptions) => Promise<void>;
@@ -1189,6 +1191,7 @@ async function convert(
   questionStartedAt = asks ? startedAt : null;
   // The steps belong to the surface that was converted: a conversion closes the painter (#167).
   paintTool.close();
+  showPaint(null, false);
   Object.assign(state, {
     painter: false,
     busy: true,
@@ -1380,19 +1383,20 @@ async function thumbnail(size?: number, paint?: TestPaint): Promise<ArrayBuffer>
       ? createDetailTexture(baked.texture, baked.resolution)
       : null;
   const texture: Texture | null = made ?? (baked?.texture as Texture | undefined) ?? null;
-  const albedo = paint && baked ? testPaintTexture(baked.mesh, paint) : null;
+  const tested = paint && baked ? testPaintTexture(baked.mesh, paint) : null;
   try {
     const png = await renderThumbnail(mesh, {
       size,
       look: state.look,
       texture,
-      albedo,
+      // The test paint, else the mini's own after Done (#167).
+      albedo: tested ?? (baked ? viewer.paintTexture : null),
       renderer: viewer.webglRenderer,
     });
     return await png.arrayBuffer();
   } finally {
     made?.dispose();
-    albedo?.dispose();
+    tested?.dispose();
   }
 }
 
@@ -1488,13 +1492,36 @@ async function openPainter(replay: PaintReplay | null = null): Promise<void> {
   requestAnimationFrame(() => (state.painterMs = performance.now() - started));
 }
 
-/** Done (#167): back to the done panel; the view stays open, hidden, its frame loop stopped. */
+/**
+ * Done (#167): back to the done panel; the view stays open, hidden, its frame loop stopped. The
+ * paint is taken once into the mini (§6): the viewer draws it, the downloads carry it.
+ */
 async function closePainter(): Promise<void> {
   if (!state.painter) return;
   paintTool.show(false);
   state.painter = false;
   render();
   paintOpen.focus();
+  showPaint(await paintTool.view().paint());
+}
+
+/** The mini's paint after Done (#167); null while unpainted, so the downloads stay as before. */
+let miniPaint: Albedo | null = null;
+
+/**
+ * Takes the paint into the mini, or drops it (null, or a paint without a painted texel), and
+ * shows the level on screen again with it unless `redraw` is false (the mini is leaving).
+ */
+function showPaint(albedo: Albedo | null, redraw = true): void {
+  let painted = false;
+  if (albedo)
+    for (let i = 3; i < albedo.data.length && !painted; i += 4) painted = albedo.data[i]! > 0;
+  miniPaint = painted ? albedo : null;
+  viewer.setPaint(
+    miniPaint && baked ? { albedo: miniPaint, table: baked.mesh, levels: levels.slice(1) } : null,
+  );
+  if (redraw && state.stats && !state.painter)
+    showLevel(state.shownLevel, false, state.showingBaked || state.shownLevel !== TABLE_LEVEL);
 }
 
 paintOpen.addEventListener('click', () => void openPainter());
@@ -1912,6 +1939,7 @@ for (const button of [chooseButton, chooseAgain]) {
 function closeMini(): void {
   if (state.busy || state.page !== 'done') return;
   paintTool.close();
+  showPaint(null, false);
   if (state.orientation.turn) showTurn(null);
   if (state.pair) showPlacement(null);
   turnByHand.checked = false;
@@ -1995,6 +2023,7 @@ window.__mt = {
   },
   openPainter: () => openPainter(),
   closePainter,
+  paint: () => Promise.resolve(miniPaint),
   loadDemo: () => {
     sources = [{ name: 'demo.stl', read: async () => demoStl() }];
     choices = noChoices();
