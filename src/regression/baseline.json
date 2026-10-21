@@ -23,8 +23,8 @@
         "triangles": 45000,
         "vertices": 22801,
         "errorMm": 0,
-        "glbBytes": 1001048,
-        "compactGlbBytes": 273296
+        "glbBytes": 1001036,
+        "compactGlbBytes": 273284
       },
       {
         "name": "table",
@@ -32,8 +32,8 @@
         "triangles": 18317,
         "vertices": 9320,
         "errorMm": 0.0488843,
-        "glbBytes": 409552,
-        "compactGlbBytes": 135116
+        "glbBytes": 409540,
+        "compactGlbBytes": 135104
       },
       {
         "name": "far",
@@ -41,8 +41,8 @@
         "triangles": 4209,
         "vertices": 2174,
         "errorMm": 0.199369,
-        "glbBytes": 96224,
-        "compactGlbBytes": 35916
+        "glbBytes": 96212,
+        "compactGlbBytes": 35904
       }
     ]
   },
@@ -70,8 +70,8 @@
         "triangles": 54600,
         "vertices": 27310,
         "errorMm": 0.0199218,
-        "glbBytes": 1202972,
-        "compactGlbBytes": 393640
+        "glbBytes": 1202960,
+        "compactGlbBytes": 393628
       },
       {
         "name": "table",
@@ -79,8 +79,8 @@
         "triangles": 35012,
         "vertices": 17516,
         "errorMm": 0.0499884,
-        "glbBytes": 772032,
-        "compactGlbBytes": 259716
+        "glbBytes": 772020,
+        "compactGlbBytes": 259704
       },
       {
         "name": "far",
@@ -88,8 +88,8 @@
         "triangles": 5300,
         "vertices": 2660,
         "errorMm": 0.197598,
-        "glbBytes": 118368,
-        "compactGlbBytes": 43384
+        "glbBytes": 118356,
+        "compactGlbBytes": 43372
       }
     ],
     "baked": {
@@ -99,8 +99,8 @@
       "utilisation": 0.837189,
       "coverage": 0.442955,
       "fallback": 0,
-      "glbBytes": 1440512,
-      "compactGlbBytes": 514060
+      "glbBytes": 1440500,
+      "compactGlbBytes": 514048
     }
   },
   "figure-y-up": {
@@ -127,8 +127,8 @@
         "triangles": 54600,
         "vertices": 27310,
         "errorMm": 0.0199218,
-        "glbBytes": 1202980,
-        "compactGlbBytes": 393652
+        "glbBytes": 1202968,
+        "compactGlbBytes": 393640
       },
       {
         "name": "table",
@@ -136,8 +136,8 @@
         "triangles": 35012,
         "vertices": 17516,
         "errorMm": 0.0499884,
-        "glbBytes": 772040,
-        "compactGlbBytes": 259728
+        "glbBytes": 772028,
+        "compactGlbBytes": 259716
       },
       {
         "name": "far",
@@ -145,8 +145,8 @@
         "triangles": 5300,
         "vertices": 2660,
         "errorMm": 0.197598,
-        "glbBytes": 118380,
-        "compactGlbBytes": 43396
+        "glbBytes": 118368,
+        "compactGlbBytes": 43384
       }
     ]
   },
@@ -174,8 +174,8 @@
         "triangles": 54314,
         "vertices": 27165,
         "errorMm": 0.0198604,
-        "glbBytes": 1196652,
-        "compactGlbBytes": 394536
+        "glbBytes": 1196640,
+        "compactGlbBytes": 394524
       },
       {
         "name": "table",
@@ -183,8 +183,8 @@
         "triangles": 34918,
         "vertices": 17467,
         "errorMm": 0.0497701,
-        "glbBytes": 769936,
-        "compactGlbBytes": 259820
+        "glbBytes": 769924,
+        "compactGlbBytes": 259808
       },
       {
         "name": "far",
@@ -192,8 +192,8 @@
         "triangles": 5172,
         "vertices": 2594,
         "errorMm": 0.199326,
-        "glbBytes": 115532,
-        "compactGlbBytes": 42564
+        "glbBytes": 115520,
+        "compactGlbBytes": 42552
       }
     ]
   },
@@ -221,8 +221,8 @@
         "triangles": 81764,
         "vertices": 40908,
         "errorMm": 0.0199609,
-        "glbBytes": 1801084,
-        "compactGlbBytes": 584296
+        "glbBytes": 1801072,
+        "compactGlbBytes": 584284
       },
       {
         "name": "table",
@@ -230,8 +230,8 @@
         "triangles": 60000,
         "vertices": 30026,
         "errorMm": 0.0821843,
-        "glbBytes": 1322292,
-        "compactGlbBytes": 442804
+        "glbBytes": 1322280,
+        "compactGlbBytes": 442792
       },
       {
         "name": "far",
@@ -239,8 +239,8 @@
         "triangles": 20000,
         "vertices": 10026,
         "errorMm": 0.244077,
-        "glbBytes": 442304,
-        "compactGlbBytes": 152800
+        "glbBytes": 442292,
+        "compactGlbBytes": 152788
       }
     ]
   },
@@ -268,8 +268,8 @@
         "triangles": 50000,
         "vertices": 25002,
         "errorMm": 0.00299005,
-        "glbBytes": 1101452,
-        "compactGlbBytes": 233024
+        "glbBytes": 1101440,
+        "compactGlbBytes": 233012
       },
       {
         "name": "table",
@@ -277,8 +277,8 @@
         "triangles": 15000,
         "vertices": 7502,
         "errorMm": 0.0117924,
-        "glbBytes": 331500,
-        "compactGlbBytes": 77360
+        "glbBytes": 331488,
+        "compactGlbBytes": 77348
       },
       {
         "name": "far",
@@ -286,8 +286,8 @@
         "triangles": 4000,
         "vertices": 2002,
         "errorMm": 0.0410684,
-        "glbBytes": 89544,
-        "compactGlbBytes": 25176
+        "glbBytes": 89532,
+        "compactGlbBytes": 25164
       }
     ]
   },
@@ -315,8 +315,8 @@
         "triangles": 38400,
         "vertices": 19212,
         "errorMm": 0,
-        "glbBytes": 846660,
-        "compactGlbBytes": 247844
+        "glbBytes": 846648,
+        "compactGlbBytes": 247832
       },
       {
         "name": "table",
@@ -324,8 +324,8 @@
         "triangles": 15000,
         "vertices": 7512,
         "errorMm": 0.0471792,
-        "glbBytes": 331852,
-        "compactGlbBytes": 112332
+        "glbBytes": 331840,
+        "compactGlbBytes": 112320
       },
       {
         "name": "far",
@@ -333,8 +333,8 @@
         "triangles": 4000,
         "vertices": 2012,
         "errorMm": 0.18786,
-        "glbBytes": 89864,
-        "compactGlbBytes": 33316
+        "glbBytes": 89852,
+        "compactGlbBytes": 33304
       }
     ]
   },
@@ -362,8 +362,8 @@
         "triangles": 54296,
         "vertices": 27156,
         "errorMm": 0.019816,
-        "glbBytes": 1196260,
-        "compactGlbBytes": 399108
+        "glbBytes": 1196248,
+        "compactGlbBytes": 399096
       },
       {
         "name": "table",
@@ -371,8 +371,8 @@
         "triangles": 34740,
         "vertices": 17378,
         "errorMm": 0.0498686,
-        "glbBytes": 766024,
-        "compactGlbBytes": 260800
+        "glbBytes": 766012,
+        "compactGlbBytes": 260788
       },
       {
         "name": "far",
@@ -380,8 +380,8 @@
         "triangles": 5318,
         "vertices": 2667,
         "errorMm": 0.199696,
-        "glbBytes": 118740,
-        "compactGlbBytes": 44120
+        "glbBytes": 118728,
+        "compactGlbBytes": 44108
       }
     ]
   },
@@ -409,8 +409,8 @@
         "triangles": 54706,
         "vertices": 27365,
         "errorMm": 0.0198636,
-        "glbBytes": 1205372,
-        "compactGlbBytes": 392632
+        "glbBytes": 1205360,
+        "compactGlbBytes": 392620
       },
       {
         "name": "table",
@@ -418,8 +418,8 @@
         "triangles": 35512,
         "vertices": 17768,
         "errorMm": 0.0498908,
-        "glbBytes": 783120,
-        "compactGlbBytes": 262436
+        "glbBytes": 783108,
+        "compactGlbBytes": 262424
       },
       {
         "name": "far",
@@ -427,8 +427,8 @@
         "triangles": 5684,
         "vertices": 2854,
         "errorMm": 0.19797,
-        "glbBytes": 126896,
-        "compactGlbBytes": 45592
+        "glbBytes": 126884,
+        "compactGlbBytes": 45580
       }
     ],
     "spot": "recess",
@@ -458,8 +458,8 @@
         "triangles": 54706,
         "vertices": 27365,
         "errorMm": 0.0198636,
-        "glbBytes": 1205376,
-        "compactGlbBytes": 392636
+        "glbBytes": 1205364,
+        "compactGlbBytes": 392624
       },
       {
         "name": "table",
@@ -467,8 +467,8 @@
         "triangles": 35512,
         "vertices": 17768,
         "errorMm": 0.0498908,
-        "glbBytes": 783124,
-        "compactGlbBytes": 262436
+        "glbBytes": 783112,
+        "compactGlbBytes": 262424
       },
       {
         "name": "far",
@@ -476,8 +476,8 @@
         "triangles": 5684,
         "vertices": 2854,
         "errorMm": 0.19797,
-        "glbBytes": 126900,
-        "compactGlbBytes": 45592
+        "glbBytes": 126888,
+        "compactGlbBytes": 45580
       }
     ],
     "spot": "recess",
@@ -507,8 +507,8 @@
         "triangles": 54457,
         "vertices": 27330,
         "errorMm": 0.0198268,
-        "glbBytes": 1202732,
-        "compactGlbBytes": 390792
+        "glbBytes": 1202720,
+        "compactGlbBytes": 390780
       },
       {
         "name": "table",
@@ -516,8 +516,8 @@
         "triangles": 35132,
         "vertices": 17644,
         "errorMm": 0.0498088,
-        "glbBytes": 776824,
-        "compactGlbBytes": 259808
+        "glbBytes": 776812,
+        "compactGlbBytes": 259796
       },
       {
         "name": "far",
@@ -525,8 +525,8 @@
         "triangles": 5309,
         "vertices": 2679,
         "errorMm": 0.199916,
-        "glbBytes": 119000,
-        "compactGlbBytes": 43416
+        "glbBytes": 118988,
+        "compactGlbBytes": 43404
       }
     ],
     "spot": "marked",
