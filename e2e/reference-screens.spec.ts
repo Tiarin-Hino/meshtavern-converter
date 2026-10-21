@@ -53,8 +53,9 @@ async function both(page: Page, frame: string, state: string, timeout?: number) 
 /**
  * How long a picture with the painter open may take (#167): in software rendering the painting
  * view's targets are on the GPU process's queue when the picture is asked for, and a page picture
- * then takes seconds, past the 5 s a comparison allows by default; the panel's pictures below
- * found the same. On CI the three painter pictures timed out at 5 s with the page responsive.
+ * then takes seconds, past the 5 s a comparison allows by default. The page pictures of the
+ * painting state and the panel's own tall pictures share it: on CI the three painter pictures
+ * timed out at 5 s with the page responsive, as the panel's had before they got this budget.
  */
 const PAINTER_PICTURE_TIMEOUT_MS = 30_000;
 
@@ -185,7 +186,7 @@ for (const frame of FRAMES) {
         await expect.soft(page).toHaveScreenshot(`${frame.name}-painting-${theme}.png`, {
           clip,
           // A frame 3400 px tall takes seconds a picture in software rendering.
-          timeout: 30_000,
+          timeout: PAINTER_PICTURE_TIMEOUT_MS,
         });
       }
     });
