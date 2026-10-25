@@ -78,6 +78,8 @@ The `?dev` details `#dev-paint` goes; `#stats`, the thumbnail and the stress but
 
 A `.panel-section` after `#adjust` (`#paint-section`, `data-in="done" data-mini`): `h2.panel-section-title` with `COPY.paint` ("Paint"), then **Paint this mini** (`#paint-open`, `.btn wide` with `paintbrush`, `COPY.paintMini`), as the `page-done` mockup draws it and `look-and-feel.md` §4.4 item 5 lists it. A mini without a detail texture (`baked` null: `stats.bakeSkipped`) shows the button disabled and under it `p.hint` with `PAINT_COPY.cannotPaint` (`#paint-cannot`, hidden otherwise). An opened GLB (`?dev`) hides the section (`data-mini`). The button's `paintbrush` joins `src/page/icons.ts` with `folder-open`, `save` and `check` (`npm run icons`); `check` is already in the questions' set, the page's list gets its own entry.
 
+**Changed (2026-10-25, PM decision in the session on the pre-release ideas):** under Paint this mini the section also has **Save paint file** (`#paint-file-save-done`, `.btn btn-ghost` with `save`, `COPY.savePaintFile`) and under it `p.hint` `#paint-file-keeps` with `COPY.paintFileKeeps` ("The paint file keeps how this mini was put together, painted or not. Drop it with the STL files next time and nothing is asked again."). Before the first stroke the file holds the conversion's choices and the look alone (§7.1), so a mini put together with every question answered once converts the same way next time without entering the painter.
+
 ## 5. The look is one value
 
 `state.look` is the page's; the view's `state.look` mirrors it:
@@ -111,6 +113,8 @@ The spec (M4, "The downloads carry the paint", a proposal that stands on merge):
 
 `#paint-file-save` → `savePaintFile()`: `writePaintFile({ sources, choices, look, steps, engines })` with the sources' fingerprints (§7.4), `choices` as `PaintChoices` from the page's `choices` (`UpChoices` and the sizing: what `result.choices` and `choices.sizing` hold, the preset by its id), `state.look`, `view.history()` and `view.engines()`; the bytes go to a download named `${downloadName()}${PAINT_FILE_EXTENSION}` with `PAINT_FILE_TYPE`, as the GLB downloads are made. Then `state.paintFile.savedAs` is the name, the status line says `COPY.paintSaved(name)` (§9.2), and the unsaved record is deleted (§8.2). Disabled while the view holds no steps (`state.painting.steps === 0`): there is nothing to save. The hook `window.__mt.savePaintFile()` resolves with the bytes.
 
+**Changed (2026-10-25):** Save is never disabled. A paint file with no steps is a valid file (`paintFileOf` with `steps: []`), and it is worth saving: it keeps the choices of a conversion whose questions took a while (a figure in parts with its base). `paintFileNow` reads `view.history()` and `view.engines()` only while the painter is open on this mini, else `steps: []` and this engine; `savePaintFile` is called from the footer's button and from the done panel's (§4), and writes the status line itself when the painter is not on screen (`paintSaved(name)`). The hook is the same.
+
 ### 7.2 Open paint file, and a drop with a paint file
 
 Three ways in, one path:
@@ -122,6 +126,8 @@ Three ways in, one path:
 In every way the olderEngine line is set from the file and shown while it is open (§9.2). A paint file's `converter` is never checked.
 
 **As built (2026-10-21, #167):** way 3 replays at once only when the file's choices are the ones the mini on screen was converted with; when they differ, the matched files convert again with the file's choices first (`convertWithPaintFile`), because steps replayed onto a surface converted another way would paint the wrong places (`openPaintFileOnMini` in `main.ts`). Matching is by fingerprints (`matchFingerprints` in `paint-file.ts`, which `matchSources` uses), not by re-hashing on the page's thread.
+
+**Changed (2026-10-25):** a paint file without steps ends in the done panel, not the painter: `replayOnMini` sets the look and returns when `file.steps` is empty, whether or not the painter is open on this mini: a file without steps has nothing to replace, so `openPaintFileOnMini` neither asks `COPY.replacePainting` nor forgets the unsaved record for one whose choices are this mini's (the automatic review's note on the PR). The empty state says the file is welcome: `p.hint` `#paint-file-hint` (`COPY.paintFileHint`, "Have a paint file? Drop it with the STL files, or open it first."; hidden while a file waits, the status line speaks then) and **Open paint file** (`#paint-file-open-empty`, `.btn btn-ghost btn-sm` with `folder-open`), which opens the same `#paint-file-input` as the footer's button: way 2 by a button.
 
 ### 7.3 Unsaved steps
 
@@ -206,6 +212,8 @@ keepPainting: 'Keep the painting',
 replacePainting: 'Opening this paint file replaces the painting on this mini.',
 openIt: 'Open it',
 whatYouGet: 'You get three detail levels, a look, a painter and two downloads.',
+paintFileHint: 'Have a paint file? Drop it with the STL files, or open it first.', // 2026-10-25
+paintFileKeeps: 'The paint file keeps how this mini was put together, painted or not. Drop it with the STL files next time and nothing is asked again.', // 2026-10-25
 collectsNothing:
   'This page collects nothing and sends nothing. It stores only your own choices on this device: the theme, the colours you painted with, and a painting you have not saved yet.',
 ```

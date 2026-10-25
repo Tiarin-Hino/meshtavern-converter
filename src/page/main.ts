@@ -524,6 +524,8 @@ const paintCannot = document.querySelector<HTMLElement>('#paint-cannot')!;
 const paintFileSave = document.querySelector<HTMLButtonElement>('#paint-file-save')!;
 const paintFileInput = document.querySelector<HTMLInputElement>('#paint-file-input')!;
 const paintFileForget = document.querySelector<HTMLButtonElement>('#paint-file-forget')!;
+/** The empty state's hint about the paint file; hidden while one waits, the status line says then. */
+const paintFileHint = document.querySelector<HTMLElement>('#paint-file-hint')!;
 paintCannot.textContent = PAINT_COPY.cannotPaint;
 
 const viewer = new Viewer(canvas);
@@ -782,7 +784,7 @@ function render(): void {
   paintOpen.disabled = baked === null;
   paintCannot.hidden = baked !== null;
   paintFileForget.hidden = state.paintFile.pending === null;
-  paintFileSave.disabled = (state.painting?.steps ?? 0) === 0;
+  paintFileHint.hidden = state.paintFile.pending !== null;
 }
 
 /** Writes the status line; a problem shows as the application's error callout, with its icon. */
@@ -1691,15 +1693,16 @@ function flushUnsaved(): Promise<void> {
 
 /**
  * The painting as a paint file now (#167, §7.1): everything read before the first await, so a
- * view closed or a mini replaced meanwhile does not change what it holds.
+ * view closed or a mini replaced meanwhile does not change what it holds. Before the painter has
+ * opened on this mini the file has no steps: the conversion's choices and the look alone.
  */
 function paintFileNow(): Promise<PaintFile> {
-  const view = paintTool.view();
+  const view = paintTool.isOpen() ? paintTool.view() : null;
   const contents = {
     choices: paintChoices(),
     look: { ...state.look },
-    steps: view.history(),
-    engines: view.engines(),
+    steps: view?.history() ?? [],
+    engines: view?.engines(),
   };
   return sourceFingerprints().then((fingerprints) =>
     paintFileOf({ ...contents, sources: fingerprints }),
@@ -1727,8 +1730,12 @@ function showPainterStatus(): void {
   setStatus(COPY.paintingKept);
 }
 
-/** Save paint file (#167, §7.1): the download, the line, and the record forgotten. */
+/**
+ * Save paint file (#167, §7.1): the download, the line, and the record forgotten. From the
+ * painter's footer or the done panel; with no stroke yet the file keeps the choices alone.
+ */
 async function savePaintFile(): Promise<Uint8Array> {
+  if (!state.stats || state.imported) throw new Error('No mini to save a paint file of');
   const bytes = await writePaintFile(await paintFileNow());
   const name = `${downloadName()}${PAINT_FILE_EXTENSION}`;
   downloadBlob(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: PAINT_FILE_TYPE }), name);
@@ -1737,7 +1744,8 @@ async function savePaintFile(): Promise<Uint8Array> {
   unsavedTimer = null;
   painterProblem = null;
   state.paintFile.savedAs = name;
-  showPainterStatus();
+  if (state.painter) showPainterStatus();
+  else setStatus(paintSaved(name));
   await forgetUnsaved();
   return bytes;
 }
@@ -1799,9 +1807,14 @@ async function convertWithPaintFile(
   await replayOnMini(file);
 }
 
-/** Opens the painter on the mini on screen at the end of a paint file's steps (§7.2). */
+/**
+ * Opens the painter on the mini on screen at the end of a paint file's steps (§7.2). A file
+ * without steps kept the conversion's choices alone: there is nothing to replay, the mini stays
+ * in the done panel with Paint a press away, and a painting on it is left as it is.
+ */
 async function replayOnMini(file: PaintFile): Promise<void> {
   setLook(file.look);
+  if (file.steps.length === 0) return;
   replaying = true;
   try {
     await openPainter({ steps: file.steps, engines: file.engines });
@@ -1861,14 +1874,16 @@ async function openPaintFileOnMini(file: PaintFile): Promise<void> {
   } catch (error) {
     return refusePaintFile(error);
   }
+  const same =
+    JSON.stringify(convertOptionsOf(file)) ===
+    JSON.stringify(convertOptionsOf({ choices: paintChoices() }));
+  // A file without steps for this very conversion replaces nothing: the look is all it brings.
+  if (same && file.steps.length === 0) return replayOnMini(file);
   if (paintTool.isOpen() && unsaved) {
     const yes = await confirmDialog.ask(COPY.replacePainting, COPY.openIt, COPY.keepPainting);
     if (!yes) return;
   }
   await forgetUnsaved();
-  const same =
-    JSON.stringify(convertOptionsOf(file)) ===
-    JSON.stringify(convertOptionsOf({ choices: paintChoices() }));
   if (same) return replayOnMini(file);
   const files = await Promise.all(
     order.map(async (k) => {
@@ -1880,7 +1895,12 @@ async function openPaintFileOnMini(file: PaintFile): Promise<void> {
 }
 
 paintFileSave.addEventListener('click', () => void savePaintFile());
-document.querySelector('#paint-file-open')!.addEventListener('click', () => paintFileInput.click());
+document
+  .querySelector('#paint-file-save-done')!
+  .addEventListener('click', () => void savePaintFile());
+// Open paint file in the painter's footer and in the empty state: the same picker.
+for (const id of ['#paint-file-open', '#paint-file-open-empty'])
+  document.querySelector(id)!.addEventListener('click', () => paintFileInput.click());
 paintFileInput.addEventListener('change', () => {
   const file = paintFileInput.files?.[0];
   paintFileInput.value = '';

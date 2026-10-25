@@ -105,6 +105,10 @@ export const COPY = {
   paintingKept: 'Kept in this browser until you save it as a paint file. Nothing is sent.',
   onePaintFile: 'Drop one paint file with the STL files.',
   withoutPaintFile: 'Convert without it',
+  // The empty state's line about the paint file, and the done panel's under Save paint file.
+  paintFileHint: 'Have a paint file? Drop it with the STL files, or open it first.',
+  paintFileKeeps:
+    'The paint file keeps how this mini was put together, painted or not. Drop it with the STL files next time and nothing is asked again.',
   continuePainting: 'Continue painting',
   convertAfresh: 'Convert afresh',
   paintingLost:
