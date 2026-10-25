@@ -1809,12 +1809,12 @@ async function convertWithPaintFile(
 
 /**
  * Opens the painter on the mini on screen at the end of a paint file's steps (§7.2). A file
- * without steps kept the conversion's choices alone: the mini stays in the done panel, Paint a
- * press away, unless the painter is open on this mini, whose painting the file then replaces.
+ * without steps kept the conversion's choices alone: there is nothing to replay, the mini stays
+ * in the done panel with Paint a press away, and a painting on it is left as it is.
  */
 async function replayOnMini(file: PaintFile): Promise<void> {
   setLook(file.look);
-  if (file.steps.length === 0 && !paintTool.isOpen()) return;
+  if (file.steps.length === 0) return;
   replaying = true;
   try {
     await openPainter({ steps: file.steps, engines: file.engines });
@@ -1874,14 +1874,16 @@ async function openPaintFileOnMini(file: PaintFile): Promise<void> {
   } catch (error) {
     return refusePaintFile(error);
   }
+  const same =
+    JSON.stringify(convertOptionsOf(file)) ===
+    JSON.stringify(convertOptionsOf({ choices: paintChoices() }));
+  // A file without steps for this very conversion replaces nothing: the look is all it brings.
+  if (same && file.steps.length === 0) return replayOnMini(file);
   if (paintTool.isOpen() && unsaved) {
     const yes = await confirmDialog.ask(COPY.replacePainting, COPY.openIt, COPY.keepPainting);
     if (!yes) return;
   }
   await forgetUnsaved();
-  const same =
-    JSON.stringify(convertOptionsOf(file)) ===
-    JSON.stringify(convertOptionsOf({ choices: paintChoices() }));
   if (same) return replayOnMini(file);
   const files = await Promise.all(
     order.map(async (k) => {

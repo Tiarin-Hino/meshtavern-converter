@@ -395,7 +395,8 @@ test('a paint file without a stroke keeps the choices: saved from the done panel
   await expect(page.locator('#paint-file-hint')).toHaveText(COPY.paintFileHint);
   await expect(page.locator('#paint-file-open-empty')).toBeVisible();
 
-  // Converted with the questions on, the hero is saved from the done panel before any stroke.
+  // Converted without the questions (the detection's choices), the hero is saved from the done
+  // panel before any stroke; the file then suppresses the question on the next drop.
   await page.goto('/?ask=off&bake=256');
   await page.waitForFunction(() => window.__mt?.state.ready === true);
   await page.setInputFiles('#file', hero());
@@ -436,4 +437,15 @@ test('a paint file without a stroke keeps the choices: saved from the done panel
   await page.locator('#paint-open').click();
   await page.waitForFunction(() => window.__mt.state.page === 'painting');
   await expect(page.locator('#paint-file-save')).toBeEnabled();
+
+  // A painting, saved and closed with Done: the choices-only file opened on it replaces nothing,
+  // asks nothing and enters no painter.
+  await strokeAcross(page, 12, '#b03030');
+  await page.evaluate(() => window.__mt.savePaintFile());
+  await page.locator('#paint-done').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'done');
+  await page.evaluate((file) => window.__mt.openPaintFile(new Uint8Array(file).buffer), [...bytes]);
+  expect(await page.evaluate(() => window.__mt.state.page)).toBe('done');
+  expect(await page.evaluate(() => window.__mt.state.confirm)).toBeNull();
+  expect(await page.evaluate(() => window.__mt.state.painting!.steps)).toBe(1);
 });
