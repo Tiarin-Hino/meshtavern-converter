@@ -263,6 +263,20 @@
             data-in="empty error"
           ></button>
           <p id="pair-hint" class="hint" data-in="empty" data-copy="pairHint"></p>
+          <!--
+            A paint file converts the same files again without a question (#167 §7.2): the empty
+            state says so and offers to open one first; it then waits for its STL files.
+          -->
+          <p id="paint-file-hint" class="hint" data-in="empty" data-copy="paintFileHint"></p>
+          <button
+            id="paint-file-open-empty"
+            class="btn btn-ghost btn-sm"
+            type="button"
+            data-in="empty"
+            data-icon="folder-open"
+          >
+            <span data-copy="openPaintFile"></span>
+          </button>
           <p class="promise" data-in="empty error" data-copy="promise"></p>
           <section
             id="export"
@@ -607,6 +621,14 @@
               <span data-copy="paintMini"></span>
             </button>
             <p id="paint-cannot" class="hint" hidden></p>
+            <!--
+              Save paint file from the done panel: with no stroke the file holds the conversion's
+              choices alone, so a mini put together once is put together the same way next time.
+            -->
+            <button id="paint-file-save-done" class="btn btn-ghost" type="button" data-icon="save">
+              <span data-copy="savePaintFile"></span>
+            </button>
+            <p id="paint-file-keeps" class="hint" data-copy="paintFileKeeps"></p>
           </section>
           <!-- The painter's panel of the library (#166) mounts here, in the painting state. -->
           <div id="paint-panel" data-in="painting"></div>

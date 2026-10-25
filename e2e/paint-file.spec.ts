@@ -385,3 +385,55 @@ test('Open over unsaved steps asks first, and a reconversion of the mini does to
   expect(await page.evaluate(() => window.__mt.state.painting!.steps)).toBe(3);
   expect(await page.evaluate(() => window.__mt.state.stats!.sizing.size)).toBe(size);
 });
+
+test('a paint file without a stroke keeps the choices: saved from the done panel, opened from the empty state, no question', async ({
+  page,
+}) => {
+  // The empty state says a paint file is welcome and offers to open one first.
+  await page.goto('/?bake=256');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await expect(page.locator('#paint-file-hint')).toHaveText(COPY.paintFileHint);
+  await expect(page.locator('#paint-file-open-empty')).toBeVisible();
+
+  // Converted with the questions on, the hero is saved from the done panel before any stroke.
+  await page.goto('/?ask=off&bake=256');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  await page.setInputFiles('#file', hero());
+  await page.waitForFunction(() => window.__mt.state.page === 'done', undefined, {
+    timeout: 180_000,
+  });
+  await expect(page.locator('#paint-file-save-done')).toBeVisible();
+  await expect(page.locator('#paint-file-keeps')).toHaveText(COPY.paintFileKeeps);
+  const download = page.waitForEvent('download');
+  await page.locator('#paint-file-save-done').click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe('hero.mtpaint');
+  await expect(page.locator('#status')).toHaveText(paintSaved('hero.mtpaint'));
+  const bytes = readFileSync((await saved.path())!);
+  const file = await readPaintFile(bytes);
+  expect(file.steps).toHaveLength(0);
+  expect(file.sources).toEqual([expect.objectContaining({ role: 'figure' })]);
+  expect(await page.evaluate(() => window.__mt.state.painting?.open ?? false)).toBe(false);
+
+  // Opened first through the empty state's button, it waits; the hero then converts without a
+  // question and stays in the done panel: there is no painting to open.
+  await page.goto('/?bake=256');
+  await page.waitForFunction(() => window.__mt?.state.ready === true);
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('#paint-file-open-empty').click();
+  await (await chooser).setFiles(asPaintFile(bytes));
+  await expect(page.locator('#status')).toHaveText(describePaintFileWaiting([{ role: 'figure' }]));
+  await expect(page.locator('#paint-file-hint')).toBeHidden();
+  await page.setInputFiles('#file', hero());
+  await page.waitForFunction(() => window.__mt.state.page === 'done', undefined, {
+    timeout: 180_000,
+  });
+  expect(await page.evaluate(() => window.__mt.state.questionMs)).toBeNull();
+  expect(await page.evaluate(() => window.__mt.state.painter)).toBe(false);
+  expect(await page.evaluate(() => window.__mt.state.paintFile.pending)).toBeNull();
+
+  // In the painter, Save is enabled before the first stroke too.
+  await page.locator('#paint-open').click();
+  await page.waitForFunction(() => window.__mt.state.page === 'painting');
+  await expect(page.locator('#paint-file-save')).toBeEnabled();
+});

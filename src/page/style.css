@@ -226,6 +226,7 @@ body[data-state='empty'] #panel {
 }
 
 #pair-hint,
+#paint-file-hint,
 .promise {
   color: var(--text-muted);
   font-size: var(--text-sm);
@@ -550,9 +551,14 @@ body[data-state='empty'] #panel {
   flex: none;
 }
 
-/* Paint (#167): the section's one button at the panel's width, as the mockup draws it. */
+/* Paint (#167): the section's first button at the panel's width, as the mockup draws it. */
 #paint-open {
   width: 100%;
+}
+
+/* Save paint file under it, with the line that says what the file keeps. */
+#paint-file-save-done {
+  margin-top: var(--space-2);
 }
 
 /* The painter's footer: Open at the start, Save and Done at the end (§3.3). */
