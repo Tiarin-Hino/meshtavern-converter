@@ -435,7 +435,10 @@ test('a paint file without a stroke keeps the choices: saved from the done panel
 
   // In the painter, Save is enabled before the first stroke too.
   await page.locator('#paint-open').click();
-  await page.waitForFunction(() => window.__mt.state.page === 'painting');
+  // The page is in the painting state before the view has opened: wait for the view too.
+  await page.waitForFunction(
+    () => window.__mt.state.page === 'painting' && window.__mt.state.painting?.open === true,
+  );
   await expect(page.locator('#paint-file-save')).toBeEnabled();
 
   // A painting, saved and closed with Done: the choices-only file opened on it replaces nothing,
