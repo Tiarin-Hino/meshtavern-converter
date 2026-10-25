@@ -181,6 +181,9 @@ function container(json: Json, bin: Uint8Array): ArrayBuffer {
   return out;
 }
 
+/** The glTF `asset.generator`: the product's name (#147), which glTF viewers show for the file. */
+const GENERATOR = 'PolyWash';
+
 /**
  * `image`: the buffer view of the painted texture (#167), whose image, sampler and texture the
  * file then holds, the material's base colour.
@@ -195,7 +198,7 @@ function document(
   const size = bounds(mesh.positions);
   const paint = image !== null ? 'texture' : options.paint ? 'vertex' : null;
   return {
-    asset: { version: '2.0', generator: 'MeshTavern Converter' },
+    asset: { version: '2.0', generator: GENERATOR },
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes: [{ name: options.name, mesh: 0, ...node }],

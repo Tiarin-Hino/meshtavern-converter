@@ -47,6 +47,7 @@ interface Gltf {
   meshes: { primitives: { attributes: Record<string, number> }[] }[];
   extensionsRequired?: string[];
   extras: { sizeMm: number[]; meshtavern?: Record<string, unknown> };
+  asset: { version: string; generator: string };
 }
 
 function parse(glb: ArrayBuffer): { json: Gltf; bin: Uint8Array } {
@@ -104,6 +105,10 @@ describe('encodeGlb, plain', () => {
     const expected = vertexColours(sheet, DEFAULT_LOOK);
     expect(bin[view.byteOffset]).toBe(Math.round(expected[0]! * 255));
     expect(bin[view.byteOffset + 3]).toBe(255);
+  });
+
+  it("names the product, not the development name, as the file's generator", () => {
+    expect(json.asset).toEqual({ version: '2.0', generator: 'PolyWash' });
   });
 
   it('uses 16-bit indices for small meshes', () => {
@@ -364,11 +369,13 @@ describe('encodeGlb, painted (#167)', () => {
   const paint = new Uint8Array(vertexCount * 4);
   for (let v = 0; v < vertexCount; v += 2) paint.set([200, 30, 20, 255], v * 4);
 
+  // The bytes of #167's files with `asset.generator` renamed to PolyWash (#147): with the old
+  // name, 'MeshTavern Converter', the encoder gives #167's hashes again.
   it.each([
-    [false, false, '652138a7d2cf2547a4fb597ad822dfbd7546be110c7914cf357fd01b2555f434'],
-    [true, false, 'f4189b5c58a355b9af3cdac79c7e7aac53ee78c4a88cd1a059046790f46fc359'],
-    [false, true, 'c89f67a7c0554fd17c306e4e6dbee657d4030da1ba5b676be6a51847b13ea9f4'],
-    [true, true, 'c02e0adda2036de40da489c89ad6b1b706a0a1aca8c9f35b4c4a92d3842113a6'],
+    [false, false, '395619590178e13ad9549cb5be7beca03b4322b1d82daf13b96705675e405134'],
+    [true, false, '569a5cefd172b1d7e47339344069e1dc57bd1e6fdfcb69c5e15e63454c6fb667'],
+    [false, true, 'c99ae5f9819a8461be5ecdd50725605fb218db09141d236190ffa47395d9c2b2'],
+    [true, true, '98f72f1cd131dbae0094eef6f50763284813373495ed0f5010509f428d224196'],
   ])(
     'without a paint is byte for byte the file before (compact: %s, uvs: %s)',
     (compact, withUvs, sha256) => {
