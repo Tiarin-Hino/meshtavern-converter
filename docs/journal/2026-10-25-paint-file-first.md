@@ -34,4 +34,4 @@ The PM's first idea, painting on the original sculpt rather than the table level
 
 ## Numbers
 
-None: no pipeline or engine change. The reference screens of the empty and done states change on purpose and are rewritten from the CI run's artifact with `npm run shots:take` (`docs/guides/reference-screenshots.md`).
+None: no pipeline or engine change. The reference screens of the empty state and of the painter change on purpose (the empty card for its new line and button, the painter because Save paint file is drawn enabled before the first stroke) and were rewritten from the first CI run's artifact with `npm run shots:take` (`docs/guides/reference-screenshots.md`); the done state's picture is unchanged, its new button lies below the panel's fold.
