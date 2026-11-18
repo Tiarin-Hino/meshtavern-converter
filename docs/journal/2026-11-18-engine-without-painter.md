@@ -53,12 +53,12 @@ Development PC (NVIDIA GeForce RTX 3060, Chrome, 1,920 × 1,080), `node scripts/
 | -------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ |
 | 500 plain strokes replayed at `open`         | 501–635 ms, 2–3 slices                               | 1,566–1,948 ms, 3–4 slices                             |
 | longest page task during that replay         | 264–301 ms                                           | 302–364 ms                                             |
-| longest page task of an `open` with no steps | 179 ms                                               | 243–330 ms                                             |
+| longest page task of an `open` with no steps | 179 ms (one run)                                     | 243–330 ms                                             |
 | longest step on the CPU                      | under 20 ms                                          | 53 ms                                                  |
 | 118 / 111 steps at `open` (#165's measure)   | 539–646 ms                                           | 1,023–1,389 ms                                         |
 | paint (1,024 px) as a KTX2: encode, size     | 925–1,209 ms, 359 KiB                                | 736–854 ms, 192 KiB                                    |
 
-The page's longest task during a long replay is no longer than an open without steps takes: the open's own work before the replay (the search tree and adjacency of the table level) and after it (the shaders), not a slice. CI's container (software rendering, 4 cores): 100 steps in 2.6 s shown, 4 slices, and 3.4 s hidden.
+No step took longer than 53 ms on the CPU, so the slices hold. The page's longest task during a long replay is the open's own work, before the replay (the search tree and adjacency of the table level) and after it (the shaders): up to about 300 ms on the generated figure and 364 ms on large-01. On large-01 that is within the range of an open without steps (243–330 ms). On the figure it is about 100 ms more than the one run without steps (179 ms), which was not traced further. CI's container (software rendering, 4 cores): 100 steps in 2.6 s shown, 4 slices, and 3.4 s hidden.
 
 Compressed paint against references (container, software rendering), pixels beyond 12 of 255:
 

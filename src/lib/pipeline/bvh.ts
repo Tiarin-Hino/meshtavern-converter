@@ -392,7 +392,6 @@ export class TriangleBvh {
     }
   }
 
-  /** Closest point on one triangle (Ericson, Real-Time Collision Detection 5.1.5); updates `out` if nearer and facing. */
   /**
    * The squared distance from (x, y, z) to triangle `triangle`'s surface (#197): Infinity for a
    * triangle the mesh does not have.
@@ -405,6 +404,7 @@ export class TriangleBvh {
     return out.distanceSquared;
   }
 
+  /** Closest point on one triangle (Ericson, Real-Time Collision Detection 5.1.5); updates `out` if nearer and facing. */
   private tryTriangle(
     out: SurfaceHit,
     triangle: number,

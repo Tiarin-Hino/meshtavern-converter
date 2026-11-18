@@ -233,7 +233,8 @@ export interface PaintingView {
    * Opens one open after another; resolves without opening when `close`, `dispose` or a later
    * `open` came first. Steps are replayed in slices of REPLAY_SLICE_MS (#197): `close`, `dispose`
    * or a later `open` during the replay end it at the next slice, and what was made is released.
-   * Until it resolves the view is not open: strokes, fills, undo and the pointer do nothing. A
+   * Until it resolves the view is not open: strokes, fills, undo and the pointer do nothing, and
+   * `paint()`, `mask()` and `surface()` give the half-replayed state, so await `open` first. A
    * hidden view (`setShown(false)`) opens and replays as a shown one does: the way to replay a
    * paint file without showing anything.
    */

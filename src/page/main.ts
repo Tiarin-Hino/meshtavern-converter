@@ -1751,6 +1751,8 @@ const paintTool = createPainter(
 
 /** The view's steps are a paint file's being replayed at open: not the person's changes. */
 let replaying = false;
+/** The painter's last open (#197: a replay goes in slices), settled; Done and Save wait for it. */
+let painterOpening: Promise<void> = Promise.resolve();
 /** The painting changed since it was opened or last saved (#167, §7.3). */
 let unsaved = false;
 /** A refused paint file on the painter's status line, until the next change (§9.2). */
@@ -1845,6 +1847,8 @@ function showPainterStatus(): void {
  */
 async function savePaintFile(): Promise<Uint8Array> {
   if (!state.stats || state.imported) throw new Error('No mini to save a paint file of');
+  // A paint file still replaying (#197: the replay goes in slices) is saved with its steps.
+  await painterOpening;
   const bytes = await writePaintFile(await paintFileNow());
   const name = `${downloadName()}${PAINT_FILE_EXTENSION}`;
   downloadBlob(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: PAINT_FILE_TYPE }), name);
@@ -2037,8 +2041,11 @@ async function openPainter(replay: PaintReplay | null = null): Promise<void> {
   showPainterStatus();
   render();
   try {
-    if (replay || !paintTool.isOpen()) await paintTool.open(null, null, null, replay);
-    else paintTool.show(true);
+    if (replay || !paintTool.isOpen()) {
+      const opening = paintTool.open(null, null, null, replay);
+      painterOpening = opening.catch(() => {});
+      await opening;
+    } else paintTool.show(true);
   } catch (error) {
     state.painter = false;
     render();
@@ -2059,6 +2066,9 @@ async function closePainter(): Promise<void> {
   if (state.stats) setStatus(describeReady(state.stats));
   render();
   paintOpen.focus();
+  // Done during a paint file's replay (#197) takes the paint at its end, not half of it.
+  await painterOpening;
+  if (!paintTool.isOpen()) return;
   showPaint(await paintTool.view().paint());
 }
 
