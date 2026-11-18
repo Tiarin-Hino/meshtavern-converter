@@ -5,6 +5,7 @@ import '../lib/questions.css';
 import '../lib/painting.css';
 import '../lib/painting-panel.css';
 import {
+  compressPaint,
   encodeGlb,
   glbEncoderReady,
   DEFAULT_LOOK,
@@ -71,7 +72,12 @@ import {
   type SourceFingerprint,
 } from '../lib';
 import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
-import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
+import {
+  createDetailTexture,
+  renderThumbnail,
+  transcodeDetail,
+  transcodePaint,
+} from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import {
@@ -283,6 +289,13 @@ declare global {
         ) => Promise<void>;
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
+        /**
+         * The open view's paint compressed (#197, `compressPaint`) and drawn as the thumbnail
+         * draws it at `size`, beside the same drawn with the paint's own pixels: how many pixels
+         * of the mini differ by how much (the largest channel's difference, 0 … 255), the encode
+         * time and the file's size.
+         */
+        compressedPaint: (size: number) => Promise<CompressedPaintCheck>;
       };
       /** Paint (#167): enters the painting state, opening the view on the mini unless it is open. */
       openPainter: () => Promise<void>;
@@ -1564,6 +1577,73 @@ async function thumbnail(size?: number, paint?: TestPaint): Promise<ArrayBuffer>
   }
 }
 
+/** What `painting.compressedPaint` measured (#197). */
+interface CompressedPaintCheck {
+  /** Pixels of the mini in either picture. */
+  pixels: number;
+  /** `histogram[d]`: pixels whose largest channel differs by d. */
+  histogram: number[];
+  encodeMs: number;
+  ktx2Bytes: number;
+}
+
+/**
+ * The open view's paint as a KTX2 (#197) against its own pixels, drawn by `renderThumbnail` at
+ * `size` with the viewer's renderer: the own pixels as the viewer draws a paint (no mipmaps), the
+ * compressed one with its mip chain.
+ */
+async function compressedPaintCheck(size: number): Promise<CompressedPaintCheck> {
+  if (!baked) throw new Error('No baked mini');
+  const albedo = await paintTool.view().paint();
+  const started = performance.now();
+  const ktx2 = await compressPaint(albedo);
+  const encodeMs = performance.now() - started;
+  const renderer = viewer.webglRenderer;
+  const compressed = await transcodePaint(ktx2, renderer);
+  const own = new DataTexture(albedo.data, albedo.width, albedo.height);
+  own.colorSpace = SRGBColorSpace;
+  own.generateMipmaps = false;
+  own.minFilter = LinearFilter;
+  own.needsUpdate = true;
+  const made =
+    baked.texture instanceof Uint8Array
+      ? createDetailTexture(baked.texture, baked.resolution)
+      : null;
+  const texture = made ?? (baked.texture as Texture);
+  const pixelsOf = async (paint: Texture): Promise<Uint8ClampedArray> => {
+    const png = await renderThumbnail(baked!.mesh, {
+      size,
+      look: state.look,
+      texture,
+      albedo: paint,
+      renderer,
+    });
+    const bitmap = await createImageBitmap(png);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  };
+  try {
+    const a = await pixelsOf(own);
+    const b = await pixelsOf(compressed);
+    const histogram = new Array<number>(256).fill(0);
+    let pixels = 0;
+    for (let k = 0; k < a.length; k += 4) {
+      if (a[k + 3] === 0 && b[k + 3] === 0) continue;
+      pixels++;
+      let off = 0;
+      for (let c = 0; c < 4; c++) off = Math.max(off, Math.abs(a[k + c]! - b[k + c]!));
+      histogram[off]!++;
+    }
+    return { pixels, histogram, encodeMs, ktx2Bytes: ktx2.byteLength };
+  } finally {
+    own.dispose();
+    compressed.dispose();
+    made?.dispose();
+  }
+}
+
 /** Where the test hook paints the table level red (#125). */
 type TestPaint = 'x+' | 'x-' | 'all';
 const TEST_PAINT_SIZE = 1024;
@@ -2554,6 +2634,7 @@ window.__mt = {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);
     },
+    compressedPaint: compressedPaintCheck,
   },
   openPainter: () => openPainter(),
   closePainter,

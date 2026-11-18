@@ -8,7 +8,8 @@
 // but the body hidden, and the group brush, which reads back its cover at each commit; since #180
 // the flat brush with every group pulled apart, which casts once per offset at each sample), the
 // intervals between frames, and the GPU process's memory with the view open against without. One
-// fresh browser per mini.
+// fresh browser per mini. Since #197 also a replay of LONG_REPLAY steps at open, in slices, and the
+// encode of the paint as a KTX2.
 // Usage, after `npm run build`:
 //   node scripts/measure-painting.mjs                     the generated figure and large-01 with its base
 //   node scripts/measure-painting.mjs corpus/x/a.stl …    other minis (a base file beside one is added)
@@ -28,6 +29,8 @@ const VIEWPORT = { width: 1920, height: 1080 };
 const STROKES = 3;
 /** Short strokes painted after the runs, so the replay at open and undo past the window are measured (#165). */
 const SHORT_STROKES = 80;
+/** Steps of the long replay (#197): the plain strokes above over and over, replayed at open in slices. */
+const LONG_REPLAY = 500;
 /** Pointer samples a stroke across the canvas has: one a frame, as a pointer at 60 Hz. */
 const SAMPLES = 120;
 /** The brushes measured: each tool that strokes at the largest size, the flat brush and the dry brush also at the default. */
@@ -260,6 +263,8 @@ try {
           await view.strokeAt([0.4, 0.5, 0.6].map((x) => [width * x, y]));
         }
         const steps = view.history();
+        // Kept for the long replay below: undo leaves history() empty.
+        window.__measureSteps = steps;
         const bytes = JSON.stringify(steps).length;
         painting.close();
         const start = performance.now();
@@ -276,6 +281,38 @@ try {
       const deep = replay.undos.filter((ms) => ms > 100).length;
       console.log(
         `paint file: ${replay.steps} steps, ${(replay.bytes / 1024).toFixed(0)} KiB as JSON · open with them ${replay.openMs.toFixed(0)} ms · undo of every one: median ${median(replay.undos).toFixed(0)} ms, worst ${Math.max(...replay.undos).toFixed(0)} ms, ${deep} over 100 ms`,
+      );
+      // The long replay (#197): LONG_REPLAY plain strokes replayed at open in slices, the time
+      // between two reports the longest the page waited; then the paint as a KTX2 (compressPaint).
+      const long = await page.evaluate(async (count) => {
+        const painting = window.__mt.painting;
+        const plain = window.__measureSteps.filter(
+          (step) =>
+            step.kind === 'stroke' &&
+            step.lifts === undefined &&
+            !step.groups &&
+            step.tool !== 'group',
+        );
+        const steps = Array.from({ length: count }, (_, k) => plain[k % plain.length]);
+        painting.close();
+        const reports = [];
+        const start = performance.now();
+        await painting.open(null, null, null, {
+          steps,
+          onReplay: (done) => reports.push([done, performance.now()]),
+        });
+        const openMs = performance.now() - start;
+        let longest = 0;
+        let last = start;
+        for (const [, at] of reports) {
+          longest = Math.max(longest, at - last);
+          last = at;
+        }
+        const ktx2 = await painting.compressedPaint(64);
+        return { steps: steps.length, openMs, slices: reports.length, longest, ktx2 };
+      }, LONG_REPLAY);
+      console.log(
+        `long replay: ${long.steps} steps at open in ${long.openMs.toFixed(0)} ms, ${long.slices} reports, the longest ${long.longest.toFixed(0)} ms apart · the paint as a KTX2: encoded in ${long.ktx2.encodeMs.toFixed(0)} ms, ${(long.ktx2.ktx2Bytes / 1024).toFixed(0)} KiB`,
       );
     } finally {
       await context.close();
