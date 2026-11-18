@@ -20,6 +20,28 @@ export function transcodeDetail(
   renderer: THREE.WebGLRenderer,
   transcoderPath = `${import.meta.env.BASE_URL}basis/`,
 ): Promise<THREE.CompressedTexture> {
+  return transcode(ktx2, renderer, transcoderPath, THREE.NoColorSpace);
+}
+
+/**
+ * The paint's KTX2 (`compressPaint`, #197) transcoded for `createBakedMaterial`'s `map`: its
+ * colour in sRGB (`colorSpace` SRGBColorSpace, so the GPU decodes it as it samples), alpha
+ * straight, every mip level. `transcoderPath` as `transcodeDetail`'s.
+ */
+export function transcodePaint(
+  ktx2: Uint8Array,
+  renderer: THREE.WebGLRenderer,
+  transcoderPath = `${import.meta.env.BASE_URL}basis/`,
+): Promise<THREE.CompressedTexture> {
+  return transcode(ktx2, renderer, transcoderPath, THREE.SRGBColorSpace);
+}
+
+function transcode(
+  ktx2: Uint8Array,
+  renderer: THREE.WebGLRenderer,
+  transcoderPath: string,
+  colorSpace: THREE.ColorSpace,
+): Promise<THREE.CompressedTexture> {
   if (loader && loaderPath !== transcoderPath) {
     loader.dispose();
     loader = null;
@@ -31,7 +53,7 @@ export function transcodeDetail(
     loader!.parse(
       copy.buffer,
       (texture) => {
-        texture.colorSpace = THREE.NoColorSpace;
+        texture.colorSpace = colorSpace;
         resolve(texture);
       },
       reject,

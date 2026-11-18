@@ -14,7 +14,12 @@ export {
   type BakedMaterialOptions,
   type LookUniforms,
 } from './three/baked-material';
-export { transcodeDetail, ownCopy, compressedTextureBytes } from './three/compressed-texture';
+export {
+  transcodeDetail,
+  transcodePaint,
+  ownCopy,
+  compressedTextureBytes,
+} from './three/compressed-texture';
 // A picture of the table level, drawn by the consumer after the conversion (issue #99).
 export {
   renderThumbnail,

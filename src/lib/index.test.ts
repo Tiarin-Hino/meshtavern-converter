@@ -63,6 +63,7 @@ describe('the library entries', () => {
       'PROBLEM_MESSAGES',
       'RECENT_COLOURS_MAX',
       'REGION_REACH_MM',
+      'SEED_ON_TRIANGLE_MM',
       'SHELL_MIN_TRIANGLES',
       'SIZES',
       'SNIFF_BYTES',
@@ -78,6 +79,7 @@ describe('the library entries', () => {
       'WASH_LIFT',
       'WASH_OCCLUSION',
       'checkFits',
+      'compressPaint',
       'convertOptionsOf',
       'encodeGlb',
       'engineOf',
@@ -114,6 +116,7 @@ describe('the library entries', () => {
       'sniffStl',
       'sourceRoles',
       'spaceDabs',
+      'stepsOnSurface',
       'toProblem',
       'toolMask',
       'turnAngleDeg',
@@ -164,6 +167,7 @@ describe('the library entries', () => {
       'readSceneColours',
       'renderThumbnail',
       'transcodeDetail',
+      'transcodePaint',
       'updateLookUniforms',
     ]);
   });
@@ -194,7 +198,7 @@ describe('the library entries', () => {
     ]);
   });
 
-  it('painting.ts exports exactly the painting view and its words (#127, #135, #139)', () => {
+  it('painting.ts exports exactly the painting view and its words (#127, #135, #139, #197)', () => {
     expect(Object.keys(painting).sort()).toEqual([
       'BRUSH_DEPTH_MM',
       'BRUSH_DEPTH_SOFT_MM',
@@ -217,6 +221,7 @@ describe('the library entries', () => {
       'PAINT_COPY',
       'PAINT_DILATION_RINGS',
       'PICK_MODE',
+      'REPLAY_SLICE_MS',
       'UNDO_STEPS',
       'describeGroup',
       'mountPainting',
