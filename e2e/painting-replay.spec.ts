@@ -21,7 +21,7 @@ const REPLAY_OUTLIERS = 0.02;
 const OTHER_TABLE_TRIANGLES = 30_000;
 /**
  * The recorded painting on the other reduction (#197): this share of its points may differ by more
- * than REPLAY_TOLERANCE. 18 of 198 (9 %) on CI: the hobby brushes and the eraser read the surface
+ * than REPLAY_TOLERANCE. 18 of 198 (9 %) on CI: the hobby brushes read the surface
  * from the detail texture, which is baked again for another mesh, and test sight and facing on
  * its triangles; at the dabs' edges they come out otherwise. Not the 2 % of the same mesh: the
  * PM's call on #197. _(proposal)_
