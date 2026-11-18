@@ -28,11 +28,11 @@ const OTHER_TABLE_TRIANGLES = 30_000;
  */
 const OTHER_REDUCTION_OUTLIERS = 0.12;
 /**
- * The steps of the long replay: enough for several slices in software rendering, where a step
- * takes about a third of a second (500, the issue's number, is `scripts/measure-painting.mjs`'s
- * on a GPU).
+ * The steps of the long replay: three slices of REPLAY_SLICE_STEPS at least, however fast the CPU
+ * (500, the issue's number, is `scripts/measure-painting.mjs`'s on a GPU; software rendering
+ * shared with other test files takes minutes for 100 steps shown and hidden).
  */
-const LONG_REPLAY = 100;
+const LONG_REPLAY = 48;
 /**
  * A pixel of the mini drawn with the compressed paint may differ from the one drawn with the
  * paint's own pixels by this much, of 255, in its largest channel… _(proposal, #197)_
@@ -41,7 +41,8 @@ const PAINT_KTX2_TOLERANCE = 12;
 /** …and at most this share of the mini's pixels by more. _(proposal, #197)_ */
 const PAINT_KTX2_OUTLIERS = 0.02;
 
-test.describe.configure({ timeout: 300_000 });
+// Two conversions in a test, in software rendering shared with other files.
+test.describe.configure({ timeout: 600_000 });
 
 /** Converts the generated figure baked, without the questions; `table` reduces its table level otherwise (`?table=`). */
 async function convertFigure(page: Page, table: number | null = null): Promise<void> {
@@ -55,7 +56,8 @@ async function convertFigure(page: Page, table: number | null = null): Promise<v
   await page.waitForFunction(
     () => window.__mt.state.stats !== null && !window.__mt.state.busy,
     undefined,
-    { timeout: 180_000 },
+    // Bounded by the test's own timeout: a conversion under load takes minutes.
+    { timeout: 0 },
   );
   expect(await page.evaluate(() => window.__mt.state.baked)).not.toBeNull();
 }

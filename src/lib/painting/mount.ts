@@ -111,6 +111,12 @@ export const FRAME_BUDGET_MS = 33;
  * before the next slice, so a long paint file neither blocks the page nor holds off `close`. _(proposal)_
  */
 export const REPLAY_SLICE_MS = 50;
+/**
+ * …or this many steps, whichever comes first (#197): the CPU time of a step is only the queueing
+ * of its draws, which on a fast CPU stays under REPLAY_SLICE_MS for a whole paint file, and the
+ * GPU's backlog would then fall on the page at the end. _(proposal)_
+ */
+export const REPLAY_SLICE_STEPS = 16;
 
 /** What the pipette picks (#135): the pixel as shown, light and shading included, or the paint as painted. */
 export type PickMode = 'shown' | 'painted';
@@ -1154,13 +1160,19 @@ class Painting implements PaintingView {
       kept: steps.length,
     };
     let sliceStart = performance.now();
+    let sliceFirst = 0;
     for (let index = 0; index < steps.length; index++) {
       // A slice is over (#197): say how far, let the event loop run until the GPU has drawn what
       // the slice queued, and stop when the open is.
-      if (index > 0 && performance.now() - sliceStart >= REPLAY_SLICE_MS) {
+      if (
+        index > 0 &&
+        (index - sliceFirst >= REPLAY_SLICE_STEPS ||
+          performance.now() - sliceStart >= REPLAY_SLICE_MS)
+      ) {
         onReplay?.(index, steps.length);
         if (!(await this.gpuDone(abandoned))) return false;
         sliceStart = performance.now();
+        sliceFirst = index;
       }
       const step = structuredClone(steps[index]!);
       // Every engine there is replays as this one does (PAINT_ENGINE_VERSION 1): a brush change
@@ -1186,8 +1198,12 @@ class Painting implements PaintingView {
     const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
     try {
+      const started = performance.now();
       do {
-        await nextTask();
+        // A task at a time at first; then a timer, so that polling never keeps a core busy that
+        // a software renderer needs to do the very work waited for.
+        if (performance.now() - started < GPU_POLL_FAST_MS) await nextTask();
+        else await new Promise((resolve) => setTimeout(resolve, GPU_POLL_INTERVAL_MS));
         if (abandoned()) return false;
       } while (sync && gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED);
       return true;
@@ -1766,6 +1782,11 @@ function checkSteps(
  * Resolves in a later task (#197): a message to itself, which a hidden tab does not hold back
  * as it does a timer.
  */
+/** The fence is polled task by task this long, in ms (#197)… */
+const GPU_POLL_FAST_MS = 4;
+/** …then every this many ms. */
+const GPU_POLL_INTERVAL_MS = 2;
+
 function nextTask(): Promise<void> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();

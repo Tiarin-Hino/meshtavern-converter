@@ -39,6 +39,7 @@ export {
   CURSOR_MIN_PX,
   FRAME_BUDGET_MS,
   REPLAY_SLICE_MS,
+  REPLAY_SLICE_STEPS,
 } from './painting/mount';
 export type { PaintSurface } from './painting/passes';
 export { PAINT_COPY, describeGroup, type PaintCopy } from './painting/copy';

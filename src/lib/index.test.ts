@@ -223,6 +223,7 @@ describe('the library entries', () => {
       'PAINT_DILATION_RINGS',
       'PICK_MODE',
       'REPLAY_SLICE_MS',
+      'REPLAY_SLICE_STEPS',
       'UNDO_STEPS',
       'describeGroup',
       'mountPainting',
