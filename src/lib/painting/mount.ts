@@ -1200,9 +1200,15 @@ class Painting implements PaintingView {
     try {
       const started = performance.now();
       do {
-        // A task at a time at first; then a timer, so that polling never keeps a core busy that
-        // a software renderer needs to do the very work waited for.
-        if (performance.now() - started < GPU_POLL_FAST_MS) await nextTask();
+        // A task at a time at first; then, on a page in view, a timer, so that polling never
+        // keeps a core busy that a software renderer needs to do the very work waited for. A
+        // page out of view stays on tasks: it draws no frames, and its timers are held back to
+        // about one a second.
+        if (
+          performance.now() - started < GPU_POLL_FAST_MS ||
+          (typeof document !== 'undefined' && document.visibilityState !== 'visible')
+        )
+          await nextTask();
         else await new Promise((resolve) => setTimeout(resolve, GPU_POLL_INTERVAL_MS));
         if (abandoned()) return false;
       } while (sync && gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED);
