@@ -1523,7 +1523,10 @@ class Painting implements PaintingView {
       }
     } else {
       const picked = step.seed.kind === 'picked';
-      const seed = step.seed.kind === 'picked' ? this.seedOn(opened, step.seed, index) : step.seed;
+      const seed =
+        step.seed.kind === 'picked'
+          ? this.seedOn(opened, step.seed, index, step.groups)
+          : step.seed;
       const group = isGroupTool(step.tool);
       const triangles = floodRegion(opened.mesh, seed, {
         tolerance: step.brush.tolerance,
@@ -1553,14 +1556,16 @@ class Painting implements PaintingView {
   /**
    * A picked seed on this mesh (#197): its triangle where its point lies on it, else the one
    * closest to its point (`seedTriangle`), so a fill painted on another reduction of the mini
-   * starts where it started there. Refused when no surface is within PAINT_REACH_MM.
+   * starts where it started there. The point is where the mini was drawn: a group apart (#180) is
+   * met at its offset. Refused when no surface is within PAINT_REACH_MM.
    */
   private seedOn(
     opened: Opened,
     seed: Extract<FillSeed, { kind: 'picked' }>,
     index: number,
+    record: StepGroups | undefined,
   ): FillSeed {
-    const triangle = seedTriangle(opened.bvh, seed);
+    const triangle = seedTriangle(opened.bvh, seed, { of: opened.groups.of, record });
     if (triangle < 0)
       throw new RangeError(`Step ${index} is not this mini’s: a fill where it has no surface`);
     return triangle === seed.triangle ? seed : { ...seed, triangle };

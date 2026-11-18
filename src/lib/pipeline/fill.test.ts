@@ -319,4 +319,42 @@ describe('seedTriangle (#197)', () => {
     expect(seedTriangle(tree, { triangle: 100, point: lifted })).toBeGreaterThanOrEqual(0);
     expect(seedTriangle(tree, { triangle: 100, point: [0, 500, 0] })).toBe(-1);
   });
+
+  it('meets a group apart at its offset and never seeds on a hidden group (#180, #139)', () => {
+    const count = table.indices.length / 3;
+    // Every other triangle in group 1, pulled 40 mm along x: the point is where it was drawn.
+    const of = new Uint8Array(count);
+    for (let t = 1; t < count; t += 2) of[t] = 1;
+    const offset: [number, number, number] = [40, 0, 0];
+    const apart = { hidden: [], apart: [{ group: 1, offset }] };
+    const drawn = (t: number): [number, number, number] => {
+      const [x, y, z] = centroid(t);
+      return of[t] ? [x + offset[0], y + offset[1], z + offset[2]] : [x, y, z];
+    };
+    const tree = new TriangleBvh(table);
+    for (const t of [1, 2, 997, 1995])
+      expect(seedTriangle(tree, { triangle: t, point: drawn(t) }, { of, record: apart })).toBe(t);
+    // On another numbering the closest surface is looked for at each offset, in its own groups.
+    const indices = new Uint32Array(table.indices.length);
+    const reversedOf = new Uint8Array(count);
+    for (let t = 0; t < count; t++) {
+      indices.set(table.indices.subarray(t * 3, t * 3 + 3), (count - 1 - t) * 3);
+      reversedOf[count - 1 - t] = of[t]!;
+    }
+    const reversed = new TriangleBvh({ ...table, indices });
+    for (const t of [1, 2, 997, 1995]) {
+      const found = seedTriangle(
+        reversed,
+        { triangle: t, point: drawn(t) },
+        { of: reversedOf, record: apart },
+      );
+      expect(found).toBe(count - 1 - t);
+    }
+    // Group 1 hidden: a point on one of its triangles seeds on a shown one, or nothing.
+    const hidden = { hidden: [1], apart: [] };
+    for (const t of [1, 997]) {
+      const found = seedTriangle(tree, { triangle: t, point: centroid(t) }, { of, record: hidden });
+      if (found >= 0) expect(of[found]).toBe(0);
+    }
+  });
 });

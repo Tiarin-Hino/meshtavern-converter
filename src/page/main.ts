@@ -2060,14 +2060,16 @@ async function openPainter(replay: PaintReplay | null = null): Promise<void> {
  */
 async function closePainter(): Promise<void> {
   if (!state.painter) return;
+  // Done during a paint file's replay (#197) takes the paint at its end, not half of it, before
+  // the done panel's Paint and downloads are back.
+  await painterOpening;
+  if (!state.painter) return;
   paintTool.show(false);
   state.painter = false;
   painterProblem = null;
   if (state.stats) setStatus(describeReady(state.stats));
   render();
   paintOpen.focus();
-  // Done during a paint file's replay (#197) takes the paint at its end, not half of it.
-  await painterOpening;
   if (!paintTool.isOpen()) return;
   showPaint(await paintTool.view().paint());
 }

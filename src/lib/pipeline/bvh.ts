@@ -179,6 +179,7 @@ export class TriangleBvh {
    * at the closest point must have a dot product of at least `minAgreement` with (nx, ny, nz).
    * That keeps the inside of a cloak from answering for its outside. `hint` is a triangle
    * worth trying first (the previous query's answer); a good first guess prunes most of the tree.
+   * `accept` leaves out the triangles it says no to (#197: a hidden group, another offset).
    */
   closest(
     out: SurfaceHit,
@@ -188,11 +189,12 @@ export class TriangleBvh {
     maxDistanceSquared: number,
     facing: { nx: number; ny: number; nz: number; minAgreement: number } | null = null,
     hint = -1,
+    accept?: (triangle: number) => boolean,
   ): SurfaceHit {
     out.triangle = -1;
     out.distanceSquared = maxDistanceSquared;
     if (this.nodes === 0) return out;
-    if (hint >= 0) this.tryTriangle(out, hint, x, y, z, facing);
+    if (hint >= 0 && (!accept || accept(hint))) this.tryTriangle(out, hint, x, y, z, facing);
 
     let top = 0;
     this.stack[top++] = 0;
@@ -203,7 +205,9 @@ export class TriangleBvh {
       if (left < 0) {
         const end = this.first[node]! + this.count[node]!;
         for (let i = this.first[node]!; i < end; i++) {
-          this.tryTriangle(out, this.order[i]!, x, y, z, facing);
+          const triangle = this.order[i]!;
+          if (accept && !accept(triangle)) continue;
+          this.tryTriangle(out, triangle, x, y, z, facing);
         }
         continue;
       }

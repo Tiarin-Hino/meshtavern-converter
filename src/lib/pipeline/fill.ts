@@ -1,4 +1,4 @@
-import type { FillSeed, PaintRegions } from './brush';
+import type { FillSeed, PaintRegions, StepGroups } from './brush';
 import type { TriangleBvh } from './bvh';
 import type { IndexedMesh } from './mesh';
 import { PAINT_REACH_MM } from './paint';
@@ -28,23 +28,41 @@ export const SEED_ON_TRIANGLE_MM = 0.05;
  * The triangle a picked fill starts from on `mesh` (#197): its own `triangle` when `point` lies on
  * it within SEED_ON_TRIANGLE_MM (always, on the mesh it was picked on), else the triangle whose
  * surface is closest to `point` (another reduction of the same mini numbers its triangles
- * otherwise), and -1 when no surface is within PAINT_REACH_MM.
+ * otherwise), and -1 when no surface is within PAINT_REACH_MM. With `groups` (the mesh's group of
+ * each triangle and the step's record, #139, #180) the point is where the mini was drawn: a group
+ * apart is met with its offset taken off, and a hidden group is never the seed.
  */
 export function seedTriangle(
   tree: TriangleBvh,
   seed: { triangle: number; point: readonly [number, number, number] },
+  groups?: { of: Uint8Array; record?: StepGroups },
 ): number {
   const [x, y, z] = seed.point;
-  if (tree.distanceSquaredTo(seed.triangle, x, y, z) <= SEED_ON_TRIANGLE_MM ** 2)
-    return seed.triangle;
-  const hit = tree.closest(
-    { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 },
-    x,
-    y,
-    z,
-    PAINT_REACH_MM ** 2,
-  );
-  return hit.triangle;
+  const hidden = new Set(groups?.record?.hidden);
+  const offsets = new Map((groups?.record?.apart ?? []).map((a) => [a.group, a.offset]));
+  const shown = (t: number): boolean => !groups || !hidden.has(groups.of[t]!);
+  const own = seed.triangle;
+  // A triangle the mesh does not have is Infinity away (`distanceSquaredTo`).
+  if (shown(own)) {
+    const [dx, dy, dz] = (groups && offsets.get(groups.of[own]!)) ?? [0, 0, 0];
+    if (tree.distanceSquaredTo(own, x - dx, y - dy, z - dz) <= SEED_ON_TRIANGLE_MM ** 2) return own;
+  }
+  // Once per offset the step drew groups at, among the shown triangles drawn at it; nearest wins.
+  const classes = new Map<string, readonly number[]>([['0,0,0', [0, 0, 0]]]);
+  for (const offset of offsets.values()) classes.set(offset.join(','), offset);
+  const hit = { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 };
+  let best = -1;
+  let reach = PAINT_REACH_MM ** 2;
+  for (const [key, [dx, dy, dz]] of classes) {
+    const accept = (t: number): boolean =>
+      shown(t) && (!groups || (offsets.get(groups.of[t]!)?.join(',') ?? '0,0,0') === key);
+    tree.closest(hit, x - dx!, y - dy!, z - dz!, reach, null, -1, accept);
+    if (hit.triangle >= 0) {
+      best = hit.triangle;
+      reach = hit.distanceSquared;
+    }
+  }
+  return best;
 }
 
 /**
