@@ -296,12 +296,21 @@ try {
         const steps = Array.from({ length: count }, (_, k) => plain[k % plain.length]);
         painting.close();
         const reports = [];
+        // The page's long tasks during the replay: how long the page was not free at a stretch.
+        const tasks = [];
+        const observer = new window.PerformanceObserver((list) =>
+          tasks.push(...list.getEntries().map((entry) => entry.duration)),
+        );
+        observer.observe({ type: 'longtask' });
         const start = performance.now();
         await painting.open(null, null, null, {
           steps,
           onReplay: (done) => reports.push([done, performance.now()]),
         });
         const openMs = performance.now() - start;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        observer.disconnect();
+        const longestTask = Math.max(0, ...tasks);
         let longest = 0;
         let last = start;
         for (const [, at] of reports) {
@@ -309,10 +318,18 @@ try {
           last = at;
         }
         const ktx2 = await painting.compressedPaint(64);
-        return { steps: steps.length, openMs, slices: reports.length, longest, ktx2 };
+        return {
+          steps: steps.length,
+          openMs,
+          slices: reports.length,
+          longest,
+          longestTask,
+          longTasks: tasks.length,
+          ktx2,
+        };
       }, LONG_REPLAY);
       console.log(
-        `long replay: ${long.steps} steps at open in ${long.openMs.toFixed(0)} ms, ${long.slices} reports, the longest ${long.longest.toFixed(0)} ms apart · the paint as a KTX2: encoded in ${long.ktx2.encodeMs.toFixed(0)} ms, ${(long.ktx2.ktx2Bytes / 1024).toFixed(0)} KiB`,
+        `long replay: ${long.steps} steps at open in ${long.openMs.toFixed(0)} ms, ${long.slices} reports, the longest ${long.longest.toFixed(0)} ms apart, ${long.longTasks} long tasks, the longest ${long.longestTask.toFixed(0)} ms · the paint as a KTX2: encoded in ${long.ktx2.encodeMs.toFixed(0)} ms, ${(long.ktx2.ktx2Bytes / 1024).toFixed(0)} KiB`,
       );
     } finally {
       await context.close();

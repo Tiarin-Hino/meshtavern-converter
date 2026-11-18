@@ -1154,11 +1154,11 @@ class Painting implements PaintingView {
     };
     let sliceStart = performance.now();
     for (let index = 0; index < steps.length; index++) {
-      // A slice is over (#197): say how far, let the event loop run, and stop when the open is.
+      // A slice is over (#197): say how far, let the event loop run until the GPU has drawn what
+      // the slice queued, and stop when the open is.
       if (index > 0 && performance.now() - sliceStart >= REPLAY_SLICE_MS) {
         onReplay?.(index, steps.length);
-        await nextTask();
-        if (abandoned()) return false;
+        if (!(await this.gpuDone(abandoned))) return false;
         sliceStart = performance.now();
       }
       const step = structuredClone(steps[index]!);
@@ -1173,6 +1173,27 @@ class Painting implements PaintingView {
     }
     if (steps.length > 0) onReplay?.(steps.length, steps.length);
     return true;
+  }
+
+  /**
+   * Yields until the GPU has done the work queued so far (#197), a task at a time, so a slice of
+   * the replay leaves the page free while its draws run: timed on the CPU, a slice only queues
+   * them, and the next would stall on them. False when the open was abandoned meanwhile.
+   */
+  private async gpuDone(abandoned: () => boolean): Promise<boolean> {
+    const gl = this.scene.renderer.getContext() as WebGL2RenderingContext;
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    try {
+      do {
+        await nextTask();
+        if (abandoned()) return false;
+      } while (sync && gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED);
+      return true;
+    } finally {
+      // Disposed meanwhile: the context is gone, and the fence with it.
+      if (sync && !gl.isContextLost()) gl.deleteSync(sync);
+    }
   }
 
   async stroke(points: Vec3[], pressure?: number[]): Promise<void> {
