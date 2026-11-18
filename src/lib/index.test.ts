@@ -116,6 +116,7 @@ describe('the library entries', () => {
       'sniffStl',
       'sourceRoles',
       'spaceDabs',
+      'spreadPaintColour',
       'stepsOnSurface',
       'toProblem',
       'toolMask',

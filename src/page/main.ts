@@ -6,6 +6,7 @@ import '../lib/painting.css';
 import '../lib/painting-panel.css';
 import {
   compressPaint,
+  spreadPaintColour,
   encodeGlb,
   glbEncoderReady,
   DEFAULT_LOOK,
@@ -71,7 +72,13 @@ import {
   type PaintFile,
   type SourceFingerprint,
 } from '../lib';
-import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
+import {
+  DataTexture,
+  LinearFilter,
+  LinearMipmapLinearFilter,
+  SRGBColorSpace,
+  type Texture,
+} from 'three';
 import {
   createDetailTexture,
   renderThumbnail,
@@ -1581,8 +1588,12 @@ async function thumbnail(size?: number, paint?: TestPaint): Promise<ArrayBuffer>
 interface CompressedPaintCheck {
   /** Pixels of the mini in either picture. */
   pixels: number;
-  /** `histogram[d]`: pixels whose largest channel differs by d. */
+  /** `histogram[d]`: pixels whose largest channel differs by d, against the paint's own pixels as the viewer draws them (no mipmaps). */
   histogram: number[];
+  /** The same against the paint's own pixels with mipmaps the GPU made, as a texture drawn small would have. */
+  mipmapped: number[];
+  /** The same against the paint spread (`spreadPaintColour`) with mipmaps, uncompressed: what compressing alone changes. */
+  spread: number[];
   encodeMs: number;
   ktx2Bytes: number;
 }
@@ -1605,6 +1616,16 @@ async function compressedPaintCheck(size: number): Promise<CompressedPaintCheck>
   own.generateMipmaps = false;
   own.minFilter = LinearFilter;
   own.needsUpdate = true;
+  const ownMipmapped = new DataTexture(albedo.data, albedo.width, albedo.height);
+  ownMipmapped.colorSpace = SRGBColorSpace;
+  ownMipmapped.generateMipmaps = true;
+  ownMipmapped.minFilter = LinearMipmapLinearFilter;
+  ownMipmapped.needsUpdate = true;
+  const spreadMipmapped = new DataTexture(spreadPaintColour(albedo), albedo.width, albedo.height);
+  spreadMipmapped.colorSpace = SRGBColorSpace;
+  spreadMipmapped.generateMipmaps = true;
+  spreadMipmapped.minFilter = LinearMipmapLinearFilter;
+  spreadMipmapped.needsUpdate = true;
   const made =
     baked.texture instanceof Uint8Array
       ? createDetailTexture(baked.texture, baked.resolution)
@@ -1625,20 +1646,27 @@ async function compressedPaintCheck(size: number): Promise<CompressedPaintCheck>
     return context.getImageData(0, 0, bitmap.width, bitmap.height).data;
   };
   try {
-    const a = await pixelsOf(own);
     const b = await pixelsOf(compressed);
-    const histogram = new Array<number>(256).fill(0);
-    let pixels = 0;
-    for (let k = 0; k < a.length; k += 4) {
-      if (a[k + 3] === 0 && b[k + 3] === 0) continue;
-      pixels++;
-      let off = 0;
-      for (let c = 0; c < 4; c++) off = Math.max(off, Math.abs(a[k + c]! - b[k + c]!));
-      histogram[off]!++;
-    }
-    return { pixels, histogram, encodeMs, ktx2Bytes: ktx2.byteLength };
+    const against = (a: Uint8ClampedArray): { pixels: number; histogram: number[] } => {
+      const histogram = new Array<number>(256).fill(0);
+      let pixels = 0;
+      for (let k = 0; k < a.length; k += 4) {
+        if (a[k + 3] === 0 && b[k + 3] === 0) continue;
+        pixels++;
+        let off = 0;
+        for (let c = 0; c < 4; c++) off = Math.max(off, Math.abs(a[k + c]! - b[k + c]!));
+        histogram[off]!++;
+      }
+      return { pixels, histogram };
+    };
+    const { pixels, histogram } = against(await pixelsOf(own));
+    const mipmapped = against(await pixelsOf(ownMipmapped)).histogram;
+    const spread = against(await pixelsOf(spreadMipmapped)).histogram;
+    return { pixels, histogram, mipmapped, spread, encodeMs, ktx2Bytes: ktx2.byteLength };
   } finally {
     own.dispose();
+    ownMipmapped.dispose();
+    spreadMipmapped.dispose();
     compressed.dispose();
     made?.dispose();
   }

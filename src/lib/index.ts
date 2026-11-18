@@ -246,6 +246,11 @@ export {
 } from './pipeline/groups';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
-export { compressPaint, readKtx2Header, type Ktx2Header } from './pipeline/compress';
+export {
+  compressPaint,
+  spreadPaintColour,
+  readKtx2Header,
+  type Ktx2Header,
+} from './pipeline/compress';
 // Export.
 export { encodeGlb, glbEncoderReady, type GlbOptions } from './pipeline/glb';
