@@ -167,8 +167,9 @@ test('refuses steps that are not the mini’s at open, and opens nothing', async
       brush: { sizeMm: 2, hardness: 0.8, opacity: 1, tolerance: 0.5, direction: null },
       seed: {
         kind: 'picked' as const,
+        // A triangle it does not have, at a point far from its surface (#197: the point decides).
         triangle: triangles,
-        point: [0, 0, 0] as [number, number, number],
+        point: [0, 500, 0] as [number, number, number],
       },
     };
     try {

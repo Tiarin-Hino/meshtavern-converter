@@ -31,6 +31,7 @@ import { TriangleBvh, type SurfaceHit } from '../pipeline/bvh';
 import { engineOf, PAINT_ENGINE_VERSION, type EngineRun } from '../pipeline/paint-file';
 import {
   fillRegion as floodRegion,
+  seedTriangle,
   triangleAdjacency,
   type TriangleAdjacency,
 } from '../pipeline/fill';
@@ -105,6 +106,11 @@ export const CURSOR_MIN_PX = 4;
 const LIFT_REACH_MM = 0.01;
 /** A frame longer than this, in ms, is counted as slow: 30 frames a second. _(proposal)_ */
 export const FRAME_BUDGET_MS = 33;
+/**
+ * The replay at `open` (#197) applies steps for this long, in ms, then yields to the event loop
+ * before the next slice, so a long paint file neither blocks the page nor holds off `close`. _(proposal)_
+ */
+export const REPLAY_SLICE_MS = 50;
 
 /** What the pipette picks (#135): the pixel as shown, light and shading included, or the paint as painted. */
 export type PickMode = 'shown' | 'painted';
@@ -147,6 +153,12 @@ export interface MiniToPaint {
   steps?: PaintStep[] | null;
   /** The engine each of `steps` was painted on (a paint file's `engines`); left out: this one's. */
   engines?: EngineRun[] | null;
+  /**
+   * Hears the replay of `steps` (#197): steps applied and all there are, after every slice of
+   * REPLAY_SLICE_MS and once at the end (`done === total`). Not called without steps, nor after
+   * `close`, `dispose` or a later `open` ended the replay.
+   */
+  onReplay?: (done: number, total: number) => void;
 }
 
 export interface PaintPerf {
@@ -217,7 +229,14 @@ export interface PaintingView {
    * subscribing: a panel beside the consumer's own listener. The function returned unsubscribes.
    */
   subscribe(listener: (state: PaintingState) => void): () => void;
-  /** Opens one open after another; resolves without opening when `close`, `dispose` or a later `open` came first. */
+  /**
+   * Opens one open after another; resolves without opening when `close`, `dispose` or a later
+   * `open` came first. Steps are replayed in slices of REPLAY_SLICE_MS (#197): `close`, `dispose`
+   * or a later `open` during the replay end it at the next slice, and what was made is released.
+   * Until it resolves the view is not open: strokes, fills, undo and the pointer do nothing. A
+   * hidden view (`setShown(false)`) opens and replays as a shown one does: the way to replay a
+   * paint file without showing anything.
+   */
   open(mini: MiniToPaint): Promise<void>;
   close(): void;
   setTool(tool: ToolId): void;
@@ -444,6 +463,8 @@ class Painting implements PaintingView {
   private generation = 0;
   /** The opens in order, so that two never share the passes. */
   private queue: Promise<void> = Promise.resolve();
+  /** The steps of `open` are being replayed (#197): the view is not open yet. */
+  private replaying = false;
 
   constructor(options: PaintingOptions) {
     const host = options.scene;
@@ -471,7 +492,7 @@ class Painting implements PaintingView {
 
   private snapshot(): PaintingState {
     return {
-      open: this.opened !== null,
+      open: this.opened !== null && !this.replaying,
       tool: this.tool,
       brush: { ...this.brush },
       colour: this.colour,
@@ -579,7 +600,7 @@ class Painting implements PaintingView {
     if (regions && regions.base.length !== mesh.indices.length / 3)
       throw new RangeError('The regions are not this mesh’s: one byte per triangle');
     if (groups) checkGroups(groups, mesh.indices.length / 3);
-    if (mini.steps) checkSteps(mini.steps, mini.engines ?? null, mesh.indices.length / 3, regions);
+    if (mini.steps) checkSteps(mini.steps, mini.engines ?? null, regions);
     const texture = ownTexture(mini.texture);
     if (!texture) throw new RangeError(this.copy.cannotPaint);
     const generation = ++this.generation;
@@ -669,12 +690,27 @@ class Painting implements PaintingView {
     });
     this.perf = NO_PERF;
     this.lift = null;
+    let finished: boolean;
+    this.replaying = true;
     try {
-      this.replaySteps(mini.steps ?? [], mini.engines ?? null);
+      finished = await this.replaySteps(
+        mini.steps ?? [],
+        mini.engines ?? null,
+        abandoned,
+        mini.onReplay ?? null,
+      );
     } catch (error) {
       this.release();
       texture.dispose();
       throw error;
+    } finally {
+      this.replaying = false;
+    }
+    // Closed, disposed or opened again during the replay (#197): `close` may have released it already.
+    if (!finished) {
+      this.release();
+      texture.dispose();
+      return;
     }
     this.scene.show(shown, {
       min: [box.min.x, box.min.y, box.min.z],
@@ -1012,7 +1048,7 @@ class Painting implements PaintingView {
   /** A fill (§7), of the paint or of the mask (#138): one step, its region found from its seed, applied as a replay would. */
   private async fill(seed: FillSeed, tool: FillToolId): Promise<void> {
     this.commitLive();
-    if (!this.opened || !this.timeline) return;
+    if (!this.opened || !this.timeline || this.replaying) return;
     const groups = this.stepGroups();
     const step: PaintFill = {
       kind: 'fill',
@@ -1031,7 +1067,7 @@ class Painting implements PaintingView {
   /** The mask cleared or inverted (#138): one step. */
   private async changeMask(change: MaskChange['change']): Promise<void> {
     this.commitLive();
-    if (!this.opened || !this.timeline) return;
+    if (!this.opened || !this.timeline || this.replaying) return;
     await this.apply({ kind: 'mask', change });
   }
 
@@ -1045,7 +1081,7 @@ class Painting implements PaintingView {
 
   async undo(): Promise<void> {
     this.commitLive();
-    if (this.timeline?.undo() == null) return;
+    if (this.replaying || this.timeline?.undo() == null) return;
     this.forgetGoneGroups();
     this.emit();
     await this.scene.nextFrame();
@@ -1053,7 +1089,7 @@ class Painting implements PaintingView {
 
   async redo(): Promise<void> {
     this.commitLive();
-    if (!this.timeline?.redo()) return;
+    if (this.replaying || !this.timeline?.redo()) return;
     this.emit();
     await this.scene.nextFrame();
   }
@@ -1103,7 +1139,12 @@ class Painting implements PaintingView {
    * lift from a keyframe pinned before it) and pushed, so the view opens at the end of them with
    * undo back through all of them. Checked by `checkSteps` before anything was opened.
    */
-  private replaySteps(steps: readonly PaintStep[], engines: EngineRun[] | null): void {
+  private async replaySteps(
+    steps: readonly PaintStep[],
+    engines: EngineRun[] | null,
+    abandoned: () => boolean,
+    onReplay: ((done: number, total: number) => void) | null,
+  ): Promise<boolean> {
     const timeline = this.timeline!;
     this.replayed = {
       engines: engines?.map((run) => ({ ...run })) ?? [
@@ -1111,8 +1152,16 @@ class Painting implements PaintingView {
       ],
       kept: steps.length,
     };
-    steps.forEach((given, index) => {
-      const step = structuredClone(given);
+    let sliceStart = performance.now();
+    for (let index = 0; index < steps.length; index++) {
+      // A slice is over (#197): say how far, let the event loop run, and stop when the open is.
+      if (index > 0 && performance.now() - sliceStart >= REPLAY_SLICE_MS) {
+        onReplay?.(index, steps.length);
+        await nextTask();
+        if (abandoned()) return false;
+        sliceStart = performance.now();
+      }
+      const step = structuredClone(steps[index]!);
       // Every engine there is replays as this one does (PAINT_ENGINE_VERSION 1): a brush change
       // that alters old paintings branches on `engineOf(this.replayed.engines, index)` in `replay`.
       if (engineOf(this.replayed.engines, index) > PAINT_ENGINE_VERSION)
@@ -1121,7 +1170,9 @@ class Painting implements PaintingView {
         throw new RangeError(`Step ${index} lifts a step undo no longer reaches`);
       this.replay(step, index);
       timeline.push(step);
-    });
+    }
+    if (steps.length > 0) onReplay?.(steps.length, steps.length);
+    return true;
   }
 
   async stroke(points: Vec3[], pressure?: number[]): Promise<void> {
@@ -1291,7 +1342,7 @@ class Painting implements PaintingView {
    * orbit).
    */
   private beginLive(first: NonNullable<Sample>, touch = false): void {
-    if (!this.opened) return;
+    if (!this.opened || this.replaying) return;
     const tool = this.tool;
     if (isFillTool(tool)) throw new RangeError('A fill tool fills; it does not stroke');
     // A lift finds its step before anything is drawn: making its keyframe may replay steps. It
@@ -1449,8 +1500,8 @@ class Painting implements PaintingView {
         return;
       }
     } else {
-      const { seed } = step;
-      const picked = seed.kind === 'picked';
+      const picked = step.seed.kind === 'picked';
+      const seed = step.seed.kind === 'picked' ? this.seedOn(opened, step.seed, index) : step.seed;
       const group = isGroupTool(step.tool);
       const triangles = floodRegion(opened.mesh, seed, {
         tolerance: step.brush.tolerance,
@@ -1462,7 +1513,9 @@ class Painting implements PaintingView {
         // The groups apart when the fill was made (#180): a flood never crosses between offsets.
         apart: picked ? apartClasses(opened.groups.of, step.groups) : null,
         // The group fill (#139): all that is connected within the group it starts in.
-        ...(group && picked ? { folds: false, within: opened.groups.of[seed.triangle] } : {}),
+        ...(group && seed.kind === 'picked'
+          ? { folds: false, within: opened.groups.of[seed.triangle] }
+          : {}),
       });
       if (group) {
         this.moveInto(triangles, step.into!, true);
@@ -1473,6 +1526,22 @@ class Painting implements PaintingView {
     }
     this.passes.composite(step.tool, parseHexColour(step.colour), step.brush);
     this.passes.commit(index, step.tool);
+  }
+
+  /**
+   * A picked seed on this mesh (#197): its triangle where its point lies on it, else the one
+   * closest to its point (`seedTriangle`), so a fill painted on another reduction of the mini
+   * starts where it started there. Refused when no surface is within PAINT_REACH_MM.
+   */
+  private seedOn(
+    opened: Opened,
+    seed: Extract<FillSeed, { kind: 'picked' }>,
+    index: number,
+  ): FillSeed {
+    const triangle = seedTriangle(opened.bvh, seed);
+    if (triangle < 0)
+      throw new RangeError(`Step ${index} is not this mini’s: a fill where it has no surface`);
+    return triangle === seed.triangle ? seed : { ...seed, triangle };
   }
 
   /** The stroke on the canvas is dropped (a second finger arrived, the pointer was cancelled): no step. */
@@ -1528,7 +1597,7 @@ class Painting implements PaintingView {
           if (this.strokePointer !== null) this.cancelLive();
           return;
         }
-        if (!this.opened || this.scene.isNavigating || event.button !== 0) return;
+        if (!this.opened || this.replaying || this.scene.isNavigating || event.button !== 0) return;
         const hit = this.hitAt(...at(event));
         if (!hit) return;
         if (isFillTool(this.tool)) {
@@ -1631,15 +1700,14 @@ function checkGroups(groups: PaintGroups, triangles: number): void {
 }
 
 /**
- * Refuses steps that cannot be this mesh's (#165), before anything is opened: a fill of a
- * triangle it does not have, of a ready region it has none of, a group past the last there may
+ * Refuses steps that cannot be this mesh's (#165), before anything is opened: a fill of a ready
+ * region it has none of, a group past the last there may
  * be, a lift of a step that is not before it, and engine runs that do not cover the steps or name
  * a newer engine. The shape of each step is `readPaintFile`'s to check.
  */
 function checkSteps(
   steps: readonly PaintStep[],
   engines: readonly EngineRun[] | null,
-  triangles: number,
   regions: PaintRegions | null | undefined,
 ): void {
   if (engines) {
@@ -1660,10 +1728,25 @@ function checkSteps(
       if (step.lifts !== undefined && step.lifts >= index) wrong('a lift of a later step');
       return;
     }
+    // A picked seed's triangle is the replay's to resolve from its point (#197, `seedTriangle`).
     const { seed } = step;
-    if (seed.kind === 'picked' && seed.triangle >= triangles) wrong('a triangle it does not have');
     if ((seed.kind === 'base' || seed.kind === 'figure') && !regions) wrong('no ready regions');
     if (seed.kind === 'group' && seed.group >= MAX_GROUPS) wrong('a group');
+  });
+}
+
+/**
+ * Resolves in a later task (#197): a message to itself, which a hidden tab does not hold back
+ * as it does a timer.
+ */
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
   });
 }
 

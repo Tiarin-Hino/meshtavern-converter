@@ -1,7 +1,14 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { generateFigure } from '../../regression/shapes';
 import type { FillSeed } from './brush';
-import { fillRegion, triangleAdjacency, type TriangleAdjacency } from './fill';
+import { TriangleBvh } from './bvh';
+import {
+  fillRegion,
+  SEED_ON_TRIANGLE_MM,
+  seedTriangle,
+  triangleAdjacency,
+  type TriangleAdjacency,
+} from './fill';
 import type { IndexedMesh } from './mesh';
 import { runPipeline } from './run';
 import { encodeBinaryStl } from './stl';
@@ -269,5 +276,47 @@ describe('fillRegion', () => {
     expect(onBase.length + onFigure.length).toBe(base.length);
     for (const t of onBase) expect(base[t]).toBe(1);
     expect(() => fillRegion(table, { kind: 'base' }, { tolerance: 0 })).toThrow(RangeError);
+  });
+});
+
+describe('seedTriangle (#197)', () => {
+  it('keeps a picked seed’s own triangle on the mesh it was picked on, even on an edge it shares', () => {
+    const tree = new TriangleBvh(table);
+    for (let t = 0; t < table.indices.length / 3; t += 997)
+      expect(seedTriangle(tree, { triangle: t, point: centroid(t) })).toBe(t);
+    // A corner of triangle 0 is on its neighbours too: the recorded triangle still wins.
+    const corner = table.indices[0]!;
+    const point = [0, 1, 2].map((axis) => table.positions[corner * 3 + axis]!) as [
+      number,
+      number,
+      number,
+    ];
+    expect(seedTriangle(tree, { triangle: 0, point })).toBe(0);
+  });
+
+  it('finds the triangle under the point when the triangles are numbered otherwise', () => {
+    // The same surface, its triangles in the opposite order.
+    const count = table.indices.length / 3;
+    const indices = new Uint32Array(table.indices.length);
+    for (let t = 0; t < count; t++)
+      indices.set(table.indices.subarray(t * 3, t * 3 + 3), (count - 1 - t) * 3);
+    const tree = new TriangleBvh({ ...table, indices });
+    for (let t = 0; t < count; t += 997) {
+      const found = seedTriangle(tree, { triangle: t, point: centroid(t) });
+      expect(found).toBe(count - 1 - t);
+    }
+    // A triangle past the mesh's count is no refusal: the point decides.
+    expect(seedTriangle(tree, { triangle: count + 5, point: centroid(7) })).toBe(count - 1 - 7);
+  });
+
+  it('takes the closest surface off the triangle, and nothing farther than PAINT_REACH_MM', () => {
+    const tree = new TriangleBvh(table);
+    const [x, y, z] = centroid(100);
+    const n = [0, 1, 2].map((axis) => adjacency.faceNormals[100 * 3 + axis]!);
+    // Lifted off its triangle by more than SEED_ON_TRIANGLE_MM but well within reach.
+    const lifted: [number, number, number] = [x + n[0]! * 0.2, y + n[1]! * 0.2, z + n[2]! * 0.2];
+    expect(0.2).toBeGreaterThan(SEED_ON_TRIANGLE_MM);
+    expect(seedTriangle(tree, { triangle: 100, point: lifted })).toBeGreaterThanOrEqual(0);
+    expect(seedTriangle(tree, { triangle: 100, point: [0, 500, 0] })).toBe(-1);
   });
 });

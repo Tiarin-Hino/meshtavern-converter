@@ -1,5 +1,7 @@
 import type { FillSeed, PaintRegions } from './brush';
+import type { TriangleBvh } from './bvh';
 import type { IndexedMesh } from './mesh';
+import { PAINT_REACH_MM } from './paint';
 
 /**
  * The fill (issue #127, design note `docs/design/painting-engine.md` §7.1): a connected region of
@@ -16,6 +18,34 @@ export const FILL_ANGLE_DEG = 40;
  * (a 20° fold measures about 0.17 raw). _(proposal)_
  */
 export const FILL_CREASE_CAVITY = -0.1;
+/**
+ * A picked fill replayed (#197) starts from its recorded triangle when its recorded point lies
+ * on it within this, in mm; else from the triangle closest to the point. _(proposal)_
+ */
+export const SEED_ON_TRIANGLE_MM = 0.05;
+
+/**
+ * The triangle a picked fill starts from on `mesh` (#197): its own `triangle` when `point` lies on
+ * it within SEED_ON_TRIANGLE_MM (always, on the mesh it was picked on), else the triangle whose
+ * surface is closest to `point` (another reduction of the same mini numbers its triangles
+ * otherwise), and -1 when no surface is within PAINT_REACH_MM.
+ */
+export function seedTriangle(
+  tree: TriangleBvh,
+  seed: { triangle: number; point: readonly [number, number, number] },
+): number {
+  const [x, y, z] = seed.point;
+  if (tree.distanceSquaredTo(seed.triangle, x, y, z) <= SEED_ON_TRIANGLE_MM ** 2)
+    return seed.triangle;
+  const hit = tree.closest(
+    { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 },
+    x,
+    y,
+    z,
+    PAINT_REACH_MM ** 2,
+  );
+  return hit.triangle;
+}
 
 /**
  * Which triangles share an edge with which, across the unwrap's seams: the table level's
