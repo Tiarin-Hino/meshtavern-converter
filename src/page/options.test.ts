@@ -9,6 +9,7 @@ describe('parsePageOptions', () => {
       ktx: DETAIL_EFFORT,
       dev: false,
       ask: true,
+      table: null,
       problems: [],
     });
   });
@@ -56,5 +57,14 @@ describe('parsePageOptions', () => {
     expect(parsePageOptions('?dev=1')).toMatchObject({ dev: true, problems: [] });
     expect(parsePageOptions('?dev&bake=off')).toMatchObject({ dev: true, bake: 0, problems: [] });
     expect(parsePageOptions('?bake=off').dev).toBe(false);
+  });
+
+  it('reduces the table level to a whole number of triangles with table= (#197), and reports anything else', () => {
+    expect(parsePageOptions('?table=9000')).toMatchObject({ table: 9000, problems: [] });
+    expect(parsePageOptions('?table=lots')).toMatchObject({
+      table: null,
+      problems: ['table=lots ignored: use a whole number of triangles'],
+    });
+    expect(parsePageOptions('?table=0').table).toBeNull();
   });
 });

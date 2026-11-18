@@ -256,3 +256,12 @@ Each step ends with `npm run check` green; the baseline test in it is the no-beh
 - Look presets (#45) go into `index.ts` when they exist.
 - Splitting `main.ts` (980 lines) into smaller page modules: not this story; the page changes only its imports and the drop handler's read.
 - How the table stores or shares what it gets back: the table's own design (private repo).
+
+## 11. Added for a consumer without a painter (#197)
+
+What the table needs to replay a paint file without a person at the view, added to the entries without a new one (design note `painting-engine.md` §17, "A consumer without a painter"):
+
+- `index.ts`: `compressPaint(albedo, effort?)`, the paint as a KTX2 (UASTC, Zstandard, sRGB, straight alpha, full mips), and `spreadPaintColour(albedo)`, the colour spread into the bare texels it does first; `stepsOnSurface(steps, mesh, reachMm?)`, how many of the steps' points lie on a mesh; `SEED_ON_TRIANGLE_MM`.
+- `three.ts`: `transcodePaint(ktx2, renderer, transcoderPath?)`, beside `transcodeDetail`, for the material's `map` (sRGB, where the detail texture is data).
+- `painting.ts`: `MiniToPaint.onReplay`, `REPLAY_SLICE_MS`, `REPLAY_SLICE_STEPS`. A hidden, mounted view on an element with a size is the supported way to replay without showing anything; there is no entry without a view.
+- `dev`: `PipelineOptions.tableTriangles` (and `ConvertOptions.tableTriangles`, the page's `?table=`), another reduction of the same mini, for the tests of a painting replayed on it.

@@ -5,6 +5,8 @@ import '../lib/questions.css';
 import '../lib/painting.css';
 import '../lib/painting-panel.css';
 import {
+  compressPaint,
+  spreadPaintColour,
   encodeGlb,
   glbEncoderReady,
   DEFAULT_LOOK,
@@ -70,8 +72,19 @@ import {
   type PaintFile,
   type SourceFingerprint,
 } from '../lib';
-import { DataTexture, LinearFilter, SRGBColorSpace, type Texture } from 'three';
-import { createDetailTexture, renderThumbnail, transcodeDetail } from '../lib/three';
+import {
+  DataTexture,
+  LinearFilter,
+  LinearMipmapLinearFilter,
+  SRGBColorSpace,
+  type Texture,
+} from 'three';
+import {
+  createDetailTexture,
+  renderThumbnail,
+  transcodeDetail,
+  transcodePaint,
+} from '../lib/three';
 import { generateBumpySheet, encodeBinaryStl, paintWhere } from '../lib/dev';
 import { runBenchmark, type BenchmarkSize } from './benchmark';
 import {
@@ -283,6 +296,13 @@ declare global {
         ) => Promise<void>;
         /** The test paint `open` takes, as pixels: what a test compares the view's paint with. */
         testPaint: (paint: TestPaint) => Albedo;
+        /**
+         * The open view's paint compressed (#197, `compressPaint`) and drawn as the thumbnail
+         * draws it at `size`, beside the same drawn with the paint's own pixels: how many pixels
+         * of the mini differ by how much (the largest channel's difference, 0 … 255), the encode
+         * time and the file's size.
+         */
+        compressedPaint: (size: number) => Promise<CompressedPaintCheck>;
       };
       /** Paint (#167): enters the painting state, opening the view on the mini unless it is open. */
       openPainter: () => Promise<void>;
@@ -1360,6 +1380,7 @@ async function convert(
         preset: choices.preset,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
+        ...(pageOptions.table !== null && { tableTriangles: pageOptions.table }),
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
         memoryBudgetBytes: memoryBudget,
         ...(asks && { ask }),
@@ -1563,6 +1584,94 @@ async function thumbnail(size?: number, paint?: TestPaint): Promise<ArrayBuffer>
   }
 }
 
+/** What `painting.compressedPaint` measured (#197). */
+interface CompressedPaintCheck {
+  /** Pixels of the mini in either picture. */
+  pixels: number;
+  /** `histogram[d]`: pixels whose largest channel differs by d, against the paint's own pixels as the viewer draws them (no mipmaps). */
+  histogram: number[];
+  /** The same against the paint's own pixels with mipmaps the GPU made, as a texture drawn small would have. */
+  mipmapped: number[];
+  /** The same against the paint spread (`spreadPaintColour`) with mipmaps, uncompressed: what compressing alone changes. */
+  spread: number[];
+  encodeMs: number;
+  ktx2Bytes: number;
+}
+
+/**
+ * The open view's paint as a KTX2 (#197) against its own pixels, drawn by `renderThumbnail` at
+ * `size` with the viewer's renderer: the own pixels as the viewer draws a paint (no mipmaps), the
+ * compressed one with its mip chain.
+ */
+async function compressedPaintCheck(size: number): Promise<CompressedPaintCheck> {
+  if (!baked) throw new Error('No baked mini');
+  const albedo = await paintTool.view().paint();
+  const started = performance.now();
+  const ktx2 = await compressPaint(albedo);
+  const encodeMs = performance.now() - started;
+  const renderer = viewer.webglRenderer;
+  const compressed = await transcodePaint(ktx2, renderer);
+  const own = new DataTexture(albedo.data, albedo.width, albedo.height);
+  own.colorSpace = SRGBColorSpace;
+  own.generateMipmaps = false;
+  own.minFilter = LinearFilter;
+  own.needsUpdate = true;
+  const ownMipmapped = new DataTexture(albedo.data, albedo.width, albedo.height);
+  ownMipmapped.colorSpace = SRGBColorSpace;
+  ownMipmapped.generateMipmaps = true;
+  ownMipmapped.minFilter = LinearMipmapLinearFilter;
+  ownMipmapped.needsUpdate = true;
+  const spreadMipmapped = new DataTexture(spreadPaintColour(albedo), albedo.width, albedo.height);
+  spreadMipmapped.colorSpace = SRGBColorSpace;
+  spreadMipmapped.generateMipmaps = true;
+  spreadMipmapped.minFilter = LinearMipmapLinearFilter;
+  spreadMipmapped.needsUpdate = true;
+  const made =
+    baked.texture instanceof Uint8Array
+      ? createDetailTexture(baked.texture, baked.resolution)
+      : null;
+  const texture = made ?? (baked.texture as Texture);
+  const pixelsOf = async (paint: Texture): Promise<Uint8ClampedArray> => {
+    const png = await renderThumbnail(baked!.mesh, {
+      size,
+      look: state.look,
+      texture,
+      albedo: paint,
+      renderer,
+    });
+    const bitmap = await createImageBitmap(png);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  };
+  try {
+    const b = await pixelsOf(compressed);
+    const against = (a: Uint8ClampedArray): { pixels: number; histogram: number[] } => {
+      const histogram = new Array<number>(256).fill(0);
+      let pixels = 0;
+      for (let k = 0; k < a.length; k += 4) {
+        if (a[k + 3] === 0 && b[k + 3] === 0) continue;
+        pixels++;
+        let off = 0;
+        for (let c = 0; c < 4; c++) off = Math.max(off, Math.abs(a[k + c]! - b[k + c]!));
+        histogram[off]!++;
+      }
+      return { pixels, histogram };
+    };
+    const { pixels, histogram } = against(await pixelsOf(own));
+    const mipmapped = against(await pixelsOf(ownMipmapped)).histogram;
+    const spread = against(await pixelsOf(spreadMipmapped)).histogram;
+    return { pixels, histogram, mipmapped, spread, encodeMs, ktx2Bytes: ktx2.byteLength };
+  } finally {
+    own.dispose();
+    ownMipmapped.dispose();
+    spreadMipmapped.dispose();
+    compressed.dispose();
+    made?.dispose();
+  }
+}
+
 /** Where the test hook paints the table level red (#125). */
 type TestPaint = 'x+' | 'x-' | 'all';
 const TEST_PAINT_SIZE = 1024;
@@ -1642,6 +1751,8 @@ const paintTool = createPainter(
 
 /** The view's steps are a paint file's being replayed at open: not the person's changes. */
 let replaying = false;
+/** The painter's last open (#197: a replay goes in slices), settled; Done and Save wait for it. */
+let painterOpening: Promise<void> = Promise.resolve();
 /** The painting changed since it was opened or last saved (#167, §7.3). */
 let unsaved = false;
 /** A refused paint file on the painter's status line, until the next change (§9.2). */
@@ -1736,6 +1847,8 @@ function showPainterStatus(): void {
  */
 async function savePaintFile(): Promise<Uint8Array> {
   if (!state.stats || state.imported) throw new Error('No mini to save a paint file of');
+  // A paint file still replaying (#197: the replay goes in slices) is saved with its steps.
+  await painterOpening;
   const bytes = await writePaintFile(await paintFileNow());
   const name = `${downloadName()}${PAINT_FILE_EXTENSION}`;
   downloadBlob(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: PAINT_FILE_TYPE }), name);
@@ -1928,8 +2041,11 @@ async function openPainter(replay: PaintReplay | null = null): Promise<void> {
   showPainterStatus();
   render();
   try {
-    if (replay || !paintTool.isOpen()) await paintTool.open(null, null, null, replay);
-    else paintTool.show(true);
+    if (replay || !paintTool.isOpen()) {
+      const opening = paintTool.open(null, null, null, replay);
+      painterOpening = opening.catch(() => {});
+      await opening;
+    } else paintTool.show(true);
   } catch (error) {
     state.painter = false;
     render();
@@ -1944,12 +2060,17 @@ async function openPainter(replay: PaintReplay | null = null): Promise<void> {
  */
 async function closePainter(): Promise<void> {
   if (!state.painter) return;
+  // Done during a paint file's replay (#197) takes the paint at its end, not half of it, before
+  // the done panel's Paint and downloads are back.
+  await painterOpening;
+  if (!state.painter) return;
   paintTool.show(false);
   state.painter = false;
   painterProblem = null;
   if (state.stats) setStatus(describeReady(state.stats));
   render();
   paintOpen.focus();
+  if (!paintTool.isOpen()) return;
   showPaint(await paintTool.view().paint());
 }
 
@@ -2553,6 +2674,7 @@ window.__mt = {
       if (!baked) throw new Error('No baked mini');
       return testPaintAlbedo(baked.mesh, paint);
     },
+    compressedPaint: compressedPaintCheck,
   },
   openPainter: () => openPainter(),
   closePainter,

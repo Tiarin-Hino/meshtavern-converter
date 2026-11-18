@@ -8,7 +8,10 @@ import {
   type StepGroups,
   type StrokeCamera,
 } from './brush';
+import { TriangleBvh, type SurfaceHit } from './bvh';
 import type { Look } from './look';
+import type { IndexedMesh } from './mesh';
+import { PAINT_REACH_MM } from './paint';
 import { figureFiles, type Pairing } from './pair';
 import { ConversionProblem, PAINT_SOURCE_MESSAGES } from './problems';
 import type { PipelineOptions, UpChoices } from './run';
@@ -465,4 +468,45 @@ async function gunzip(bytes: Uint8Array, max: number): Promise<Uint8Array> {
     at += chunk.length;
   }
   return plain;
+}
+
+/**
+ * Whether steps are of a mesh (#197): how many points on the surface `steps` hold (a stroke's
+ * dabs, a picked fill's point) and how many of them lie within `reachMm` of `mesh`'s surface. A
+ * consumer that kept a table level tells a painting made on another conversion of the same files
+ * (another size, stance or base) by `near` well short of `points` before it replays. A dab of a
+ * stroke made with groups pulled apart (#180) lies where its group was drawn: it counts as near
+ * when it is near with any of the step's offsets taken off. Steps without points (a ready
+ * region's fill, a group's, a mask change) count nothing.
+ */
+export function stepsOnSurface(
+  steps: readonly PaintStep[],
+  mesh: IndexedMesh,
+  reachMm = PAINT_REACH_MM,
+): { points: number; near: number } {
+  const tree = new TriangleBvh(mesh);
+  const hit: SurfaceHit = { triangle: -1, u: 0, v: 0, w: 0, distanceSquared: 0 };
+  const reach = reachMm * reachMm;
+  let points = 0;
+  let near = 0;
+  for (const step of steps) {
+    if (step.kind === 'mask') continue;
+    const offsets: (readonly number[])[] = [
+      [0, 0, 0],
+      ...(step.groups?.apart ?? []).map(({ offset }) => offset),
+    ];
+    const count = (x: number, y: number, z: number): void => {
+      points++;
+      for (const [dx, dy, dz] of offsets as [number, number, number][])
+        if (tree.closest(hit, x - dx, y - dy, z - dz, reach, null, hit.triangle).triangle >= 0) {
+          near++;
+          return;
+        }
+    };
+    if (step.kind === 'stroke')
+      for (let k = 0; k + 3 < step.dabs.length; k += 4)
+        count(step.dabs[k]!, step.dabs[k + 1]!, step.dabs[k + 2]!);
+    else if (step.seed.kind === 'picked') count(...step.seed.point);
+  }
+  return { points, near };
 }

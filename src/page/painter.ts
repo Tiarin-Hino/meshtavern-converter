@@ -35,6 +35,10 @@ import { mountPaintingPanel, type PaintingPanel } from '../lib/painting-panel';
 export interface PaintReplay {
   steps: PaintStep[];
   engines?: EngineRun[] | null;
+  /** Hears the replay's slices (#197), as `MiniToPaint.onReplay`. */
+  onReplay?: ((done: number, total: number) => void) | null;
+  /** For tests (#197): opens the view hidden, as a consumer without a painter replays. */
+  hidden?: boolean;
 }
 
 /** What the page has of the converted mini for painting. */
@@ -162,7 +166,7 @@ export function createPainter(
     if (!found) throw new Error('No baked mini to paint');
     close();
     const painting = ensureView();
-    painting.setShown(true);
+    painting.setShown(!replay?.hidden);
     opened = found;
     panel!.setNames(found.names ?? []);
     panel!.setPalette(palette());
@@ -176,6 +180,7 @@ export function createPainter(
       groups: groups ?? found.groups,
       steps: replay?.steps ?? null,
       engines: replay?.engines ?? null,
+      ...(replay?.onReplay && { onReplay: replay.onReplay }),
     });
   };
 

@@ -115,7 +115,14 @@ import {
   sizingUnder,
   type SourcePreset,
 } from './source-preset';
-import { chainLods, LOD_SPECS, simplifierReady, simplifyToSpec, type Lod } from './simplify';
+import {
+  chainLods,
+  LOD_SPECS,
+  simplifierReady,
+  simplifyToSpec,
+  type Lod,
+  type LodSpec,
+} from './simplify';
 import { unwrap } from './unwrap';
 import { ConversionProblem, isOutOfMemory } from './problems';
 import {
@@ -147,6 +154,19 @@ export const STEPS = [
   'shade',
   'levels',
 ] as const;
+/** The specs of the levels below the close one: LOD_SPECS's, or a table level of `tableTriangles` (#197, development only). */
+function levelSpecs(tableTriangles: number | undefined): readonly LodSpec[] {
+  const specs = LOD_SPECS.slice(1);
+  if (tableTriangles === undefined) return specs;
+  if (!Number.isInteger(tableTriangles) || tableTriangles < 1)
+    throw new RangeError('tableTriangles is a whole number of triangles');
+  return specs.map((spec) =>
+    spec.name === 'table'
+      ? { ...spec, minTriangles: tableTriangles, maxTriangles: tableTriangles }
+      : spec,
+  );
+}
+
 /** The steps that turn the table level into a baked mini. They run unless baking is switched off. */
 export const BAKE_STEPS = ['unwrap', 'bake', 'compress'] as const;
 export type BakeStepName = (typeof BAKE_STEPS)[number];
@@ -307,6 +327,12 @@ export interface PipelineOptions {
   bake?: number | 'auto';
   /** UASTC effort for the KTX2 file. Null keeps the raw texture instead: development only. */
   compress?: number | null;
+  /**
+   * Development only (#197): the table level reduced to this many triangles (its floor and cap
+   * both), the far level from it as before. Another reduction of the same mini, with its triangles
+   * numbered otherwise, for the tests of a painting replayed on it. Left out: LOD_SPECS.
+   */
+  tableTriangles?: number;
   /** Largest texture the device can hold, when known. A mini that needs more keeps the per-vertex look. */
   maxTextureSize?: number;
   /**
@@ -935,6 +961,7 @@ export async function runPipeline(
     preset: presetOption,
     bake: bakeRequest = 'auto',
     compress = DETAIL_EFFORT,
+    tableTriangles,
     maxTextureSize,
     memoryBudgetBytes,
     secondStl,
@@ -1866,7 +1893,7 @@ export async function runPipeline(
   );
   const lods = run(
     'levels',
-    () => [close, ...chainLods(close, LOD_SPECS.slice(1))],
+    () => [close, ...chainLods(close, levelSpecs(tableTriangles))],
     (l) => meshBytes(placed.mesh) + l.reduce((sum, lod) => sum + meshBytes(lod.mesh), 0),
   );
 

@@ -167,8 +167,9 @@ test('refuses steps that are not the mini’s at open, and opens nothing', async
       brush: { sizeMm: 2, hardness: 0.8, opacity: 1, tolerance: 0.5, direction: null },
       seed: {
         kind: 'picked' as const,
+        // A triangle it does not have, at a point far from its surface (#197: the point decides).
         triangle: triangles,
-        point: [0, 0, 0] as [number, number, number],
+        point: [0, 500, 0] as [number, number, number],
       },
     };
     try {
@@ -451,4 +452,51 @@ test('a paint file without a stroke keeps the choices: saved from the done panel
   expect(await page.evaluate(() => window.__mt.state.page)).toBe('done');
   expect(await page.evaluate(() => window.__mt.state.confirm)).toBeNull();
   expect(await page.evaluate(() => window.__mt.state.painting!.steps)).toBe(1);
+});
+
+test('Done and Save paint file during a replay wait for its end (#197)', async ({ page }) => {
+  const { bytes } = await savedPainting(page);
+  // The two strokes thirty times over: a replay of several slices.
+  const saved = await readPaintFile(bytes);
+  const steps = Array.from({ length: 60 }, (_, k) => saved.steps[k % saved.steps.length]!);
+  const long = await writePaintFile({
+    ...saved,
+    steps,
+    engines: [{ engine: PAINT_ENGINE_VERSION, steps: steps.length }],
+  });
+  const outcome = await page.evaluate(
+    async (file) => {
+      const mt = window.__mt;
+      const replay = mt.openPaintFile(new Uint8Array(file).buffer);
+      // Pressed while the view is still replaying (the painter is on screen from the save).
+      const viewOpen = () => {
+        try {
+          return mt.painting.view().state.open;
+        } catch {
+          return false;
+        }
+      };
+      const started = performance.now();
+      while (viewOpen() && performance.now() - started < 30_000)
+        await new Promise((resolve) => setTimeout(resolve));
+      const midway = mt.state.painter && !viewOpen();
+      const [savedBytes] = await Promise.all([mt.savePaintFile(), mt.closePainter()]);
+      await replay;
+      const sha = async (data: Uint8Array) =>
+        Array.from(
+          new Uint8Array(await crypto.subtle.digest('SHA-256', data as Uint8Array<ArrayBuffer>)),
+          (byte) => byte.toString(16).padStart(2, '0'),
+        ).join('');
+      return {
+        midway,
+        saved: [...savedBytes],
+        mini: await sha((await mt.paint())!.data),
+        view: await sha((await mt.painting.view().paint()).data),
+      };
+    },
+    [...long],
+  );
+  expect(outcome.midway).toBe(true);
+  expect((await readPaintFile(Buffer.from(outcome.saved))).steps).toHaveLength(steps.length);
+  expect(outcome.mini).toBe(outcome.view);
 });

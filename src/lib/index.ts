@@ -221,6 +221,7 @@ export {
   matchSources,
   matchFingerprints,
   convertOptionsOf,
+  stepsOnSurface,
   type PaintFile,
   type PaintFileContents,
   type PaintChoices,
@@ -228,7 +229,12 @@ export {
   type SourceRole,
   type EngineRun,
 } from './pipeline/paint-file';
-export { FILL_ANGLE_DEG, FILL_CREASE_CAVITY, fillRegion } from './pipeline/fill';
+export {
+  FILL_ANGLE_DEG,
+  FILL_CREASE_CAVITY,
+  SEED_ON_TRIANGLE_MM,
+  fillRegion,
+} from './pipeline/fill';
 export { REGION_REACH_MM, regionsOf, type RegionSources } from './pipeline/regions';
 // The automatic groups (#139): the base, the files and the shells, a byte a table-level triangle.
 export {
@@ -240,6 +246,11 @@ export {
 } from './pipeline/groups';
 // The detail texture.
 export type { BakedMaps } from './pipeline/bake';
-export { readKtx2Header, type Ktx2Header } from './pipeline/compress';
+export {
+  compressPaint,
+  spreadPaintColour,
+  readKtx2Header,
+  type Ktx2Header,
+} from './pipeline/compress';
 // Export.
 export { encodeGlb, glbEncoderReady, type GlbOptions } from './pipeline/glb';
