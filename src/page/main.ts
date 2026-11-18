@@ -1360,6 +1360,7 @@ async function convert(
         preset: choices.preset,
         bake: pageOptions.bake,
         compress: pageOptions.ktx,
+        ...(pageOptions.table !== null && { tableTriangles: pageOptions.table }),
         maxTextureSize: viewer.webglRenderer.capabilities.maxTextureSize,
         memoryBudgetBytes: memoryBudget,
         ...(asks && { ask }),

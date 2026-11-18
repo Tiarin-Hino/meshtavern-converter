@@ -20,12 +20,17 @@ export interface PageOptions {
    * that is new to the person is asked about after the orient step.
    */
   ask: boolean;
+  /**
+   * `?table=<triangles>` (#197): the table level reduced to that many triangles, another
+   * reduction of the same mini; null, the default, LOD_SPECS.
+   */
+  table: number | null;
   /** One message per option that was ignored. */
   problems: string[];
 }
 
 const BAKE_SIZES = [256, 512, 1024, 2048, 4096];
-const KNOWN = ['bake', 'ktx', 'settle', 'dev', 'ask'];
+const KNOWN = ['bake', 'ktx', 'settle', 'dev', 'ask', 'table'];
 
 export function parsePageOptions(search: string): PageOptions {
   const parameters = new URLSearchParams(search);
@@ -52,6 +57,14 @@ export function parsePageOptions(search: string): PageOptions {
   const ask = askValue !== 'off';
   if (askValue !== null && ask) problems.push(`ask=${askValue} ignored: use off`);
 
+  let table: PageOptions['table'] = null;
+  const tableValue = parameters.get('table');
+  if (tableValue !== null) {
+    const triangles = Number(tableValue);
+    if (Number.isInteger(triangles) && triangles >= 1) table = triangles;
+    else problems.push(`table=${tableValue} ignored: use a whole number of triangles`);
+  }
+
   for (const key of parameters.keys()) {
     if (!KNOWN.includes(key)) problems.push(`unknown option "${key}" ignored`);
   }
@@ -59,5 +72,5 @@ export function parsePageOptions(search: string): PageOptions {
   if (/%(?![0-9a-f]{2})/i.test(search)) {
     problems.push('the address contains a stray "%": options are separated by "&"');
   }
-  return { bake, ktx, dev: parameters.has('dev'), ask, problems };
+  return { bake, ktx, dev: parameters.has('dev'), ask, table, problems };
 }

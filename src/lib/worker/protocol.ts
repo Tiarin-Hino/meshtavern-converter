@@ -27,6 +27,8 @@ export interface ConvertOptions {
   bake?: number | 'auto';
   /** Development only: UASTC effort, or null to keep the raw texture. Default: see compress.ts. */
   compress?: number | null;
+  /** Development only (#197): the table level's triangles, another reduction of the same mini. Default: LOD_SPECS. */
+  tableTriangles?: number;
   /** Largest texture the device can hold; a mini that needs more keeps the per-vertex look. */
   maxTextureSize?: number;
   /** Memory the conversion may use; a file expected to need more is refused. See memory.ts. */
