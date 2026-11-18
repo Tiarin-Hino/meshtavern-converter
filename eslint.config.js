@@ -4,7 +4,15 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   // public/theme/ is the application's theme, copied byte for byte (#142, #143).
   {
-    ignores: ['dist', 'out', 'playwright-report', 'test-results', '.claude', 'public/theme'],
+    ignores: [
+      'dist',
+      'out',
+      'playwright-report',
+      'test-results',
+      '.claude',
+      '.claude-pr',
+      'public/theme',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
